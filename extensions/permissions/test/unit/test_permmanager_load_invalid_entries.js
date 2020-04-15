@@ -5,6 +5,12 @@ var DEBUG_TEST = false;
 function run_test() {
   // Setup a profile directory.
   var dir = do_get_profile();
+
+  // We need to execute a pm method to be sure that the DB is fully
+  // initialized.
+  var pm = Services.perms;
+  Assert.equal(pm.all.length, 0, "No cookies");
+
   // Get the db file.
   var file = dir.clone();
   file.append("permissions.sqlite");
@@ -220,8 +226,8 @@ function run_test() {
   // This will force the permission-manager to reload the data.
   Services.obs.notifyObservers(null, "testonly-reload-permissions-from-disk");
 
-  // Initialize the permission manager service
-  var pm = Services.perms;
+  // Let's do something in order to be sure the DB is read.
+  Assert.greater(pm.all.length, 0);
 
   // The schema should be upgraded to 11, and a 'modificationTime' column should
   // exist with all records having a value of 0.
@@ -233,7 +239,10 @@ function run_test() {
   let numMigrated = 0;
   while (select.executeStep()) {
     let thisModTime = select.getInt64(0);
-    Assert.ok(thisModTime == 0, "new modifiedTime field is correct");
+    Assert.ok(
+      thisModTime > 0,
+      "new modifiedTime field is correct (but it's not 0!)"
+    );
     numMigrated += 1;
   }
   // check we found at least 1 record that was migrated.

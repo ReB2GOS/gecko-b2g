@@ -606,7 +606,10 @@ extern "C" fn audiounit_output_callback(
                 cubeb_log!("Dropping {} frames in input buffer.", popped_samples);
             }
 
-            if input_frames_needed > buffered_input_frames {
+            if input_frames_needed > buffered_input_frames
+                && (stm.switching_device.load(Ordering::SeqCst)
+                    || stm.frames_read.load(Ordering::SeqCst) == 0)
+            {
                 let silent_frames_to_push = input_frames_needed - buffered_input_frames;
                 let silent_samples_to_push = silent_frames_to_push * input_channels;
                 input_buffer_manager.push_silent_data(silent_samples_to_push);
@@ -617,19 +620,18 @@ extern "C" fn audiounit_output_callback(
                     stm.core_stream_data.stm_ptr,
                     if stm.frames_read.load(Ordering::SeqCst) == 0 {
                         "input hasn't started,"
-                    } else if stm.switching_device.load(Ordering::SeqCst) {
-                        "device switching,"
                     } else {
-                        "drop out,"
+                        assert!(stm.switching_device.load(Ordering::SeqCst));
+                        "device switching,"
                     },
                     silent_frames_to_push
                 );
             }
 
-            let input_samples_needed = input_frames_needed * input_channels;
+            let input_samples_needed = buffered_input_frames * input_channels;
             (
                 input_buffer_manager.get_linear_data(input_samples_needed),
-                input_frames_needed as i64,
+                buffered_input_frames as i64,
             )
         } else {
             (ptr::null_mut::<c_void>(), 0)
@@ -703,6 +705,7 @@ extern "C" fn audiounit_output_callback(
     status
 }
 
+#[allow(clippy::cognitive_complexity)]
 extern "C" fn audiounit_property_listener_callback(
     id: AudioObjectID,
     address_count: u32,
@@ -1376,6 +1379,7 @@ fn get_presentation_latency(devid: AudioObjectID, devtype: DeviceType) -> u32 {
     device_latency + stream_latency
 }
 
+#[allow(clippy::cognitive_complexity)]
 fn get_device_group_id(
     id: AudioDeviceID,
     devtype: DeviceType,
@@ -1448,6 +1452,7 @@ fn get_device_global_uid(id: AudioDeviceID) -> std::result::Result<StringRef, OS
     get_device_uid(id, DeviceType::INPUT | DeviceType::OUTPUT)
 }
 
+#[allow(clippy::cognitive_complexity)]
 fn create_cubeb_device_info(
     devid: AudioObjectID,
     devtype: DeviceType,
@@ -1663,7 +1668,10 @@ fn audiounit_get_devices_of_type(devtype: DeviceType) -> Vec<AudioObjectID> {
 
     // Remove the aggregate device from the list of devices (if any).
     devices.retain(|&device| {
-        if let Ok(uid) = get_device_global_uid(device) {
+        // TODO: (bug 1628411) Figure out when `device` is `kAudioObjectUnknown`.
+        if device == kAudioObjectUnknown {
+            false
+        } else if let Ok(uid) = get_device_global_uid(device) {
             let uid = uid.into_string();
             !uid.contains(PRIVATE_AGGREGATE_DEVICE_NAME)
         } else {

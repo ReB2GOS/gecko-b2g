@@ -92,7 +92,7 @@
 #include "nsWindowMemoryReporter.h"
 #include "mozilla/dom/ContentParent.h"
 #include "mozilla/ProcessPriorityManager.h"
-#include "nsPermissionManager.h"
+#include "mozilla/PermissionManager.h"
 #include "nsApplicationCacheService.h"
 #include "mozilla/dom/CustomElementRegistry.h"
 #include "mozilla/EventDispatcher.h"
@@ -104,7 +104,6 @@
 #include "DecoderDoctorLogger.h"
 #include "MediaDecoder.h"
 #include "mozilla/ClearSiteData.h"
-#include "mozilla/dom/DOMSecurityManager.h"
 #include "mozilla/EditorController.h"
 #include "mozilla/Fuzzyfox.h"
 #include "mozilla/HTMLEditorController.h"
@@ -248,7 +247,7 @@ nsresult nsLayoutStatics::Initialize() {
 
   ProcessPriorityManager::Init();
 
-  nsPermissionManager::Startup();
+  PermissionManager::Startup();
 
   UIDirectionManager::Initialize();
 
@@ -292,8 +291,6 @@ nsresult nsLayoutStatics::Initialize() {
   mozilla::Fuzzyfox::Start();
 
   ClearSiteData::Initialize();
-
-  DOMSecurityManager::Initialize();
 
   // Reporting API.
   ReportingHeader::Initialize();

@@ -4686,6 +4686,13 @@ bool nsIFrame::IsSelectable(StyleUserSelect* aSelectStyle) const {
   return style != StyleUserSelect::None;
 }
 
+bool nsIFrame::ShouldHaveLineIfEmpty() const {
+  if (Style()->IsPseudoOrAnonBox()) {
+    return false;
+  }
+  return IsEditingHost(this);
+}
+
 /**
  * Handles the Mouse Press Event for the frame
  */
@@ -10031,15 +10038,27 @@ bool nsIFrame::IsScrollAnchor(ScrollAnchorContainer** aOutContainer) {
     return false;
   }
 
-  ScrollAnchorContainer* container = ScrollAnchorContainer::FindFor(this);
-  if (container->AnchorNode() != this) {
-    return false;
+  nsIFrame* f = this;
+
+  // FIXME(emilio, bug 1629280): We should find a non-null anchor if we have the
+  // flag set, but bug 1629280 makes it so that we cannot really assert it /
+  // make this just a `while (true)`, and uncomment the below assertion.
+  while (auto* container = ScrollAnchorContainer::FindFor(f)) {
+    // MOZ_ASSERT(f->IsInScrollAnchorChain());
+    if (nsIFrame* anchor = container->AnchorNode()) {
+      if (anchor != this) {
+        return false;
+      }
+      if (aOutContainer) {
+        *aOutContainer = container;
+      }
+      return true;
+    }
+
+    f = container->Frame();
   }
 
-  if (aOutContainer) {
-    *aOutContainer = container;
-  }
-  return true;
+  return false;
 }
 
 bool nsIFrame::IsInScrollAnchorChain() const { return mInScrollAnchorChain; }

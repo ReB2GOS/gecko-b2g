@@ -612,7 +612,7 @@ dictionary GPUVertexAttributeDescriptor {
 dictionary GPUVertexBufferLayoutDescriptor {
     required u64 arrayStride;
     GPUInputStepMode stepMode = "vertex";
-    required sequence<GPUVertexAttributeDescriptor> attributeSet;
+    required sequence<GPUVertexAttributeDescriptor> attributes;
 };
 
 dictionary GPUVertexStateDescriptor {
@@ -777,7 +777,6 @@ interface GPUCommandEncoder {
         u64 destinationOffset,
         u64 size);
 
-    /*
     void copyBufferToTexture(
         GPUBufferCopyView source,
         GPUTextureCopyView destination,
@@ -793,6 +792,7 @@ interface GPUCommandEncoder {
         GPUTextureCopyView destination,
         GPUExtent3D copySize);
 
+    /*
     void copyImageBitmapToTexture(
         GPUImageBitmapCopyView source,
         GPUTextureCopyView destination,

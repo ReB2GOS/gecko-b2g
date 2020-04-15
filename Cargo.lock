@@ -5,10 +5,6 @@ name = "Inflector"
 version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
-dependencies = [
- "lazy_static",
- "regex",
-]
 
 [[package]]
 name = "adler32"
@@ -58,11 +54,11 @@ checksum = "cff77d8686867eceff3105329d4698d96c2391c176d5d03adc90c7389162b5b8"
 
 [[package]]
 name = "ash"
-version = "0.29.0"
+version = "0.30.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "003d1fb2eb12eb06d4a03dbe02eea67a9fac910fa97932ab9e3a75b96a1ea5e5"
+checksum = "69daec0742947f33a85931fa3cb0ce5f07929159dcbd1f0cbb5b2912e2978509"
 dependencies = [
- "shared_library",
+ "libloading",
 ]
 
 [[package]]
@@ -174,9 +170,9 @@ dependencies = [
 
 [[package]]
 name = "authenticator"
-version = "0.2.10"
+version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7ab47f9d4626728ef5b1622700ebb38b1ea76869d1c4c0ab0868297dfd6b4b3e"
+checksum = "ff593fb4dd388fe452c5e63d4d668699466bd46b571c4b852dfbca4bac8f0706"
 dependencies = [
  "bitflags",
  "boxfnonce",
@@ -205,7 +201,7 @@ dependencies = [
  "cranelift-wasm",
  "env_logger",
  "log",
- "smallvec 1.2.0",
+ "smallvec",
 ]
 
 [[package]]
@@ -586,9 +582,9 @@ dependencies = [
 
 [[package]]
 name = "cocoa"
-version = "0.19.0"
+version = "0.20.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cd20045e880893b4a8286d5639e9ade85fb1f6a14c291f882cf8cf2149d37d9"
+checksum = "0a4736c86d51bd878b474400d9ec888156f4037015f5d09794fab9f26eab1ad4"
 dependencies = [
  "bitflags",
  "block",
@@ -598,12 +594,6 @@ dependencies = [
  "libc",
  "objc",
 ]
-
-[[package]]
-name = "colorful"
-version = "0.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0bca1619ff57dd7a56b58a8e25ef4199f123e78e503fe1653410350a1b98ae65"
 
 [[package]]
 name = "comedy"
@@ -639,9 +629,9 @@ checksum = "6ff9c56c9fb2a49c05ef0e431485a22400af20d33226dc0764d891d09e724127"
 
 [[package]]
 name = "core-foundation"
-version = "0.6.3"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e2640d6d0bf22e82bed1b73c6aef8d5dd31e5abe6666c57e6d45e2649f4f887"
+checksum = "57d24c7a13c43e870e37c1556b74555437870a04514f7685f5b354e090567171"
 dependencies = [
  "core-foundation-sys",
  "libc",
@@ -649,15 +639,15 @@ dependencies = [
 
 [[package]]
 name = "core-foundation-sys"
-version = "0.6.2"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e7ca8a5221364ef15ce201e8ed2f609fc312682a8f4e0e3d4aa5879764e0fa3b"
+checksum = "b3a71ab494c0b5b860bdc8407ae08978052417070c2ced38573a9157ad75b8ac"
 
 [[package]]
 name = "core-graphics"
-version = "0.17.3"
+version = "0.19.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56790968ab1c8a1202a102e6de05fc6e1ec87da99e4e93e9a7d13efbfc1e95a9"
+checksum = "59e78b2e0aaf43f08e7ae0d6bc96895ef72ff0921c7d4ff4762201b2dba376dd"
 dependencies = [
  "bitflags",
  "core-foundation",
@@ -667,9 +657,9 @@ dependencies = [
 
 [[package]]
 name = "core-text"
-version = "13.0.0"
+version = "15.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3f46450d6f2397261af420b4ccce23807add2e45fa206410a03d66fb7f050ae"
+checksum = "131b3fd1f8bd5db9f2b398fa4fdb6008c64afc04d447c306ac2c7e98fba2a61d"
 dependencies = [
  "core-foundation",
  "core-graphics",
@@ -689,7 +679,7 @@ dependencies = [
 [[package]]
 name = "coreaudio-sys-utils"
 version = "0.1.0"
-source = "git+https://github.com/ChunMinChang/cubeb-coreaudio-rs?rev=ea9e5aa3e6014f219cf5fa0690bc4b06916f0b09#ea9e5aa3e6014f219cf5fa0690bc4b06916f0b09"
+source = "git+https://github.com/ChunMinChang/cubeb-coreaudio-rs?rev=0f62d389cc04cc3707368eda14fe1904ee8d7981#0f62d389cc04cc3707368eda14fe1904ee8d7981"
 dependencies = [
  "core-foundation-sys",
  "coreaudio-sys",
@@ -715,41 +705,41 @@ dependencies = [
 
 [[package]]
 name = "cranelift-bforest"
-version = "0.60.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=5cfcbeb59d477e028c6fb312f1cf63aa711fcc3c#5cfcbeb59d477e028c6fb312f1cf63aa711fcc3c"
+version = "0.62.0"
+source = "git+https://github.com/bytecodealliance/wasmtime?rev=6a68130d5b0296379fae0b8de5fbb8a1499b67a5#6a68130d5b0296379fae0b8de5fbb8a1499b67a5"
 dependencies = [
- "cranelift-entity 0.60.0",
+ "cranelift-entity 0.62.0",
 ]
 
 [[package]]
 name = "cranelift-codegen"
-version = "0.60.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=5cfcbeb59d477e028c6fb312f1cf63aa711fcc3c#5cfcbeb59d477e028c6fb312f1cf63aa711fcc3c"
+version = "0.62.0"
+source = "git+https://github.com/bytecodealliance/wasmtime?rev=6a68130d5b0296379fae0b8de5fbb8a1499b67a5#6a68130d5b0296379fae0b8de5fbb8a1499b67a5"
 dependencies = [
  "byteorder",
  "cranelift-bforest",
  "cranelift-codegen-meta",
  "cranelift-codegen-shared",
- "cranelift-entity 0.60.0",
+ "cranelift-entity 0.62.0",
  "log",
- "smallvec 1.2.0",
+ "smallvec",
  "target-lexicon 0.10.0",
  "thiserror",
 ]
 
 [[package]]
 name = "cranelift-codegen-meta"
-version = "0.60.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=5cfcbeb59d477e028c6fb312f1cf63aa711fcc3c#5cfcbeb59d477e028c6fb312f1cf63aa711fcc3c"
+version = "0.62.0"
+source = "git+https://github.com/bytecodealliance/wasmtime?rev=6a68130d5b0296379fae0b8de5fbb8a1499b67a5#6a68130d5b0296379fae0b8de5fbb8a1499b67a5"
 dependencies = [
  "cranelift-codegen-shared",
- "cranelift-entity 0.60.0",
+ "cranelift-entity 0.62.0",
 ]
 
 [[package]]
 name = "cranelift-codegen-shared"
-version = "0.60.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=5cfcbeb59d477e028c6fb312f1cf63aa711fcc3c#5cfcbeb59d477e028c6fb312f1cf63aa711fcc3c"
+version = "0.62.0"
+source = "git+https://github.com/bytecodealliance/wasmtime?rev=6a68130d5b0296379fae0b8de5fbb8a1499b67a5#6a68130d5b0296379fae0b8de5fbb8a1499b67a5"
 
 [[package]]
 name = "cranelift-entity"
@@ -758,27 +748,27 @@ source = "git+https://github.com/PLSysSec/lucet_sandbox_compiler?rev=5e870faf6f9
 
 [[package]]
 name = "cranelift-entity"
-version = "0.60.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=5cfcbeb59d477e028c6fb312f1cf63aa711fcc3c#5cfcbeb59d477e028c6fb312f1cf63aa711fcc3c"
+version = "0.62.0"
+source = "git+https://github.com/bytecodealliance/wasmtime?rev=6a68130d5b0296379fae0b8de5fbb8a1499b67a5#6a68130d5b0296379fae0b8de5fbb8a1499b67a5"
 
 [[package]]
 name = "cranelift-frontend"
-version = "0.60.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=5cfcbeb59d477e028c6fb312f1cf63aa711fcc3c#5cfcbeb59d477e028c6fb312f1cf63aa711fcc3c"
+version = "0.62.0"
+source = "git+https://github.com/bytecodealliance/wasmtime?rev=6a68130d5b0296379fae0b8de5fbb8a1499b67a5#6a68130d5b0296379fae0b8de5fbb8a1499b67a5"
 dependencies = [
  "cranelift-codegen",
  "log",
- "smallvec 1.2.0",
+ "smallvec",
  "target-lexicon 0.10.0",
 ]
 
 [[package]]
 name = "cranelift-wasm"
-version = "0.60.0"
-source = "git+https://github.com/bytecodealliance/wasmtime?rev=5cfcbeb59d477e028c6fb312f1cf63aa711fcc3c#5cfcbeb59d477e028c6fb312f1cf63aa711fcc3c"
+version = "0.62.0"
+source = "git+https://github.com/bytecodealliance/wasmtime?rev=6a68130d5b0296379fae0b8de5fbb8a1499b67a5#6a68130d5b0296379fae0b8de5fbb8a1499b67a5"
 dependencies = [
  "cranelift-codegen",
- "cranelift-entity 0.60.0",
+ "cranelift-entity 0.62.0",
  "cranelift-frontend",
  "log",
  "thiserror",
@@ -861,7 +851,7 @@ dependencies = [
  "phf",
  "proc-macro2",
  "quote",
- "smallvec 1.2.0",
+ "smallvec",
  "syn",
 ]
 
@@ -906,9 +896,9 @@ dependencies = [
 
 [[package]]
 name = "cubeb-backend"
-version = "0.6.2"
+version = "0.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a1e7add4e7642a8aebb24172922318482bed52389a12cb339f728bbd4c4ed9c"
+checksum = "228778b00abd85a2ccca9330bc0ee7e72795dd255039814baef02b99757ad12e"
 dependencies = [
  "cubeb-core",
 ]
@@ -926,7 +916,7 @@ dependencies = [
 [[package]]
 name = "cubeb-coreaudio"
 version = "0.1.0"
-source = "git+https://github.com/ChunMinChang/cubeb-coreaudio-rs?rev=ea9e5aa3e6014f219cf5fa0690bc4b06916f0b09#ea9e5aa3e6014f219cf5fa0690bc4b06916f0b09"
+source = "git+https://github.com/ChunMinChang/cubeb-coreaudio-rs?rev=0f62d389cc04cc3707368eda14fe1904ee8d7981#0f62d389cc04cc3707368eda14fe1904ee8d7981"
 dependencies = [
  "atomic",
  "audio-mixer",
@@ -1236,7 +1226,7 @@ name = "fallible"
 version = "0.0.1"
 dependencies = [
  "hashglobe",
- "smallvec 1.2.0",
+ "smallvec",
 ]
 
 [[package]]
@@ -1314,7 +1304,7 @@ dependencies = [
  "intl-memoizer",
  "intl_pluralrules",
  "rental",
- "smallvec 1.2.0",
+ "smallvec",
  "unic-langid",
 ]
 
@@ -1500,7 +1490,7 @@ dependencies = [
  "parking_lot",
  "selectors",
  "servo_arc",
- "smallvec 1.2.0",
+ "smallvec",
  "style",
  "style_traits",
  "to_shmem",
@@ -1529,9 +1519,9 @@ dependencies = [
 
 [[package]]
 name = "gfx-auxil"
-version = "0.1.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "572eee952a9a23c99cfe3e4fd95d277784058a89ac3c77ff6fa3d80a4e321919"
+checksum = "3b46e6f0031330a0be08d17820f2dcaaa91cb36710a97a9500cb4f1c36e785c8"
 dependencies = [
  "fxhash",
  "gfx-hal",
@@ -1540,9 +1530,9 @@ dependencies = [
 
 [[package]]
 name = "gfx-backend-dx11"
-version = "0.4.2"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c66c77836ff26cf9916e5c8745715a22eae1fc61d994ffa0bea8a7dbd708ece2"
+checksum = "b148219292624126f78245e50a9720d95ea149a415ce8ce73ab7014205301b88"
 dependencies = [
  "bitflags",
  "gfx-auxil",
@@ -1552,7 +1542,7 @@ dependencies = [
  "parking_lot",
  "range-alloc",
  "raw-window-handle",
- "smallvec 0.6.10",
+ "smallvec",
  "spirv_cross",
  "winapi 0.3.7",
  "wio",
@@ -1560,9 +1550,9 @@ dependencies = [
 
 [[package]]
 name = "gfx-backend-dx12"
-version = "0.4.1"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b6e913cc800fb12eaba2c420091a02aca9aafbefd672600dfc5b52654343d341"
+checksum = "a0e526746379e974501551b08958947e67a81b5ea8cdc717a000cdd72577da05"
 dependencies = [
  "bitflags",
  "d3d12",
@@ -1571,16 +1561,16 @@ dependencies = [
  "log",
  "range-alloc",
  "raw-window-handle",
- "smallvec 0.6.10",
+ "smallvec",
  "spirv_cross",
  "winapi 0.3.7",
 ]
 
 [[package]]
 name = "gfx-backend-empty"
-version = "0.4.0"
+version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d383e6bc48867cb37d298a20139fd1eec298f8f6d594690cd1c50ef25470cc7"
+checksum = "b67bd2d7bc022b257ddbdabc5fa3b10c29c292372c3409f2b6a6e3f4e11cdb85"
 dependencies = [
  "gfx-hal",
  "raw-window-handle",
@@ -1588,9 +1578,9 @@ dependencies = [
 
 [[package]]
 name = "gfx-backend-metal"
-version = "0.4.0"
+version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8de5c71f18ba805c95b84d6c78c472ef44485a6fc46e3b49fe1e6739c8d7b0c0"
+checksum = "cfe128c29675b5afc8acdda1dfe096d6abd5e3528059ab0b98bda8215d8beed9"
 dependencies = [
  "arrayvec",
  "bitflags",
@@ -1608,16 +1598,16 @@ dependencies = [
  "parking_lot",
  "range-alloc",
  "raw-window-handle",
- "smallvec 0.6.10",
+ "smallvec",
  "spirv_cross",
  "storage-map",
 ]
 
 [[package]]
 name = "gfx-backend-vulkan"
-version = "0.4.0"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62538fedd66a78968a162e8e1a29d085ffbc97f8782634684b2f7da7aea59207"
+checksum = "ebd1dee09bd8d8f1ba52c5ba22d1f70c7ffa990c5eb245eb3ef2d0206f631673"
 dependencies = [
  "arrayvec",
  "ash",
@@ -1628,20 +1618,43 @@ dependencies = [
  "log",
  "objc",
  "raw-window-handle",
- "smallvec 0.6.10",
+ "smallvec",
  "winapi 0.3.7",
  "x11",
 ]
 
 [[package]]
-name = "gfx-hal"
-version = "0.4.0"
+name = "gfx-descriptor"
+version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "977716fea7800ab5bc9a1e048dd2f72b23af166d8c2f48c6fb6d1ce37d77ca7e"
+checksum = "1bf35f5d66d1bc56e63e68d7528441453f25992bd954b84309d23c659df2c5da"
+dependencies = [
+ "fxhash",
+ "gfx-hal",
+ "log",
+]
+
+[[package]]
+name = "gfx-hal"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc96180204064c9493e0fe4a9efeb721e0ac59fe8e1906d0c659142a93114fb1"
 dependencies = [
  "bitflags",
  "raw-window-handle",
- "smallvec 0.6.10",
+]
+
+[[package]]
+name = "gfx-memory"
+version = "0.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2eed6cda674d9cd4d92229102dbd544292124533d236904f987e9afab456137"
+dependencies = [
+ "fxhash",
+ "gfx-hal",
+ "hibitset",
+ "log",
+ "slab",
 ]
 
 [[package]]
@@ -2152,6 +2165,8 @@ version = "0.1.0"
 dependencies = [
  "jsrust_shared",
  "mozglue-static",
+ "wasmparser 0.48.2",
+ "wat",
 ]
 
 [[package]]
@@ -2164,7 +2179,6 @@ dependencies = [
  "mozglue-static",
  "mozilla-central-workspace-hack",
  "smoosh",
- "wasm-rust",
 ]
 
 [[package]]
@@ -2239,9 +2253,9 @@ dependencies = [
 
 [[package]]
 name = "libloading"
-version = "0.5.0"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9c3ad660d7cb8c5822cd83d10897b0f1f1526792737a179e73896152f85b88c2"
+checksum = "f2b111a074963af1d37a139918ac6d49ad1d0d5e47f72fd55388619691a7d753"
 dependencies = [
  "cc",
  "winapi 0.3.7",
@@ -2249,9 +2263,9 @@ dependencies = [
 
 [[package]]
 name = "libsqlite3-sys"
-version = "0.17.2"
+version = "0.17.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38c4446f020dfbfab9f8a1ab605c15e6c03a8924c08522dcb67314acc8d2b523"
+checksum = "56d90181c2904c287e5390186be820e5ef311a3c62edebb7d6ca3d6a48ce041d"
 dependencies = [
  "pkg-config",
  "vcpkg",
@@ -2327,9 +2341,9 @@ dependencies = [
 
 [[package]]
 name = "lock_api"
-version = "0.3.1"
+version = "0.3.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8912e782533a93a167888781b836336a6ca5da6175c05944c86cf28c31104dc"
+checksum = "c4da24a77a3d8a6d4862d95f72e6fdb9c09a643ecdb402d754004a557f2bec75"
 dependencies = [
  "scopeguard",
 ]
@@ -2449,7 +2463,7 @@ dependencies = [
  "selectors",
  "servo_arc",
  "smallbitvec",
- "smallvec 1.2.0",
+ "smallvec",
  "thin-slice",
  "void",
 ]
@@ -2527,9 +2541,9 @@ dependencies = [
 
 [[package]]
 name = "metal"
-version = "0.17.0"
+version = "0.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddf8052f20601c7af6293d3f7bf7b9159aee5974804fe65d871d437f933ec1eb"
+checksum = "e198a0ee42bdbe9ef2c09d0b9426f3b2b47d90d93a4a9b0395c4cea605e92dc0"
 dependencies = [
  "bitflags",
  "block",
@@ -2829,7 +2843,7 @@ dependencies = [
  "neqo-qpack",
  "neqo-transport",
  "num-traits",
- "smallvec 1.2.0",
+ "smallvec",
 ]
 
 [[package]]
@@ -2854,7 +2868,7 @@ dependencies = [
  "log",
  "neqo-common",
  "neqo-crypto",
- "smallvec 1.2.0",
+ "smallvec",
 ]
 
 [[package]]
@@ -3114,36 +3128,26 @@ checksum = "ddfc878dac00da22f8f61e7af3157988424567ab01d9920b962ef7dcbd7cd865"
 
 [[package]]
 name = "parking_lot"
-version = "0.9.0"
+version = "0.10.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f842b1982eb6c2fe34036a4fbfb06dd185a3f5c8edfaacdf7d1ea10b07de6252"
+checksum = "d3a704eb390aafdc107b0e392f56a82b668e3a71366993b5340f5833fd62505e"
 dependencies = [
  "lock_api",
  "parking_lot_core",
- "rustc_version",
 ]
 
 [[package]]
 name = "parking_lot_core"
-version = "0.6.2"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b876b1b9e7ac6e1a74a6da34d25c42e17e8862aa409cbbbdcfc8d86c6f3bc62b"
+checksum = "0e136c1904604defe99ce5fd71a28d473fa60a12255d511aa78a9ddf11237aeb"
 dependencies = [
  "cfg-if",
  "cloudabi",
  "libc",
  "redox_syscall",
- "rustc_version",
- "smallvec 0.6.10",
+ "smallvec",
  "winapi 0.3.7",
-]
-
-[[package]]
-name = "peek-poke"
-version = "0.2.0"
-source = "git+https://github.com/kvark/peek-poke?rev=969bd7fe2be1a83f87916dc8b388c63cfd457075#969bd7fe2be1a83f87916dc8b388c63cfd457075"
-dependencies = [
- "peek-poke-derive 0.2.0",
 ]
 
 [[package]]
@@ -3155,18 +3159,30 @@ dependencies = [
 ]
 
 [[package]]
-name = "peek-poke-derive"
+name = "peek-poke"
 version = "0.2.0"
-source = "git+https://github.com/kvark/peek-poke?rev=969bd7fe2be1a83f87916dc8b388c63cfd457075#969bd7fe2be1a83f87916dc8b388c63cfd457075"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d93fd6a575ebf1ac2668d08443c97a22872cfb463fd8b7ddd141e9f6be59af2f"
 dependencies = [
- "proc-macro2",
- "quote",
- "syn",
+ "peek-poke-derive 0.2.1 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "peek-poke-derive"
 version = "0.2.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
+ "synstructure",
+ "unicode-xid",
+]
+
+[[package]]
+name = "peek-poke-derive"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6fb44a25c5bba983be0fc8592dfaf3e6d0935ce8be0c6b15b2a39507af34a926"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3539,16 +3555,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "11a7e20d1cce64ef2fed88b66d347f88bd9babb82845b2b858f3edbf59a4f716"
 
 [[package]]
-name = "relevant"
-version = "0.4.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "bbc232e13d37f4547f5b9b42a5efc380cabe5dbc1807f8b893580640b2ab0308"
-dependencies = [
- "cfg-if",
- "log",
-]
-
-[[package]]
 name = "remote"
 version = "0.1.0"
 dependencies = [
@@ -3568,33 +3574,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a83fa3702a688b9359eccba92d153ac33fd2e8462f9e0e3fdf155239ea7792e"
 dependencies = [
  "winapi 0.3.7",
-]
-
-[[package]]
-name = "rendy-descriptor"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f475bcc0505946e998590f1f0545c52ef4b559174a1b353a7ce6638def8b621e"
-dependencies = [
- "gfx-hal",
- "log",
- "relevant",
- "smallvec 0.6.10",
-]
-
-[[package]]
-name = "rendy-memory"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "08f99de535d9e48d9cfab780b521702cc0d7183d354872d223967b75abae1199"
-dependencies = [
- "colorful",
- "gfx-hal",
- "hibitset",
- "log",
- "relevant",
- "slab",
- "smallvec 0.6.10",
 ]
 
 [[package]]
@@ -3705,9 +3684,9 @@ checksum = "5d79b4b604167921892e84afbbaad9d5ad74e091bf6c511d9dbfb0593f09fabd"
 
 [[package]]
 name = "rusqlite"
-version = "0.22.0-beta.0"
+version = "0.22.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d5c02d0acf7e60bbf900bfc46c287a336473aedf6b7658039441b474289643de"
+checksum = "57edf4c4cea4d7e0fab069acb5da9e8e8e5403c78abc81b1f37d83af02148ea5"
 dependencies = [
  "bitflags",
  "fallible-iterator",
@@ -3838,7 +3817,7 @@ dependencies = [
  "phf_codegen",
  "precomputed-hash",
  "servo_arc",
- "smallvec 1.2.0",
+ "smallvec",
  "thin-slice",
  "to_shmem",
  "to_shmem_derive",
@@ -3967,16 +3946,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "shared_library"
-version = "0.1.9"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5a9e7e0f2bfae24d8a5b5a66c5b257a83c7412304311512a0c054cd5e619da11"
-dependencies = [
- "lazy_static",
- "libc",
-]
-
-[[package]]
 name = "shift_or_euc"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4026,18 +3995,12 @@ checksum = "1764fe2b30ee783bfe3b9b37b2649d8d590b3148bb12e0079715d4d5c673562e"
 
 [[package]]
 name = "smallvec"
-version = "0.6.10"
+version = "1.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab606a9c5e214920bb66c458cd7be8ef094f813f20fe77a54cc7dbfff220d4b7"
+checksum = "05720e22615919e4734f6a99ceae50d00226c3c5aca406e102ebc33298214e0a"
 dependencies = [
  "serde",
 ]
-
-[[package]]
-name = "smallvec"
-version = "1.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c2fb2ec9bcd216a5b0d0ccf31ab17b5ed1d627960edff65bbe95d3ce221cefc"
 
 [[package]]
 name = "smoosh"
@@ -4064,15 +4027,15 @@ dependencies = [
 [[package]]
 name = "spirv-cross-internal"
 version = "0.1.0"
-source = "git+https://github.com/kvark/spirv_cross?branch=wgpu#9cb4de489bf80b2b23efffe5a79afb7db6247ba4"
+source = "git+https://github.com/kvark/spirv_cross?branch=wgpu2#f0c322e8a17d4957fbb5b7cd3b56d520ad72fbf2"
 dependencies = [
  "cc",
 ]
 
 [[package]]
 name = "spirv_cross"
-version = "0.16.0"
-source = "git+https://github.com/kvark/spirv_cross?branch=wgpu#9cb4de489bf80b2b23efffe5a79afb7db6247ba4"
+version = "0.18.0"
+source = "git+https://github.com/kvark/spirv_cross?branch=wgpu2#f0c322e8a17d4957fbb5b7cd3b56d520ad72fbf2"
 dependencies = [
  "spirv-cross-internal",
 ]
@@ -4174,7 +4137,7 @@ dependencies = [
  "serde",
  "servo_arc",
  "smallbitvec",
- "smallvec 1.2.0",
+ "smallvec",
  "static_prefs",
  "style_derive",
  "style_traits",
@@ -4235,7 +4198,7 @@ dependencies = [
  "num-traits",
  "selectors",
  "size_of_test",
- "smallvec 1.2.0",
+ "smallvec",
  "style",
  "style_traits",
  "to_shmem",
@@ -4443,7 +4406,7 @@ dependencies = [
  "cssparser",
  "servo_arc",
  "smallbitvec",
- "smallvec 1.2.0",
+ "smallvec",
  "thin-slice",
 ]
 
@@ -4897,14 +4860,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wasm-rust"
-version = "0.1.0"
-dependencies = [
- "wasmparser 0.48.2",
- "wat",
-]
-
-[[package]]
 name = "wasmparser"
 version = "0.48.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4981,7 +4936,7 @@ dependencies = [
  "ron",
  "serde",
  "serde_json",
- "smallvec 0.6.10",
+ "smallvec",
  "svg_fmt",
  "time",
  "tracy-rs",
@@ -5066,7 +5021,7 @@ dependencies = [
 
 [[package]]
 name = "wgpu-core"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "arrayvec",
  "bitflags",
@@ -5077,14 +5032,14 @@ dependencies = [
  "gfx-backend-empty",
  "gfx-backend-metal",
  "gfx-backend-vulkan",
+ "gfx-descriptor",
  "gfx-hal",
+ "gfx-memory",
  "log",
  "parking_lot",
- "peek-poke 0.2.0 (git+https://github.com/kvark/peek-poke?rev=969bd7fe2be1a83f87916dc8b388c63cfd457075)",
- "rendy-descriptor",
- "rendy-memory",
+ "peek-poke 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde",
- "smallvec 1.2.0",
+ "smallvec",
  "vec_map",
  "wgpu-types",
 ]
@@ -5101,10 +5056,10 @@ dependencies = [
 
 [[package]]
 name = "wgpu-types"
-version = "0.1.0"
+version = "0.5.0"
 dependencies = [
  "bitflags",
- "peek-poke 0.2.0 (git+https://github.com/kvark/peek-poke?rev=969bd7fe2be1a83f87916dc8b388c63cfd457075)",
+ "peek-poke 0.2.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde",
 ]
 

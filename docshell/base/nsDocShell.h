@@ -980,7 +980,7 @@ class nsDocShell final : public nsDocLoader,
    * passing the return value of MaybeInitTiming(): if it's possible to reset
    * the Timing, this method will do it.
    */
-  MOZ_MUST_USE bool MaybeInitTiming();
+  [[nodiscard]] bool MaybeInitTiming();
   void MaybeResetInitTiming(bool aReset);
 
   // Convenience method for getting our parent docshell. Can return null
@@ -1061,13 +1061,6 @@ class nsDocShell final : public nsDocLoader,
   // nsIContentPolicy::TYPE_INTERNAL_FRAME depending on who is responsible for
   // this docshell.
   uint32_t DetermineContentType();
-
-  // In cases where we have a LoadURIDelegate (loading external links via
-  // GeckoView), a load may need to be handled through the delegate. aWindowType
-  // is either nsIBrowserDOMWindow::OPEN_CURRENTWINDOW or
-  // nsIBrowserDOMWindow::OPEN_NEWWINDOW.
-  nsresult MaybeHandleLoadDelegate(nsDocShellLoadState* aLoadState,
-                                   uint32_t aWindowType, bool* aDidHandleLoad);
 
   struct SameDocumentNavigationState {
     nsAutoCString mCurrentHash;

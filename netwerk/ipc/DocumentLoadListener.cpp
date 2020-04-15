@@ -22,6 +22,7 @@
 #include "mozilla/net/RedirectChannelRegistrar.h"
 #include "nsDocShell.h"
 #include "nsDocShellLoadState.h"
+#include "nsContentSecurityUtils.h"
 #include "nsHttpChannel.h"
 #include "nsISecureBrowserUI.h"
 #include "nsRedirectHistoryEntry.h"
@@ -39,6 +40,10 @@
 #include "nsIOService.h"
 #include "mozilla/dom/WindowGlobalParent.h"
 #include "mozilla/StaticPrefs_security.h"
+
+#ifdef MOZ_WIDGET_ANDROID
+#  include "mozilla/widget/nsWindow.h"
+#endif /* MOZ_WIDGET_ANDROID */
 
 mozilla::LazyLogModule gDocumentChannelLog("DocumentChannel");
 #define LOG(fmt) MOZ_LOG(gDocumentChannelLog, mozilla::LogLevel::Verbose, fmt)
@@ -338,7 +343,8 @@ bool DocumentLoadListener::Open(
     nsDocShellLoadState* aLoadState, class LoadInfo* aLoadInfo,
     nsLoadFlags aLoadFlags, uint32_t aCacheKey, const uint64_t& aChannelId,
     const TimeStamp& aAsyncOpenTime, nsDOMNavigationTiming* aTiming,
-    Maybe<ClientInfo>&& aInfo, uint64_t aOuterWindowId, nsresult* aRv) {
+    Maybe<ClientInfo>&& aInfo, uint64_t aOuterWindowId, bool aHasGesture,
+    nsresult* aRv) {
   LOG(("DocumentLoadListener Open [this=%p, uri=%s]", this,
        aLoadState->URI()->GetSpecOrDefault().get()));
   RefPtr<CanonicalBrowsingContext> browsingContext =
@@ -444,10 +450,52 @@ bool DocumentLoadListener::Open(
                                         browsingContext);
   openInfo->Prepare();
 
-  *aRv = mChannel->AsyncOpen(openInfo);
-  if (NS_FAILED(*aRv)) {
-    mParentChannelListener = nullptr;
-    return false;
+#ifdef MOZ_WIDGET_ANDROID
+  RefPtr<MozPromise<bool, bool, false>> promise;
+  if (aLoadState->LoadType() != LOAD_ERROR_PAGE &&
+      !(aLoadState->HasLoadFlags(
+          nsDocShell::INTERNAL_LOAD_FLAGS_BYPASS_LOAD_URI_DELEGATE)) &&
+      browsingContext->IsTopContent() &&
+      !(aLoadState->LoadType() & LOAD_HISTORY)) {
+    nsCOMPtr<nsIWidget> widget =
+        browsingContext->GetParentProcessWidgetContaining();
+    RefPtr<nsWindow> window = nsWindow::From(widget);
+
+    if (window) {
+      promise = window->OnLoadRequest(
+          aLoadState->URI(), nsIBrowserDOMWindow::OPEN_CURRENTWINDOW,
+          aLoadState->LoadFlags(), aLoadState->TriggeringPrincipal(),
+          aHasGesture);
+    }
+  }
+
+  if (promise) {
+    RefPtr<DocumentLoadListener> self = this;
+    promise->Then(
+        GetCurrentThreadSerialEventTarget(), __func__,
+        [=](const MozPromise<bool, bool, false>::ResolveOrRejectValue& aValue) {
+          if (aValue.IsResolve()) {
+            bool handled = aValue.ResolveValue();
+            if (handled) {
+              self->DisconnectChildListeners(NS_ERROR_ABORT, NS_ERROR_ABORT);
+              mParentChannelListener = nullptr;
+            } else {
+              nsresult rv = mChannel->AsyncOpen(openInfo);
+              if (NS_FAILED(rv)) {
+                self->DisconnectChildListeners(NS_ERROR_ABORT, NS_ERROR_ABORT);
+                mParentChannelListener = nullptr;
+              }
+            }
+          }
+        });
+  } else
+#endif /* MOZ_WIDGET_ANDROID */
+  {
+    *aRv = mChannel->AsyncOpen(openInfo);
+    if (NS_FAILED(*aRv)) {
+      mParentChannelListener = nullptr;
+      return false;
+    }
   }
 
   mChannelCreationURI = aLoadState->URI();
@@ -982,6 +1030,10 @@ DocumentLoadListener::OnStartRequest(nsIRequest* aRequest) {
     return NS_ERROR_UNEXPECTED;
   }
 
+  // Enforce CSP frame-ancestors and x-frame-options checks which
+  // might cancel the channel.
+  nsContentSecurityUtils::PerformCSPFrameAncestorAndXFOCheck(mChannel);
+
   // Once we initiate a process switch, we ask the child to notify the
   // listeners that we have completed. If the switch promise then gets
   // rejected we also cancel the parent, which results in this being called.
@@ -1249,46 +1301,52 @@ DocumentLoadListener::AsyncOnChannelRedirect(
   rv = aNewChannel->GetURI(getter_AddRefs(newUri));
   NS_ENSURE_SUCCESS(rv, rv);
 
-  RefPtr<ADocumentChannelBridge> bridge = mDocumentChannelBridge;
-  auto callback =
-      [bridge, loadInfo](
-          nsCSPContext* aContext, mozilla::dom::Element* aTriggeringElement,
-          nsICSPEventListener* aCSPEventListener, nsIURI* aBlockedURI,
-          nsCSPContext::BlockedContentSource aBlockedContentSource,
-          nsIURI* aOriginalURI, const nsAString& aViolatedDirective,
-          uint32_t aViolatedPolicyIndex, const nsAString& aObserverSubject,
-          const nsAString& aSourceFile, const nsAString& aScriptSample,
-          uint32_t aLineNum, uint32_t aColumnNum) -> nsresult {
-    MOZ_ASSERT(!aTriggeringElement);
-    MOZ_ASSERT(!aCSPEventListener);
-    MOZ_ASSERT(aSourceFile.IsVoid() || aSourceFile.IsEmpty());
-    MOZ_ASSERT(aScriptSample.IsVoid() || aScriptSample.IsEmpty());
-    nsCOMPtr<nsIContentSecurityPolicy> cspToInherit =
-        loadInfo->GetCspToInherit();
-
-    // The CSPContext normally contains the loading Document (used
-    // for targeting events), but this gets lost when serializing across
-    // IPDL. We need to know which CSPContext we're serializing, so that
-    // we can find the right loading Document on the content process
-    // side.
-    bool isCspToInherit = (aContext == cspToInherit);
-    bridge->CSPViolation(aContext, isCspToInherit, aBlockedURI,
-                         aBlockedContentSource, aOriginalURI,
-                         aViolatedDirective, aViolatedPolicyIndex,
-                         aObserverSubject);
-    return NS_OK;
-  };
-
   Maybe<nsresult> cancelCode;
-  rv = CSPService::ConsultCSPForRedirect(callback, originalUri, newUri,
-                                         loadInfo, cancelCode);
+  rv = CSPService::ConsultCSPForRedirect(originalUri, newUri, loadInfo,
+                                         cancelCode);
 
   if (cancelCode) {
     aOldChannel->Cancel(*cancelCode);
   }
   NS_ENSURE_SUCCESS(rv, rv);
 
-  aCallback->OnRedirectVerifyCallback(NS_OK);
+#ifdef MOZ_WIDGET_ANDROID
+  nsCOMPtr<nsIURI> uriBeingLoaded =
+      AntiTrackingUtils::MaybeGetDocumentURIBeingLoaded(mChannel);
+  RefPtr<CanonicalBrowsingContext> bc =
+      mParentChannelListener->GetBrowsingContext();
+
+  RefPtr<MozPromise<bool, bool, false>> promise;
+  if (bc->IsTopContent()) {
+    nsCOMPtr<nsIWidget> widget = bc->GetParentProcessWidgetContaining();
+    RefPtr<nsWindow> window = nsWindow::From(widget);
+
+    if (window) {
+      promise = window->OnLoadRequest(
+          uriBeingLoaded, nsIBrowserDOMWindow::OPEN_CURRENTWINDOW,
+          nsIWebNavigation::LOAD_FLAGS_IS_REDIRECT, nullptr, false);
+    }
+  }
+
+  if (promise) {
+    RefPtr<nsIAsyncVerifyRedirectCallback> cb = aCallback;
+    promise->Then(
+        GetCurrentThreadSerialEventTarget(), __func__,
+        [=](const MozPromise<bool, bool, false>::ResolveOrRejectValue& aValue) {
+          if (aValue.IsResolve()) {
+            bool handled = aValue.ResolveValue();
+            if (handled) {
+              cb->OnRedirectVerifyCallback(NS_ERROR_ABORT);
+            } else {
+              cb->OnRedirectVerifyCallback(NS_OK);
+            }
+          }
+        });
+  } else
+#endif /* MOZ_WIDGET_ANDROID */
+  {
+    aCallback->OnRedirectVerifyCallback(NS_OK);
+  }
   return NS_OK;
 }
 

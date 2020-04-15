@@ -271,7 +271,7 @@ class Opcode {
 
 enum class PackedTypeCode : uint32_t {};
 
-static_assert(std::is_pod<PackedTypeCode>::value,
+static_assert(std::is_pod_v<PackedTypeCode>,
               "must be POD to be simply serialized/deserialized");
 
 const uint32_t NoTypeCode = 0xFF;          // Only use these
@@ -1078,15 +1078,6 @@ class FuncType {
   ValType result(unsigned i) const { return results_[i]; }
   const ValTypeVector& results() const { return results_; }
 
-  // Transitional method, to be removed after multi-values (1401675).
-  Maybe<ValType> ret() const {
-    if (results_.length() == 0) {
-      return Nothing();
-    }
-    MOZ_ASSERT(results_.length() == 1);
-    return Some(result(0));
-  }
-
   HashNumber hash() const {
     HashNumber hn = 0;
     for (const ValType& vt : args_) {
@@ -1119,12 +1110,12 @@ class FuncType {
   // Entry from JS to wasm via the JIT is currently unimplemented for
   // functions that return multiple values.
   bool temporarilyUnsupportedResultCountForJitEntry() const {
-    return results().length() > 1;
+    return results().length() > MaxResultsForJitEntry;
   }
   // Calls out from wasm to JS that return multiple values is currently
   // unsupported.
   bool temporarilyUnsupportedResultCountForJitExit() const {
-    return results().length() > 1;
+    return results().length() > MaxResultsForJitExit;
   }
   // For JS->wasm jit entries, AnyRef parameters and returns are allowed,
   // as are all reference types apart from TypeIndex.

@@ -253,6 +253,7 @@ EXPORTS.mozilla.dom += [
     'UserActivation.h',
     'ViewportMetaData.h',
     'VisualViewport.h',
+    'WindowFeatures.h',
     'WindowOrientationObserver.h',
     'WindowProxyHolder.h',
 ]
@@ -425,6 +426,7 @@ UNIFIED_SOURCES += [
     'ViewportMetaData.cpp',
     'VisualViewport.cpp',
     'WindowDestroyedEvent.cpp',
+    'WindowFeatures.cpp',
     'WindowNamedPropertiesHandler.cpp',
     'WindowOrientationObserver.cpp',
     'XPathGenerator.cpp',
@@ -511,7 +513,6 @@ LOCAL_INCLUDES += [
     '/dom/xml',
     '/dom/xslt/xpath',
     '/dom/xul',
-    '/extensions/permissions',
     '/gfx/2d',
     '/image',
     '/js/xpconnect/loader',

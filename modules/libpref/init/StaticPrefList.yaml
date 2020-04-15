@@ -963,11 +963,7 @@
 # If set, use DocumentChannel with nsDocShell in place of HttpChannel.
 - name: browser.tabs.documentchannel
   type: bool
-#if defined(ANDROID)
-  value: false  # See bug 1589982.
-#else
   value: true
-#endif
   mirror: always
 
 - name: browser.tabs.remote.desktopbehavior
@@ -1518,6 +1514,12 @@
 - name: dom.document.exec_command.nested_calls_allowed
   type: bool
   value: @IS_NOT_EARLY_BETA_OR_EARLIER@
+  mirror: always
+
+# Enable Downloads API
+- name: dom.downloads.enabled
+  type: bool
+  value: true
   mirror: always
 
 - name: dom.enable_window_print
@@ -3738,7 +3740,7 @@
 # See eCMSMode in gfx/thebes/gfxPlatform.h.
 - name: gfx.color_management.mode
   type: RelaxedAtomicInt32
-  value: 2
+  value: 1
   mirror: always
 
 # The zero default here should match QCMS_INTENT_DEFAULT from qcms.h
@@ -4003,7 +4005,7 @@
 
 - name: gfx.omta.background-color
   type: bool
-  value: @IS_NOT_RELEASE_OR_BETA@
+  value: true
   mirror: always
 
 - name: gfx.partialpresent.force
@@ -4099,6 +4101,23 @@
   value: false
   mirror: once
   do_not_use_directly: true
+
+#ifdef XP_WIN
+- name: gfx.webrender.force-angle
+  type: bool
+  value: true
+  mirror: once
+#endif
+
+# WebRender is not enabled when there is no GPU process on window when
+# WebRender uses ANGLE. It is for avoiding that WebGL and WebRender use ANGLE
+# at once. But there is a case that we want to enable WebRender for testing.
+#if defined(NIGHTLY_BUILD) && defined(XP_WIN)
+- name: gfx.webrender.enabled-no-gpu-process-with-angle-win
+  type: bool
+  value: false
+  mirror: once
+#endif
 
 - name: gfx.webrender.blob-images
   type: RelaxedAtomicBool
@@ -5448,7 +5467,7 @@
 # Are implicit tracks in computed grid templates serialized?
 - name: layout.css.serialize-grid-implicit-tracks
   type: RelaxedAtomicBool
-  value: false
+  value: @IS_NOT_NIGHTLY_BUILD@
   mirror: always
 
 # Set the number of device pixels per CSS pixel. A value <= 0 means choose
@@ -6276,7 +6295,7 @@
 #if defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)
   value: true
 #elif defined(XP_WIN) && !defined(_ARM64_)
-  value: @IS_EARLY_BETA_OR_EARLIER@
+  value: true
 #else
   value: false
 #endif
@@ -7799,12 +7818,12 @@
   mirror: always
 
 - name: permissions.isolateBy.userContext
-  type: bool
+  type: RelaxedAtomicBool
   value: false
   mirror: always
 
 - name: permissions.isolateBy.privateBrowsing
-  type: bool
+  type: RelaxedAtomicBool
   value: @IS_EARLY_BETA_OR_EARLIER@
   mirror: always
 

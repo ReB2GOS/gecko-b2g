@@ -83,6 +83,7 @@
   <link rel="localization" href="preview/interventions.ftl"/>
   <link rel="localization" href="browser/sidebarMenu.ftl"/>
   <link rel="localization" href="browser/allTabsMenu.ftl"/>
+  <link rel="localization" href="browser/places.ftl"/>
 
   <title>&mainWindow.title;</title>
 
@@ -759,7 +760,7 @@
             <toolbarbutton id="alltabs-button"
                            class="toolbarbutton-1 chromeclass-toolbar-additional tabs-alltabs-button"
                            badged="true"
-                           oncommand="gTabsPanel.showAllTabsPanel();"
+                           oncommand="gTabsPanel.showAllTabsPanel(event);"
                            label="&listAllTabs.label;"
                            tooltiptext="&listAllTabs.label;"
                            removable="false"/>

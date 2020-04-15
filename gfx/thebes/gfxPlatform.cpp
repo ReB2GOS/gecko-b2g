@@ -452,6 +452,12 @@ SRGBOverrideObserver::Observe(nsISupports* aSubject, const char* aTopic,
   ShutdownCMS();
   // Update current cms profile.
   gfxPlatform::CreateCMSOutputProfile();
+  // FIXME(aosmond): This is also racy for the transforms but the pref is only
+  // used for dev purposes. It can be made a static pref in a followup once the
+  // dependency on it is removed from the gtest suite (see bug 1620600).
+  gfxPlatform::GetCMSRGBTransform();
+  gfxPlatform::GetCMSRGBATransform();
+  gfxPlatform::GetCMSBGRATransform();
   return NS_OK;
 }
 
@@ -1030,7 +1036,14 @@ void gfxPlatform::Init() {
   // the (rare) cases where they're used. Note that the GPU process where
   // WebRender runs doesn't initialize gfxPlatform and performs explicit
   // initialization of the bits it needs.
-  if (!UseWebRender()) {
+  if (!UseWebRender()
+#if defined(XP_WIN) && defined(NIGHTLY_BUILD)
+      || (UseWebRender() && XRE_IsParentProcess() &&
+          !gfxConfig::IsEnabled(Feature::GPU_PROCESS) &&
+          StaticPrefs::
+              gfx_webrender_enabled_no_gpu_process_with_angle_win_AtStartup())
+#endif
+  ) {
     gPlatform->EnsureDevicesInitialized();
   }
   gPlatform->InitOMTPConfig();
@@ -1103,6 +1116,12 @@ void gfxPlatform::Init() {
                                        "gfx.2d.recording");
 
   CreateCMSOutputProfile();
+
+  // Create the sRGB to output display profile transforms. They can be accessed
+  // off the main thread so we want to avoid a race condition.
+  GetCMSRGBTransform();
+  GetCMSRGBATransform();
+  GetCMSBGRATransform();
 
   // Listen to memory pressure event so we can purge DrawTarget caches
   gPlatform->mMemoryPressureObserver =
@@ -2998,15 +3017,6 @@ void gfxPlatform::InitWebRenderConfig() {
         NS_LITERAL_CSTRING("FEATURE_FAILURE_WEBRENDER_NEED_HWCOMP"));
   }
 
-  // WebRender relies on the GPU process when on Windows
-#ifdef XP_WIN
-  if (!gfxConfig::IsEnabled(Feature::GPU_PROCESS)) {
-    featureWebRender.ForceDisable(
-        FeatureStatus::UnavailableNoGpuProcess, "GPU Process is disabled",
-        NS_LITERAL_CSTRING("FEATURE_FAILURE_GPU_PROCESS_DISABLED"));
-  }
-#endif
-
   if (InSafeMode()) {
     featureWebRender.ForceDisable(
         FeatureStatus::UnavailableInSafeMode, "Safe-mode is enabled",
@@ -3014,11 +3024,22 @@ void gfxPlatform::InitWebRenderConfig() {
   }
 
 #ifdef XP_WIN
-  if (Preferences::GetBool("gfx.webrender.force-angle", false)) {
+  if (StaticPrefs::gfx_webrender_force_angle_AtStartup()) {
     if (!gfxConfig::IsEnabled(Feature::D3D11_HW_ANGLE)) {
       featureWebRender.ForceDisable(
           FeatureStatus::UnavailableNoAngle, "ANGLE is disabled",
           NS_LITERAL_CSTRING("FEATURE_FAILURE_ANGLE_DISABLED"));
+    } else if (
+        !gfxConfig::IsEnabled(Feature::GPU_PROCESS)
+#  ifdef NIGHTLY_BUILD
+        && !StaticPrefs::
+               gfx_webrender_enabled_no_gpu_process_with_angle_win_AtStartup()
+#  endif
+    ) {
+      // WebRender with ANGLE relies on the GPU process when on Windows
+      featureWebRender.ForceDisable(
+          FeatureStatus::UnavailableNoGpuProcess, "GPU Process is disabled",
+          NS_LITERAL_CSTRING("FEATURE_FAILURE_GPU_PROCESS_DISABLED"));
     } else {
       gfxVars::SetUseWebRenderANGLE(gfxConfig::IsEnabled(Feature::WEBRENDER));
     }
