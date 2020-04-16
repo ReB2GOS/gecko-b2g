@@ -1762,10 +1762,6 @@ bool LazyScriptCreationData::create(JSContext* cx,
     return false;
   }
 
-  if (fieldInitializers) {
-    lazy->setFieldInitializers(*fieldInitializers);
-  }
-
   function->initLazyScript(lazy);
 
   return true;
@@ -2503,9 +2499,14 @@ bool Parser<FullParseHandler, Unit>::skipLazyInnerFunction(
   }
 
   funbox->initFromLazyFunction(fun);
-  MOZ_ASSERT(fun->baseScript()->hasEnclosingScript(),
-             "Inner lazy function should not have a scope until we finish our "
-             "own compile");
+
+  // Info derived from parent compilation should not be set yet for our inner
+  // lazy functions. Instead that info will be updated when we finish our
+  // compilation.
+  MOZ_ASSERT(fun->baseScript()->hasEnclosingScript());
+  MOZ_ASSERT(fun->baseScript()->treatAsRunOnce() == false);
+  MOZ_ASSERT_IF(fun->isClassConstructor(),
+                !fun->baseScript()->getFieldInitializers().valid);
 
   PropagateTransitiveParseFlags(funbox, pc_->sc());
 
@@ -6852,13 +6853,9 @@ bool GeneralParser<ParseHandler, Unit>::classMember(
     if (!tokenStream.peekToken(&tt)) {
       return false;
     }
-    if (tt == TokenKind::RightCurly) {
-      tokenStream.consumeKnownToken(tt);
-      error(JSMSG_UNEXPECTED_TOKEN, "property name", TokenKindToDesc(tt));
-      return false;
-    }
 
-    if (tt != TokenKind::LeftParen) {
+    if (tt != TokenKind::LeftParen && tt != TokenKind::Assign &&
+        tt != TokenKind::Semi && tt != TokenKind::RightCurly) {
       isStatic = true;
     } else {
       anyChars.ungetToken();
@@ -8635,6 +8632,15 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::assignExpr(
     case TokenKind::SubAssign:
       kind = ParseNodeKind::SubAssignExpr;
       break;
+    case TokenKind::CoalesceAssign:
+      kind = ParseNodeKind::CoalesceAssignExpr;
+      break;
+    case TokenKind::OrAssign:
+      kind = ParseNodeKind::OrAssignExpr;
+      break;
+    case TokenKind::AndAssign:
+      kind = ParseNodeKind::AndAssignExpr;
+      break;
     case TokenKind::BitOrAssign:
       kind = ParseNodeKind::BitOrAssignExpr;
       break;
@@ -8700,6 +8706,17 @@ typename ParseHandler::Node GeneralParser<ParseHandler, Unit>::assignExpr(
   } else if (handler_.isPropertyAccess(lhs)) {
     // Permitted: no additional testing/fixup needed.
   } else if (handler_.isFunctionCall(lhs)) {
+    // We don't have to worry about backward compatibility issues with the new
+    // compound assignment operators, so we always throw here. Also that way we
+    // don't have to worry if |f() &&= expr| should always throw an error or
+    // only if |f()| returns true.
+    if (kind == ParseNodeKind::CoalesceAssignExpr ||
+        kind == ParseNodeKind::OrAssignExpr ||
+        kind == ParseNodeKind::AndAssignExpr) {
+      errorAt(exprPos.begin, JSMSG_BAD_LEFTSIDE_OF_ASS);
+      return null();
+    }
+
     if (!strictModeErrorAt(exprPos.begin, JSMSG_BAD_LEFTSIDE_OF_ASS)) {
       return null();
     }

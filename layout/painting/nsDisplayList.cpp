@@ -1225,7 +1225,6 @@ nsDisplayListBuilder::nsDisplayListBuilder(nsIFrame* aReferenceFrame,
       mPartialBuildFailed(false),
       mIsInActiveDocShell(false),
       mBuildAsyncZoomContainer(false),
-      mBuildBackdropRootContainer(false),
       mContainsBackdropFilter(false),
       mHitTestArea(),
       mHitTestInfo(CompositorHitTestInvisibleToHit) {
@@ -1454,16 +1453,9 @@ void nsDisplayListBuilder::UpdateShouldBuildAsyncZoomContainer() {
   mBuildAsyncZoomContainer = nsLayoutUtils::AllowZoomingForDocument(document);
 }
 
-void nsDisplayListBuilder::UpdateShouldBuildBackdropRootContainer() {
-  mBuildBackdropRootContainer =
-      StaticPrefs::layout_css_backdrop_filter_enabled();
-}
-
 // Certain prefs may cause display list items to be added or removed when they
 // are toggled. In those cases, we need to fully rebuild the display list.
 bool nsDisplayListBuilder::ShouldRebuildDisplayListDueToPrefChange() {
-  bool shouldRebuild = false;
-
   // If we transition between wrapping the RCD-RSF contents into an async
   // zoom container vs. not, we need to rebuild the display list. This only
   // happens when the zooming or container scrolling prefs are toggled
@@ -1471,19 +1463,10 @@ bool nsDisplayListBuilder::ShouldRebuildDisplayListDueToPrefChange() {
   bool didBuildAsyncZoomContainer = mBuildAsyncZoomContainer;
   UpdateShouldBuildAsyncZoomContainer();
   if (didBuildAsyncZoomContainer != mBuildAsyncZoomContainer) {
-    shouldRebuild = true;
+    return true;
   }
 
-  // If backdrop-filter is enabled, backdrop root containers are added to the
-  // display list. When the pref is toggled these containers may be added or
-  // removed, so the display list should be rebuilt.
-  bool didBuildBackdropRootContainer = mBuildBackdropRootContainer;
-  UpdateShouldBuildBackdropRootContainer();
-  if (didBuildBackdropRootContainer != mBuildBackdropRootContainer) {
-    shouldRebuild = true;
-  }
-
-  return shouldRebuild;
+  return false;
 }
 
 bool nsDisplayListBuilder::MarkOutOfFlowFrameForDisplay(nsIFrame* aDirtyFrame,
@@ -7448,7 +7431,8 @@ already_AddRefed<Layer> nsDisplayStickyPosition::BuildLayer(
 }
 
 // Returns the smallest distance from "0" to the range [min, max] where
-// min <= max.
+// min <= max. Despite the name, the return value is actually a 1-D vector,
+// and so may be negative if max < 0.
 static nscoord DistanceToRange(nscoord min, nscoord max) {
   MOZ_ASSERT(min <= max);
   if (max < 0) {
@@ -7458,6 +7442,32 @@ static nscoord DistanceToRange(nscoord min, nscoord max) {
     return min;
   }
   MOZ_ASSERT(min <= 0 && max >= 0);
+  return 0;
+}
+
+// Returns the magnitude of the part of the range [min, max] that is greater
+// than zero. The return value is always non-negative.
+static nscoord PositivePart(nscoord min, nscoord max) {
+  MOZ_ASSERT(min <= max);
+  if (min >= 0) {
+    return max - min;
+  }
+  if (max > 0) {
+    return max;
+  }
+  return 0;
+}
+
+// Returns the magnitude of the part of the range [min, max] that is less
+// than zero. The return value is always non-negative.
+static nscoord NegativePart(nscoord min, nscoord max) {
+  MOZ_ASSERT(min <= max);
+  if (max <= 0) {
+    return max - min;
+  }
+  if (min < 0) {
+    return 0 - min;
+  }
   return 0;
 }
 
@@ -7530,7 +7540,8 @@ bool nsDisplayStickyPosition::CreateWebRenderCommands(
       // reach the range [inner.YMost(), outer.YMost()] where the item gets
       // stuck?
       // Answer: the current distance is "itemBounds.y - scrollPort.y". That
-      // needs to be adjusted by the distance to the range. If the distance is
+      // needs to be adjusted by the distance to the range, less any other
+      // sticky ranges that fall between 0 and the range. If the distance is
       // negative (i.e. inner.YMost() <= outer.YMost() < 0) then we would be
       // scrolling upwards (decreasing scroll offset) to reach that range,
       // which would increase itemBounds.y and make it farther away from the
@@ -7539,8 +7550,18 @@ bool nsDisplayStickyPosition::CreateWebRenderCommands(
       // we would be scrolling downwards, itemBounds.y would decrease, and we
       // again need to adjust by -distance. If we are already in the range
       // then no adjustment is needed and distance is 0 so again using
-      // -distance works.
+      // -distance works. If the distance is positive, and the item has both
+      // top and bottom sticky ranges, then the bottom sticky range may fall
+      // (entirely[1] or partly[2]) between the current scroll position.
+      // [1]: 0 <= outer.Y() <= inner.Y() < inner.YMost() <= outer.YMost()
+      // [2]: outer.Y() < 0 <= inner.Y() < inner.YMost() <= outer.YMost()
+      // In these cases, the item doesn't actually move for that part of the
+      // distance, so we need to subtract out that bit, which can be computed
+      // as the positive portion of the range [outer.Y(), inner.Y()].
       nscoord distance = DistanceToRange(inner.YMost(), outer.YMost());
+      if (distance > 0) {
+        distance -= PositivePart(outer.Y(), inner.Y());
+      }
       topMargin = Some(NSAppUnitsToFloatPixels(
           itemBounds.y - scrollPort.y - distance, auPerDevPixel));
       // Question: What is the maximum positive ("downward") offset that WR
@@ -7567,6 +7588,9 @@ bool nsDisplayStickyPosition::CreateWebRenderCommands(
       // Similar logic as in the previous section, but this time we care about
       // the distance from itemBounds.YMost() to scrollPort.YMost().
       nscoord distance = DistanceToRange(outer.Y(), inner.Y());
+      if (distance < 0) {
+        distance += NegativePart(inner.YMost(), outer.YMost());
+      }
       bottomMargin = Some(NSAppUnitsToFloatPixels(
           scrollPort.YMost() - itemBounds.YMost() + distance, auPerDevPixel));
       // And here WR will be moving the item upwards rather than downwards so
@@ -7584,6 +7608,9 @@ bool nsDisplayStickyPosition::CreateWebRenderCommands(
     // Same as above, but for the x-axis
     if (outer.XMost() != inner.XMost()) {
       nscoord distance = DistanceToRange(inner.XMost(), outer.XMost());
+      if (distance > 0) {
+        distance -= PositivePart(outer.X(), inner.X());
+      }
       leftMargin = Some(NSAppUnitsToFloatPixels(
           itemBounds.x - scrollPort.x - distance, auPerDevPixel));
       hBounds.max =
@@ -7595,6 +7622,9 @@ bool nsDisplayStickyPosition::CreateWebRenderCommands(
     }
     if (outer.X() != inner.X()) {
       nscoord distance = DistanceToRange(outer.X(), inner.X());
+      if (distance < 0) {
+        distance += NegativePart(inner.XMost(), outer.XMost());
+      }
       rightMargin = Some(NSAppUnitsToFloatPixels(
           scrollPort.XMost() - itemBounds.XMost() + distance, auPerDevPixel));
       hBounds.min =

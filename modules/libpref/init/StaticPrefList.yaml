@@ -1303,6 +1303,12 @@
 # Prefs starting with "dom."
 #---------------------------------------------------------------------------
 
+# Whether Alarm API is exposed to the web.
+- name: dom.alarm.enabled
+  type: bool
+  value: false
+  mirror: always
+
 # Whether window.mozPaintCount is exposed to the web.
 - name: dom.mozPaintCount.enabled
   type: bool
@@ -1374,7 +1380,7 @@
 # Is support for AudioWorklet enabled?
 - name: dom.audioworklet.enabled
   type: bool
-  value: @IS_NIGHTLY_BUILD@
+  value: true
   mirror: always
 
 # Is support for Navigator.getBattery enabled?
@@ -2466,7 +2472,7 @@
 # This pref enables the featurePolicy header support.
 - name: dom.security.featurePolicy.header.enabled
   type: bool
-  value: @IS_NIGHTLY_BUILD@
+  value: false
   mirror: always
 
 - name: dom.security.respect_document_nosniff
@@ -2479,10 +2485,10 @@
   value: false
   mirror: always
 
-# Expose the 'policy' attribute in document and HTMLIFrameElement
+# Expose the 'featurePolicy' attribute in document and HTMLIFrameElement
 - name: dom.security.featurePolicy.webidl.enabled
   type: bool
-  value: @IS_NIGHTLY_BUILD@
+  value: false
   mirror: always
 
 # For testing purposes only: Flipping this pref to true allows
@@ -2523,6 +2529,14 @@
   value: false
   mirror: always
 
+# WARNING: Don't ever update that pref manually! It is only used
+# for telemetry purposes and allows to reason about retention of
+# the pref dom.security.https_only_mode from above.
+- name: dom.security.https_only_mode_ever_enabled
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
 # Is support for selection event APIs enabled?
 - name: dom.select_events.enabled
   type: bool
@@ -2542,7 +2556,7 @@
 
 - name: dom.arena_allocator.enabled
   type: bool
-  value: false
+  value: true
   mirror: once
 
 - name: dom.serviceWorkers.enabled
@@ -3207,7 +3221,7 @@
 
 - name: dom.worklet.enabled
   type: bool
-  value: @IS_NIGHTLY_BUILD@
+  value: true
   mirror: always
 
 # Enable content type normalization of XHR uploads via MIME Sniffing standard
@@ -3728,7 +3742,11 @@
 
 - name: gfx.canvas.remote
   type: RelaxedAtomicBool
+#if defined(XP_WIN) && defined(NIGHTLY_BUILD)
+  value: true
+#else
   value: false
+#endif
   mirror: always
 
 - name: gfx.color_management.enablev4
@@ -4447,7 +4465,7 @@
 # APIs on HTMLImageElement.
 - name: image.honor_orientation_metadata.natural_size
   type: bool
-  value: @IS_NIGHTLY_BUILD@
+  value: true
   mirror: always
 
 # The threshold for inferring that changes to an <img> element's |src|

@@ -2114,12 +2114,11 @@ static bool PrepareAndExecuteRegExp(JSContext* cx, MacroAssembler& masm,
   }
 
   // Don't handle RegExps with excessive parens.
-  masm.load32(Address(temp1, RegExpShared::offsetOfParenCount()), temp2);
-  masm.branch32(Assembler::AboveOrEqual, temp2,
+  masm.load32(Address(temp1, RegExpShared::offsetOfPairCount()), temp2);
+  masm.branch32(Assembler::Above, temp2,
                 Imm32(RegExpObject::MaxPairCount), failure);
 
   // Fill in the paren count in the MatchPairs on the stack.
-  masm.add32(Imm32(1), temp2);
   masm.store32(temp2, pairCountAddress);
 
   // Load the code pointer for the type of input string we have, and compute
@@ -3736,10 +3735,9 @@ void CodeGenerator::visitTableSwitchV(LTableSwitchV* ins) {
 }
 
 void CodeGenerator::visitCloneLiteral(LCloneLiteral* lir) {
-  pushArg(ImmWord(TenuredObject));
   pushArg(ToRegister(lir->getObjectLiteral()));
 
-  using Fn = JSObject* (*)(JSContext*, HandleObject, NewObjectKind);
+  using Fn = JSObject* (*)(JSContext*, HandleObject);
   callVM<Fn, DeepCloneObjectLiteral>(lir);
 }
 
@@ -6739,21 +6737,21 @@ void CodeGenerator::visitNewIterator(LNewIterator* lir) {
   OutOfLineCode* ool;
   switch (lir->mir()->type()) {
     case MNewIterator::ArrayIterator: {
-      using Fn = ArrayIteratorObject* (*)(JSContext*, NewObjectKind);
-      ool = oolCallVM<Fn, NewArrayIteratorObject>(
-          lir, ArgList(Imm32(GenericObject)), StoreRegisterTo(objReg));
+      using Fn = ArrayIteratorObject* (*)(JSContext*);
+      ool = oolCallVM<Fn, NewArrayIterator>(lir, ArgList(),
+                                            StoreRegisterTo(objReg));
       break;
     }
     case MNewIterator::StringIterator: {
-      using Fn = StringIteratorObject* (*)(JSContext*, NewObjectKind);
-      ool = oolCallVM<Fn, NewStringIteratorObject>(
-          lir, ArgList(Imm32(GenericObject)), StoreRegisterTo(objReg));
+      using Fn = StringIteratorObject* (*)(JSContext*);
+      ool = oolCallVM<Fn, NewStringIterator>(lir, ArgList(),
+                                             StoreRegisterTo(objReg));
       break;
     }
     case MNewIterator::RegExpStringIterator: {
-      using Fn = RegExpStringIteratorObject* (*)(JSContext*, NewObjectKind);
-      ool = oolCallVM<Fn, NewRegExpStringIteratorObject>(
-          lir, ArgList(Imm32(GenericObject)), StoreRegisterTo(objReg));
+      using Fn = RegExpStringIteratorObject* (*)(JSContext*);
+      ool = oolCallVM<Fn, NewRegExpStringIterator>(lir, ArgList(),
+                                                   StoreRegisterTo(objReg));
       break;
     }
     default:

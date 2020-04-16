@@ -5333,17 +5333,17 @@ bool CallIRGenerator::getTemplateObjectForNative(HandleFunction calleeFunc,
     }
 
     case InlinableNative::IntrinsicNewArrayIterator: {
-      res.set(NewArrayIteratorObject(cx_, TenuredObject));
+      res.set(NewArrayIteratorTemplate(cx_));
       return !!res;
     }
 
     case InlinableNative::IntrinsicNewStringIterator: {
-      res.set(NewStringIteratorObject(cx_, TenuredObject));
+      res.set(NewStringIteratorTemplate(cx_));
       return !!res;
     }
 
     case InlinableNative::IntrinsicNewRegExpStringIterator: {
-      res.set(NewRegExpStringIteratorObject(cx_, TenuredObject));
+      res.set(NewRegExpStringIteratorTemplate(cx_));
       return !!res;
     }
 
@@ -7035,6 +7035,10 @@ AttachDecision BinaryArithIRGenerator::tryAttachStringInt32Arith() {
     case JSOp::Mod:
       writer.int32ModResult(lhsIntId, rhsIntId);
       trackAttached("BinaryArith.StringInt32.Mod");
+      break;
+    case JSOp::Pow:
+      writer.int32PowResult(lhsIntId, rhsIntId);
+      trackAttached("BinaryArith.StringInt32.Pow");
       break;
     default:
       MOZ_CRASH("Unhandled op in tryAttachStringInt32Arith");

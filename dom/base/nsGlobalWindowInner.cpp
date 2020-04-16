@@ -1806,7 +1806,11 @@ void nsGlobalWindowInner::UpdateParentTarget() {
   // child global, and if it doesn't have one, just use the chrome event
   // handler itself.
 
-  nsCOMPtr<Element> frameElement = GetOuterWindow()->GetFrameElementInternal();
+  nsPIDOMWindowOuter* outer = GetOuterWindow();
+  if (!outer) {
+    return;
+  }
+  nsCOMPtr<Element> frameElement = outer->GetFrameElementInternal();
   nsCOMPtr<EventTarget> eventTarget =
       nsContentUtils::TryGetBrowserChildGlobal(frameElement);
 
@@ -1943,7 +1947,7 @@ void nsGlobalWindowInner::FireFrameLoadEvent() {
     }
 
     mozilla::Unused << browserChild->SendMaybeFireEmbedderLoadEvents(
-        /*aFireLoadAtEmbeddingElement*/ true);
+        EmbedderElementEventType::LoadEvent);
   }
 }
 
@@ -1994,11 +1998,19 @@ nsresult nsGlobalWindowInner::PostHandleEvent(EventChainPostVisitor& aVisitor) {
       }
     }
     mIsDocumentLoaded = false;
+    // Tell the parent process that the document is not loaded.
+    if (mWindowGlobalChild) {
+      mWindowGlobalChild->SendUpdateDocumentHasLoaded(mIsDocumentLoaded);
+    }
   } else if (aVisitor.mEvent->mMessage == eLoad &&
              aVisitor.mEvent->IsTrusted()) {
     // This is page load event since load events don't propagate to |window|.
     // @see Document::GetEventTargetParent.
     mIsDocumentLoaded = true;
+    // Tell the parent process that the document is loaded.
+    if (mWindowGlobalChild) {
+      mWindowGlobalChild->SendUpdateDocumentHasLoaded(mIsDocumentLoaded);
+    }
 
     mTimeoutManager->OnDocumentLoaded();
 

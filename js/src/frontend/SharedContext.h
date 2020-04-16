@@ -217,6 +217,9 @@ class SharedContext {
   bool hasCallSiteObj() const {
     return immutableFlags_.hasFlag(ImmutableFlags::HasCallSiteObj);
   }
+  bool treatAsRunOnce() const {
+    return immutableFlags_.hasFlag(ImmutableFlags::TreatAsRunOnce);
+  }
 
   void setExplicitUseStrict() { hasExplicitUseStrict_ = true; }
   void setBindingsAccessedDynamically() {
@@ -228,12 +231,16 @@ class SharedContext {
   void setHasCallSiteObj() {
     immutableFlags_.setFlag(ImmutableFlags::HasCallSiteObj);
   }
-  void setHasModuleGoal(bool hasModuleGoal = true) {
-    immutableFlags_.setFlag(ImmutableFlags::HasModuleGoal, hasModuleGoal);
+  void setHasModuleGoal(bool flag = true) {
+    immutableFlags_.setFlag(ImmutableFlags::HasModuleGoal, flag);
   }
   void setHasInnerFunctions() {
     immutableFlags_.setFlag(ImmutableFlags::HasInnerFunctions);
   }
+  void setTreatAsRunOnce(bool flag = true) {
+    immutableFlags_.setFlag(ImmutableFlags::TreatAsRunOnce, flag);
+  }
+
 
   ImmutableScriptFlags immutableFlags() { return immutableFlags_; }
 
@@ -340,6 +347,8 @@ class FunctionBox : public SharedContext {
 
   // Back pointer used by asm.js for error messages.
   FunctionNode* functionNode;
+
+  mozilla::Maybe<FieldInitializers> fieldInitializers;
 
   SourceExtent extent;
 
@@ -625,22 +634,9 @@ class FunctionBox : public SharedContext {
     }
   }
 
-  void setFieldInitializers(FieldInitializers fi) {
-    MOZ_ASSERT(function()->baseScript());
-    function()->baseScript()->setFieldInitializers(fi);
-    return;
-  }
-
   bool setTypeForScriptedFunction(JSContext* cx, bool singleton) {
     RootedFunction fun(cx, function());
     return JSFunction::setTypeForScriptedFunction(cx, fun, singleton);
-  }
-
-  bool treatAsRunOnce() const {
-    return immutableFlags_.hasFlag(ImmutableFlags::TreatAsRunOnce);
-  }
-  void setTreatAsRunOnce(bool flag) {
-    immutableFlags_.setFlag(ImmutableFlags::TreatAsRunOnce, flag);
   }
 
   void setInferredName(JSAtom* atom) { function()->setInferredName(atom); }

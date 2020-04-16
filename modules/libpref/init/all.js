@@ -240,6 +240,9 @@ pref("browser.cache.offline.capacity",         512000);
 // Don't show "Open with" option on download dialog if true.
 pref("browser.download.forbid_open_with", false);
 
+// WebAlarms
+pref("dom.alarm.enabled", false);
+
 // Insecure registerProtocolHandler is disabled by default
 pref("dom.registerProtocolHandler.insecure.enabled", false);
 
@@ -1078,18 +1081,17 @@ pref("privacy.restrict3rdpartystorage.url_decorations", "");
 // opened more than this number of popups.
 pref("privacy.popups.maxReported", 100);
 
-// Enable Purge Tracking Cookie Jars feature.
-pref("privacy.purge_trackers.enabled", false);
-// Enable logging for Purge Tracking Cookie Jars feature.
+// Purging first-party tracking cookies.
 #ifdef NIGHTLY_BUILD
-  pref("privacy.purge_trackers.logging.enabled", true);
+  pref("privacy.purge_trackers.enabled", true);
+  pref("privacy.purge_trackers.logging.level", "All");
 #else
-  pref("privacy.purge_trackers.logging.enabled", false);
+  pref("privacy.purge_trackers.enabled", false);
+  pref("privacy.purge_trackers.logging.level", "Error");
 #endif
+
 // Allowable amount of cookies to purge in a batch.
 pref("privacy.purge_trackers.max_purge_count", 100);
-pref("privacy.purge_trackers.logging.level", "Warn");
-
 
 pref("dom.event.contextmenu.enabled",       true);
 pref("dom.event.coalesce_mouse_move",       true);

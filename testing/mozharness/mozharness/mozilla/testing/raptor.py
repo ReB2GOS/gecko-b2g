@@ -204,13 +204,6 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             "help": "The number of times a cold load test is repeated (for cold load tests only, "
                     "where the browser is shutdown and restarted between test iterations)."
         }],
-        [["--project"], {
-            "action": "store",
-            "dest": "project",
-            "default": "mozilla-central",
-            "type": "str",
-            "help": "Name of the project (try, mozilla-central, etc.)"
-        }],
         [["--test-url-params"], {
             "action": "store",
             "dest": "test_url_params",
@@ -249,6 +242,12 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             "dest": "disable_perf_tuning",
             "default": False,
             "help": "Disable performance tuning on android.",
+        }],
+        [["--conditioned-profile-scenario"], {
+            "dest": "conditioned_profile_scenario",
+            "type": "str",
+            "default": "settled",
+            "help": "Name of profile scenario.",
         }],
         [["--debug-mode"], {
             "dest": "debug_mode",
@@ -373,6 +372,8 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
         self.memory_test = self.config.get('memory_test')
         self.cpu_test = self.config.get('cpu_test')
         self.disable_perf_tuning = self.config.get('disable_perf_tuning')
+        self.conditioned_profile_scenario = self.config.get('conditioned_profile_scenario',
+                                                            'settled')
         self.extra_prefs = self.config.get('extra_prefs')
         self.is_release_build = self.config.get('is_release_build')
         self.debug_mode = self.config.get('debug_mode', False)
@@ -531,6 +532,9 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             kw_options['device-name'] = self.config['device_name']
         if self.config.get('activity') is not None:
             kw_options['activity'] = self.config['activity']
+        if self.config.get('conditioned_profile_scenario') is not None:
+            kw_options['conditioned-profile-scenario'] = \
+                self.config['conditioned_profile_scenario']
 
         kw_options.update(kw)
         if self.host:

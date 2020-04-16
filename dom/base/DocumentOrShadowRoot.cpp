@@ -78,16 +78,20 @@ void DocumentOrShadowRoot::InsertSheetAt(size_t aIndex, StyleSheet& aSheet) {
   mStyleSheets.InsertElementAt(aIndex, &aSheet);
 }
 
-already_AddRefed<StyleSheet> DocumentOrShadowRoot::RemoveSheet(
-    StyleSheet& aSheet) {
+void DocumentOrShadowRoot::RemoveStyleSheet(StyleSheet& aSheet) {
   auto index = mStyleSheets.IndexOf(&aSheet);
   if (index == mStyleSheets.NoIndex) {
-    return nullptr;
+    // We should only hit this case if we are unlinking
+    // in which case mStyleSheets should be cleared.
+    MOZ_ASSERT(mKind != Kind::Document ||
+               AsNode().AsDocument()->InUnlinkOrDeletion());
+    MOZ_ASSERT(mStyleSheets.IsEmpty());
+    return;
   }
   RefPtr<StyleSheet> sheet = std::move(mStyleSheets[index]);
   mStyleSheets.RemoveElementAt(index);
+  RemoveSheetFromStylesIfApplicable(*sheet);
   sheet->ClearAssociatedDocumentOrShadowRoot();
-  return sheet.forget();
 }
 
 void DocumentOrShadowRoot::RemoveSheetFromStylesIfApplicable(
@@ -315,7 +319,7 @@ Element* DocumentOrShadowRoot::GetFullscreenElement() {
     return nullptr;
   }
 
-  Element* element = AsNode().OwnerDoc()->FullscreenStackTop();
+  Element* element = AsNode().OwnerDoc()->GetUnretargetedFullScreenElement();
   NS_ASSERTION(!element || element->State().HasState(NS_EVENT_STATE_FULLSCREEN),
                "Fullscreen element should have fullscreen styles applied");
 
@@ -812,6 +816,11 @@ void DocumentOrShadowRoot::Traverse(DocumentOrShadowRoot* tmp,
 
 void DocumentOrShadowRoot::Unlink(DocumentOrShadowRoot* tmp) {
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mDOMStyleSheets);
+  for (StyleSheet* sheet : tmp->mStyleSheets) {
+    sheet->ClearAssociatedDocumentOrShadowRoot();
+    tmp->RemoveSheetFromStylesIfApplicable(*sheet);
+  }
+  NS_IMPL_CYCLE_COLLECTION_UNLINK(mStyleSheets);
   for (RefPtr<StyleSheet>& sheet : tmp->mAdoptedStyleSheets) {
     sheet->RemoveAdopter(*tmp);
   }
