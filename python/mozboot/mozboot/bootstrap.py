@@ -242,7 +242,7 @@ def update_or_create_build_telemetry_config(path):
 class Bootstrapper(object):
     """Main class that performs system bootstrap."""
 
-    def __init__(self, finished=FINISHED, choice=None, no_interactive=False,
+    def __init__(self, finished=FINISHED, choice=4, no_interactive=False,
                  hg_configure=False, no_system_changes=False, mach_context=None,
                  vcs=None):
         self.instance = None
