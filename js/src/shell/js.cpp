@@ -5446,9 +5446,10 @@ static bool BinParse(JSContext* cx, unsigned argc, Value* vp) {
     return false;
   }
 
+  js::SourceExtent extent = js::SourceExtent::makeGlobalExtent(0, options);
   js::frontend::Directives directives(false);
-  js::frontend::GlobalSharedContext globalsc(cx, ScopeKind::Global,
-                                             compilationInfo, directives);
+  js::frontend::GlobalSharedContext globalsc(
+      cx, ScopeKind::Global, compilationInfo, directives, extent);
 
   auto parseFunc = mode == Multipart
                        ? ParseBinASTData<frontend::BinASTTokenReaderMultipart>
@@ -5495,7 +5496,9 @@ static bool FullParseTest(JSContext* cx,
 
     ModuleBuilder builder(cx, &parser);
 
-    ModuleSharedContext modulesc(cx, module, compilationInfo, nullptr, builder);
+    SourceExtent extent = SourceExtent::makeGlobalExtent(length);
+    ModuleSharedContext modulesc(cx, module, compilationInfo, nullptr, builder,
+                                 extent);
     pn = parser.moduleBody(&modulesc);
   }
   if (!pn) {
@@ -6633,6 +6636,17 @@ static bool NewGlobal(JSContext* cx, unsigned argc, Value* vp) {
     }
     if (v.isBoolean()) {
       creationOptions.setCoopAndCoepEnabled(v.toBoolean());
+    }
+
+    // On the web, the SharedArrayBuffer constructor is not installed as a
+    // global property in pages that aren't isolated in a separate process (and
+    // thus can't allow the structured cloning of shared memory).  Specify false
+    // for this option to reproduce this behavior.
+    if (!JS_GetProperty(cx, opts, "defineSharedArrayBufferConstructor", &v)) {
+      return false;
+    }
+    if (v.isBoolean()) {
+      creationOptions.setDefineSharedArrayBufferConstructor(v.toBoolean());
     }
   }
 
@@ -10692,6 +10706,13 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
     jit::JitOptions.baselineJitWarmUpThreshold = warmUpThreshold;
   }
 
+#ifdef ENABLE_NEW_REGEXP
+  warmUpThreshold = op.getIntOption("regexp-warmup-threshold");
+  if (warmUpThreshold >= 0) {
+    jit::JitOptions.regexpWarmUpThreshold = warmUpThreshold;
+  }
+#endif
+
   if (op.getBoolOption("baseline-eager")) {
     jit::JitOptions.setEagerBaselineCompilation();
   }
@@ -10724,6 +10745,21 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
   if (op.getBoolOption("no-native-regexp")) {
     jit::JitOptions.nativeRegExp = false;
   }
+
+#ifdef ENABLE_NEW_REGEXP
+  if (op.getBoolOption("trace-regexp-parser")) {
+    jit::JitOptions.traceRegExpParser = true;
+  }
+  if (op.getBoolOption("trace-regexp-assembler")) {
+    jit::JitOptions.traceRegExpAssembler = true;
+  }
+  if (op.getBoolOption("trace-regexp-interpreter")) {
+    jit::JitOptions.traceRegExpInterpreter = true;
+  }
+  if (op.getBoolOption("trace-regexp-peephole")) {
+    jit::JitOptions.traceRegExpPeephole = true;
+  }
+#endif
 
 #ifdef NIGHTLY_BUILD
   if (op.getBoolOption("no-ti")) {
@@ -11295,6 +11331,20 @@ int main(int argc, char** argv, char** envp) {
 
       !op.addBoolOption('\0', "no-native-regexp",
                         "Disable native regexp compilation") ||
+#ifdef ENABLE_NEW_REGEXP
+      !op.addIntOption(
+          '\0', "regexp-warmup-threshold", "COUNT",
+          "Wait for COUNT invocations before compiling regexps to native code "
+          "(default 10)",
+          -1) ||
+      !op.addBoolOption('\0', "trace-regexp-parser", "Trace regexp parsing") ||
+      !op.addBoolOption('\0', "trace-regexp-assembler",
+                        "Trace regexp assembler") ||
+      !op.addBoolOption('\0', "trace-regexp-interpreter",
+                        "Trace regexp interpreter") ||
+      !op.addBoolOption('\0', "trace-regexp-peephole",
+                        "Trace regexp peephole optimization") ||
+#endif
       !op.addBoolOption('\0', "no-unboxed-objects",
                         "Disable creating unboxed plain objects") ||
       !op.addBoolOption('\0', "enable-streams",

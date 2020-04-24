@@ -242,7 +242,6 @@ pref("browser.slowStartup.notificationDisabled", false);
 pref("browser.slowStartup.timeThreshold", 20000);
 pref("browser.slowStartup.maxSamples", 5);
 
-pref("browser.enable_automatic_image_resizing", true);
 pref("browser.chrome.site_icons", true);
 // browser.warnOnQuit == false will override all other possible prompts when quitting or restarting
 pref("browser.warnOnQuit", true);
@@ -281,9 +280,9 @@ pref("browser.urlbar.suggest.bookmark",             true);
 pref("browser.urlbar.suggest.openpage",             true);
 pref("browser.urlbar.suggest.searches",             true);
 
-// Limit the number of characters sent to the current search engine to fetch
-// suggestions.
-pref("browser.urlbar.maxCharsForSearchSuggestions", 20);
+// As a user privacy measure, don't fetch search suggestions if a pasted string
+// is longer than this.
+pref("browser.urlbar.maxCharsForSearchSuggestions", 100);
 
 pref("browser.urlbar.formatting.enabled", true);
 pref("browser.urlbar.trimURLs", true);
@@ -753,6 +752,8 @@ pref("browser.download.hide_plugins_without_extensions", true);
   pref("browser.backspace_action", 0);
 #endif
 
+pref("intl.regional_prefs.use_os_locales", false);
+
 // this will automatically enable inline spellchecking (if it is available) for
 // editable elements in HTML
 // 0 = spellcheck nothing
@@ -1030,7 +1031,7 @@ pref("dom.ipc.shims.enabledWarnings", false);
   // For information on what the level number means, see
   // SetSecurityLevelForGPUProcess() in
   // security/sandbox/win/src/sandboxbroker/sandboxBroker.cpp
-  pref("security.sandbox.gpu.level", 1);
+  pref("security.sandbox.gpu.level", 0);
 
   // Controls whether we disable win32k for the processes.
   // true means that win32k system calls are not permitted.
@@ -1199,6 +1200,7 @@ pref("services.sync.prefs.sync.dom.event.contextmenu.enabled", true);
 pref("services.sync.prefs.sync.extensions.update.enabled", true);
 pref("services.sync.prefs.sync.extensions.activeThemeID", true);
 pref("services.sync.prefs.sync.intl.accept_languages", true);
+pref("services.sync.prefs.sync.intl.regional_prefs.use_os_locales", true);
 pref("services.sync.prefs.sync.layout.spellcheckDefault", true);
 pref("services.sync.prefs.sync.media.autoplay.default", true);
 pref("services.sync.prefs.sync.media.eme.enabled", true);
@@ -1251,6 +1253,10 @@ pref("browser.menu.showCharacterEncoding", "chrome://browser/locale/browser.prop
 
 // Allow using tab-modal prompts when possible.
 pref("prompts.tab_modal.enabled", true);
+
+// Whether prompts should be content modal (1) tab modal (2) or window modal(3) by default
+// This is a fallback value for when prompt callers do not specify a modalType.
+pref("prompts.defaultModalType", 3);
 
 // Activates preloading of the new tab url.
 pref("browser.newtab.preload", true);
@@ -1309,9 +1315,6 @@ pref("trailhead.firstrun.branches", "join-dynamic");
 
 // Separate about welcome
 pref("browser.aboutwelcome.enabled", true);
-// Temporary utility to unblock testing on about:welcome experiment variations
-pref("browser.aboutwelcome.temp.testExperiment.slug", "");
-pref("browser.aboutwelcome.temp.testExperiment.branch", "control");
 // See Console.jsm LOG_LEVELS for all possible values
 pref("browser.aboutwelcome.log", "warn");
 
@@ -1320,6 +1323,10 @@ pref("browser.messaging-system.whatsNewPanel.enabled", true);
 // Used for CFR messages with scores. See Bug 1594422.
 pref("browser.messaging-system.personalized-cfr.scores", "{}");
 pref("browser.messaging-system.personalized-cfr.score-threshold", 5000);
+
+// Experiment Manager
+pref("messaging-system.log", "warn");
+pref("messaging-system.rsexperimentloader.enabled", true);
 
 // Enable the DOM fullscreen API.
 pref("full-screen-api.enabled", true);
@@ -1367,9 +1374,6 @@ pref("security.insecure_connection_icon.pbmode.enabled", true);
 
 // For secure connections, show gray instead of green lock icon
 pref("security.secure_connection_icon_color_gray", true);
-
-// Ignore EV certificate and treat as normal secure connection instead
-pref("security.identityblock.show_extended_validation", false);
 
 // Show "Not Secure" text for http pages; disabled for now
 pref("security.insecure_connection_text.enabled", false);
@@ -1953,8 +1957,6 @@ pref("devtools.inspector.showAllAnonymousContent", false);
 pref("devtools.inspector.new-rulesview.enabled", false);
 // Enable the compatibility tool in the inspector.
 pref("devtools.inspector.compatibility.enabled", false);
-// Enable the new Box Model Highlighter with renderer in parent process
-pref("devtools.inspector.use-new-box-model-highlighter", false);
 // Enable color scheme simulation in the inspector.
 pref("devtools.inspector.color-scheme-simulation.enabled", false);
 
@@ -1966,6 +1968,10 @@ pref("devtools.gridinspector.showGridLineNumbers", false);
 pref("devtools.gridinspector.showInfiniteLines", false);
 // Max number of grid highlighters that can be displayed
 pref("devtools.gridinspector.maxHighlighters", 3);
+
+// Compatibility preferences
+// Stringified array of target browsers that users investigate.
+pref("devtools.inspector.compatibility.target-browsers", "");
 
 // Whether or not the box model panel is opened in the layout view
 pref("devtools.layout.boxmodel.opened", true);

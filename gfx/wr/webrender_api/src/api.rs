@@ -20,6 +20,7 @@ use crate::{display_item as di, font};
 use crate::color::{ColorU, ColorF};
 use crate::display_list::{BuiltDisplayList, BuiltDisplayListDescriptor};
 use crate::image::{BlobImageData, BlobImageKey, ImageData, ImageDescriptor, ImageKey};
+use crate::image::DEFAULT_TILE_SIZE;
 use crate::units::*;
 
 /// Width and height in device pixels of image tiles.
@@ -51,7 +52,7 @@ impl Default for QualitySettings {
 /// Update of a persistent resource in WebRender.
 ///
 /// ResourceUpdate changes keep theirs effect across display list changes.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 pub enum ResourceUpdate {
     /// See `AddImage`.
     AddImage(AddImage),
@@ -99,7 +100,7 @@ impl fmt::Debug for ResourceUpdate {
                 &i.descriptor.size
             )),
             ResourceUpdate::AddBlobImage(ref i) => f.write_fmt(format_args!(
-                "ResourceUpdate::AddBlobImage size({:?})",
+                "ResourceUFpdate::AddBlobImage size({:?})",
                 &i.descriptor.size
             )),
             ResourceUpdate::UpdateBlobImage(i) => f.write_fmt(format_args!(
@@ -445,7 +446,7 @@ impl Transaction {
         descriptor: ImageDescriptor,
         data: Arc<BlobImageData>,
         visible_rect: DeviceIntRect,
-        tiling: Option<TileSize>,
+        tile_size: Option<TileSize>,
     ) {
         self.resource_updates.push(
             ResourceUpdate::AddBlobImage(AddBlobImage {
@@ -453,7 +454,7 @@ impl Transaction {
                 descriptor,
                 data,
                 visible_rect,
-                tiling,
+                tile_size: tile_size.unwrap_or(DEFAULT_TILE_SIZE),
             })
         );
     }
@@ -554,7 +555,6 @@ pub struct DocumentTransaction {
 }
 
 /// Represents a transaction in the format sent through the channel.
-#[derive(Clone, Deserialize, Serialize)]
 pub struct TransactionMsg {
     /// Changes that require re-building the scene.
     pub scene_ops: Vec<SceneMsg>,
@@ -573,7 +573,6 @@ pub struct TransactionMsg {
     pub low_priority: bool,
 
     /// Handlers to notify at certain points of the pipeline.
-    #[serde(skip)]
     pub notifications: Vec<NotificationRequest>,
 }
 
@@ -643,7 +642,7 @@ impl TransactionMsg {
 /// Creates an image resource with provided parameters.
 ///
 /// Must be matched with a `DeleteImage` at some point to prevent memory leaks.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 pub struct AddImage {
     /// A key to identify the image resource.
     pub key: ImageKey,
@@ -660,7 +659,7 @@ pub struct AddImage {
 }
 
 /// Updates an already existing image resource.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 pub struct UpdateImage {
     /// The key identfying the image resource to update.
     pub key: ImageKey,
@@ -678,7 +677,7 @@ pub struct UpdateImage {
 /// Creates a blob-image resource with provided parameters.
 ///
 /// Must be matched with a `DeleteImage` at some point to prevent memory leaks.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 pub struct AddBlobImage {
     /// A key to identify the blob-image resource.
     pub key: BlobImageKey,
@@ -695,17 +694,16 @@ pub struct AddBlobImage {
     /// This means that blob images can be updated to insert/remove content
     /// in any direction to support panning and zooming.
     pub visible_rect: DeviceIntRect,
-    /// An optional tiling scheme to apply when rasterizing the blob-image
+    /// The blob image's tile size to apply when rasterizing the blob-image
     /// and when storing its rasterized data on the GPU.
     /// Applies to both width and heights of the tiles.
     ///
-    /// Note that WebRender may internally chose to tile large blob-images
-    /// even if this member is set to `None`.
-    pub tiling: Option<TileSize>,
+    /// All blob images are tiled.
+    pub tile_size: TileSize,
 }
 
 /// Updates an already existing blob-image resource.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 pub struct UpdateBlobImage {
     /// The key identfying the blob-image resource to update.
     pub key: BlobImageKey,
@@ -724,20 +722,16 @@ pub struct UpdateBlobImage {
 ///
 /// Must be matched with a corresponding `ResourceUpdate::DeleteFont` at some point to prevent
 /// memory leaks.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 pub enum AddFont {
     ///
-    Raw(
-        font::FontKey,
-        #[serde(with = "serde_bytes")] Vec<u8>,
-        u32
-    ),
+    Raw(font::FontKey, Vec<u8>, u32),
     ///
     Native(font::FontKey, font::NativeFontHandle),
 }
 
 /// Describe an item that matched a hit-test query.
-#[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct HitTestItem {
     /// The pipeline that the display item that was hit belongs to.
     pub pipeline: PipelineId,
@@ -756,14 +750,14 @@ pub struct HitTestItem {
 }
 
 /// Returned by `RenderApi::hit_test`.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default)]
 pub struct HitTestResult {
     /// List of items that are match the hit-test query.
     pub items: Vec<HitTestItem>,
 }
 
 bitflags! {
-    #[derive(Deserialize, MallocSizeOf, Serialize)]
+    #[derive(MallocSizeOf)]
     ///
     pub struct HitTestFlags: u8 {
         ///
@@ -777,7 +771,7 @@ bitflags! {
 ///
 /// Must be matched with a corresponding `DeleteFontInstance` at some point
 /// to prevent memory leaks.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 pub struct AddFontInstance {
     /// A key to identify the font instance.
     pub key: font::FontInstanceKey,
@@ -794,7 +788,6 @@ pub struct AddFontInstance {
 }
 
 /// Frame messages affect building the scene.
-#[derive(Clone, Deserialize, Serialize)]
 pub enum SceneMsg {
     ///
     UpdateEpoch(PipelineId, Epoch),
@@ -840,15 +833,12 @@ pub enum SceneMsg {
 }
 
 /// Frame messages affect frame generation (applied after building the scene).
-#[derive(Clone, Deserialize, Serialize)]
 pub enum FrameMsg {
     ///
     UpdateEpoch(PipelineId, Epoch),
     ///
-    #[serde(skip_serializing, skip_deserializing)]
     HitTest(Option<PipelineId>, WorldPoint, HitTestFlags, Sender<HitTestResult>),
     ///
-    #[serde(skip_serializing, skip_deserializing)]
     RequestHitTester(Sender<Arc<dyn ApiHitTester>>),
     ///
     SetPan(DeviceIntPoint),
@@ -857,7 +847,6 @@ pub enum FrameMsg {
     ///
     ScrollNodeWithId(LayoutPoint, di::ExternalScrollId, ScrollClamping),
     ///
-    #[serde(skip_serializing, skip_deserializing)]
     GetScrollNodeState(Sender<Vec<ScrollNodeState>>),
     ///
     UpdateDynamicProperties(DynamicProperties),
@@ -905,7 +894,6 @@ impl fmt::Debug for FrameMsg {
 bitflags!{
     /// Bit flags for WR stages to store in a capture.
     // Note: capturing `FRAME` without `SCENE` is not currently supported.
-    #[derive(Deserialize, Serialize)]
     pub struct CaptureBits: u8 {
         ///
         const SCENE = 0x1;
@@ -913,12 +901,13 @@ bitflags!{
         const FRAME = 0x2;
         ///
         const TILE_CACHE = 0x4;
+        ///
+        const EXTERNAL_RESOURCES = 0x8;
     }
 }
 
 bitflags!{
     /// Mask for clearing caches in debug commands.
-    #[derive(Deserialize, Serialize)]
     pub struct ClearCache: u8 {
         ///
         const IMAGES = 0b1;
@@ -930,14 +919,12 @@ bitflags!{
         const RENDER_TASKS = 0b0001;
         ///
         const TEXTURE_CACHE = 0b00001;
-        ///
-        const RASTERIZED_BLOBS = 0b000001;
     }
 }
 
 /// Information about a loaded capture of each document
 /// that is returned by `RenderBackend`.
-#[derive(Clone, Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug)]
 pub struct CapturedDocument {
     ///
     pub document_id: DocumentId,
@@ -946,7 +933,7 @@ pub struct CapturedDocument {
 }
 
 /// Update of the state of built-in debugging facilities.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 pub enum DebugCommand {
     /// Sets the provided debug flags.
     SetFlags(DebugFlags),
@@ -968,8 +955,11 @@ pub enum DebugCommand {
     /// Save a capture of all the documents state.
     SaveCapture(PathBuf, CaptureBits),
     /// Load a capture of all the documents state.
-    #[serde(skip_serializing, skip_deserializing)]
-    LoadCapture(PathBuf, Sender<CapturedDocument>),
+    LoadCapture(PathBuf, Option<(u32, u32)>, Sender<CapturedDocument>),
+    /// Start capturing a sequence of scene/frame changes.
+    StartCaptureSequence(PathBuf, CaptureBits),
+    /// Stop capturing a sequence of scene/frame changes.
+    StopCaptureSequence,
     /// Clear cached resources, forcing them to be re-uploaded from templates.
     ClearCaches(ClearCache),
     /// Enable/disable native compositor usage
@@ -993,22 +983,18 @@ pub enum DebugCommand {
 }
 
 /// Message sent by the `RenderApi` to the render backend thread.
-#[derive(Clone, Deserialize, Serialize)]
 pub enum ApiMsg {
     /// Add/remove/update images and fonts.
     UpdateResources(Vec<ResourceUpdate>),
     /// Gets the glyph dimensions
-    #[serde(skip_serializing, skip_deserializing)]
     GetGlyphDimensions(
         font::FontInstanceKey,
         Vec<font::GlyphIndex>,
         Sender<Vec<Option<font::GlyphDimensions>>>,
     ),
     /// Gets the glyph indices from a string
-    #[serde(skip_serializing, skip_deserializing)]
     GetGlyphIndices(font::FontKey, String, Sender<Vec<Option<u32>>>),
     /// Adds a new document namespace.
-    #[serde(skip_serializing, skip_deserializing)]
     CloneApi(Sender<IdNamespace>),
     /// Adds a new document namespace.
     CloneApiByClient(IdNamespace),
@@ -1027,7 +1013,6 @@ pub enum ApiMsg {
     /// Flush from the caches anything that isn't necessary, to free some memory.
     MemoryPressure,
     /// Collects a memory report.
-    #[serde(skip_serializing, skip_deserializing)]
     ReportMemory(Sender<Box<MemoryReport>>),
     /// Change debugging options.
     DebugCommand(DebugCommand),
@@ -1039,10 +1024,8 @@ pub enum ApiMsg {
     /// Block until a round-trip to the scene builder thread has completed. This
     /// ensures that any transactions (including ones deferred to the scene
     /// builder thread) have been processed.
-    #[serde(skip_serializing, skip_deserializing)]
     FlushSceneBuilder(Sender<()>),
     /// Shut the WebRender instance down.
-    #[serde(skip_serializing, skip_deserializing)]
     ShutDown(Option<Sender<()>>),
 }
 
@@ -1198,7 +1181,7 @@ macro_rules! declare_interning_memory_report {
     ( $( $name:ident: $ty:ident, )+ ) => {
         ///
         #[repr(C)]
-        #[derive(AddAssign, Clone, Debug, Default, Deserialize, Serialize)]
+        #[derive(AddAssign, Clone, Debug, Default)]
         pub struct InternerSubReport {
             $(
                 ///
@@ -1213,7 +1196,7 @@ enumerate_interners!(declare_interning_memory_report);
 /// Memory report for interning-related data structures.
 /// cbindgen:derive-eq=false
 #[repr(C)]
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default)]
 pub struct InterningMemoryReport {
     ///
     pub interners: InternerSubReport,
@@ -1232,7 +1215,7 @@ impl ::std::ops::AddAssign for InterningMemoryReport {
 /// cbindgen:derive-eq=false
 #[repr(C)]
 #[allow(missing_docs)]
-#[derive(AddAssign, Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(AddAssign, Clone, Debug, Default)]
 pub struct MemoryReport {
     //
     // CPU Memory.
@@ -1272,7 +1255,7 @@ struct ResourceId(pub u32);
 
 /// An opaque pointer-sized value.
 #[repr(C)]
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 pub struct ExternalEvent {
     raw: usize,
 }
@@ -1291,7 +1274,7 @@ impl ExternalEvent {
 }
 
 /// Describe whether or not scrolling should be clamped by the content bounds.
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 pub enum ScrollClamping {
     ///
     ToContentBounds,
@@ -1734,13 +1717,13 @@ impl RenderApi {
     }
 
     /// Load a capture of the current frame state for debugging.
-    pub fn load_capture(&self, path: PathBuf) -> Vec<CapturedDocument> {
+    pub fn load_capture(&self, path: PathBuf, ids: Option<(u32, u32)>) -> Vec<CapturedDocument> {
         // First flush the scene builder otherwise async scenes might clobber
         // the capture we are about to load.
         self.flush_scene_builder();
 
         let (tx, rx) = channel();
-        let msg = ApiMsg::DebugCommand(DebugCommand::LoadCapture(path, tx));
+        let msg = ApiMsg::DebugCommand(DebugCommand::LoadCapture(path, ids, tx));
         self.send_message(msg);
 
         let mut documents = Vec::new();
@@ -1748,6 +1731,18 @@ impl RenderApi {
             documents.push(captured_doc);
         }
         documents
+    }
+
+    /// Start capturing a sequence of frames.
+    pub fn start_capture_sequence(&self, path: PathBuf, bits: CaptureBits) {
+        let msg = ApiMsg::DebugCommand(DebugCommand::StartCaptureSequence(path, bits));
+        self.send_message(msg);
+    }
+
+    /// Stop capturing sequences of frames.
+    pub fn stop_capture_sequence(&self) {
+        let msg = ApiMsg::DebugCommand(DebugCommand::StopCaptureSequence);
+        self.send_message(msg);
     }
 
     /// Update the state of builtin debugging facilities.
@@ -1779,7 +1774,7 @@ impl HitTesterRequest {
 }
 
 ///
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone)]
 pub struct ScrollNodeState {
     ///
     pub id: di::ExternalScrollId,
@@ -1788,7 +1783,7 @@ pub struct ScrollNodeState {
 }
 
 ///
-#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
+#[derive(Clone, Copy, Debug)]
 pub enum ScrollLocation {
     /// Scroll by a certain amount.
     Delta(LayoutVector2D),
@@ -1799,7 +1794,7 @@ pub enum ScrollLocation {
 }
 
 /// Represents a zoom factor.
-#[derive(Clone, Copy, Serialize, Deserialize, Debug)]
+#[derive(Clone, Copy, Debug)]
 pub struct ZoomFactor(f32);
 
 impl ZoomFactor {
@@ -1972,7 +1967,7 @@ pub trait RenderNotifier: Send {
 
 /// A stage of the rendering pipeline.
 #[repr(u32)]
-#[derive(Copy, Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Checkpoint {
     ///
     SceneBuilt,

@@ -1605,7 +1605,7 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(nsGlobalWindowOuter)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mDocShell)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBrowsingContext)
 
-  tmp->TraverseHostObjectURIs(cb);
+  tmp->TraverseObjectsInGlobal(cb);
 
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChromeFields.mBrowserDOMWindow)
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
@@ -1649,7 +1649,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(nsGlobalWindowOuter)
     tmp->mBrowsingContext = nullptr;
   }
 
-  tmp->UnlinkHostObjectURIs();
+  tmp->UnlinkObjectsInGlobal();
 
   if (tmp->IsChromeWindow()) {
     NS_IMPL_CYCLE_COLLECTION_UNLINK(mChromeFields.mBrowserDOMWindow)
@@ -1908,9 +1908,7 @@ bool nsGlobalWindowOuter::ComputeIsSecureContext(Document* aDocument,
     }
   }
 
-  bool isTrustworthyOrigin = false;
-  principal->GetIsOriginPotentiallyTrustworthy(&isTrustworthyOrigin);
-  return isTrustworthyOrigin;
+  return principal->GetIsOriginPotentiallyTrustworthy();
 }
 
 static bool InitializeLegacyNetscapeObject(JSContext* aCx,
@@ -2004,12 +2002,10 @@ static JS::RealmCreationOptions& SelectZone(
  * Return the native global and an nsISupports 'holder' that can be used
  * to manage the lifetime of it.
  */
-static nsresult CreateNativeGlobalForInner(JSContext* aCx,
-                                           nsGlobalWindowInner* aNewInner,
-                                           nsIURI* aURI,
-                                           nsIPrincipal* aPrincipal,
-                                           JS::MutableHandle<JSObject*> aGlobal,
-                                           bool aIsSecureContext) {
+static nsresult CreateNativeGlobalForInner(
+    JSContext* aCx, nsGlobalWindowInner* aNewInner, nsIURI* aURI,
+    nsIPrincipal* aPrincipal, JS::MutableHandle<JSObject*> aGlobal,
+    bool aIsSecureContext, bool aDefineSharedArrayBufferConstructor) {
   MOZ_ASSERT(aCx);
   MOZ_ASSERT(aNewInner);
   MOZ_ASSERT(aPrincipal);
@@ -2020,10 +2016,20 @@ static nsresult CreateNativeGlobalForInner(JSContext* aCx,
   MOZ_RELEASE_ASSERT(!nsEP, "DOMWindow with nsEP is not supported");
 
   JS::RealmOptions options;
+  JS::RealmCreationOptions& creationOptions = options.creationOptions();
 
-  SelectZone(aCx, aPrincipal, aNewInner, options.creationOptions());
+  SelectZone(aCx, aPrincipal, aNewInner, creationOptions);
 
-  options.creationOptions().setSecureContext(aIsSecureContext);
+  creationOptions.setSecureContext(aIsSecureContext);
+
+  // Define the SharedArrayBuffer global constructor property only if shared
+  // memory may be used and structured-cloned (e.g. through postMessage).
+  //
+  // When the global constructor property isn't defined, the SharedArrayBuffer
+  // constructor can still be reached through Web Assembly.  Omitting the global
+  // property just prevents feature-tests from being misled.  See bug 1624266.
+  creationOptions.setDefineSharedArrayBufferConstructor(
+      aDefineSharedArrayBufferConstructor);
 
   xpc::InitGlobalObjectOptions(options, aPrincipal);
 
@@ -2209,12 +2215,28 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
       mInnerWindow = nullptr;
 
       mCreatingInnerWindow = true;
+
+      // The SharedArrayBuffer global constructor property should not be present
+      // in a fresh global object when shared memory objects aren't allowed
+      // (because COOP/COEP support isn't enabled, or because COOP/COEP don't
+      // act to isolate this page to a separate process).
+      //
+      // We set this value to |true| to replicate pre-existing behavior.  In the
+      // future, bug 1624266 will assign the correct COOP/COEP-respecting value
+      // here.  When that change is made, corresponding code for workers in
+      // WorkerPrivate.cpp must also be updated.  (Ideally both paint and audio
+      // worklets -- bug 1630876 and bug 1630877 -- would be fixed at the same
+      // time, but fixing them has lower priorit because they're not shipping
+      // yet.)
+      bool aDefineSharedArrayBufferConstructor = true;
+
       // Every script context we are initialized with must create a
       // new global.
       rv = CreateNativeGlobalForInner(
           cx, newInnerWindow, aDocument->GetDocumentURI(),
           aDocument->NodePrincipal(), &newInnerGlobal,
-          ComputeIsSecureContext(aDocument));
+          ComputeIsSecureContext(aDocument),
+          aDefineSharedArrayBufferConstructor);
       NS_ASSERTION(
           NS_SUCCEEDED(rv) && newInnerGlobal &&
               newInnerWindow->GetWrapperPreserveColor() == newInnerGlobal,
@@ -2491,6 +2513,10 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
     newInnerWindow->GetWindowGlobalChild()
         ->WindowContext()
         ->SetCookieJarSettings(Some(cookieJarSettings));
+
+    newInnerWindow->GetWindowGlobalChild()
+        ->WindowContext()
+        ->SetHasStoragePermission(aDocument->HasStoragePermission());
   }
 
   mHasStorageAccess = false;
@@ -2524,10 +2550,6 @@ nsresult nsGlobalWindowOuter::SetNewDocument(Document* aDocument,
           ContentBlocking::ShouldAllowAccessFor(newInnerWindow, uri, nullptr);
     }
   }
-
-  newInnerWindow->GetWindowGlobalChild()
-      ->WindowContext()
-      ->SetHasStoragePermission(aDocument->HasStoragePermission());
 
   return NS_OK;
 }
@@ -3165,12 +3187,12 @@ nsPIDOMWindowOuter* nsGlobalWindowOuter::GetInProcessScriptableParent() {
     return nullptr;
   }
 
-  if (mDocShell->GetIsMozBrowser()) {
-    return this;
+  if (BrowsingContext* parentBC = GetBrowsingContext()->GetParent()) {
+    if (nsCOMPtr<nsPIDOMWindowOuter> parent = parentBC->GetDOMWindow()) {
+      return parent;
+    }
   }
-
-  nsCOMPtr<nsPIDOMWindowOuter> parent = GetInProcessParent();
-  return parent;
+  return this;
 }
 
 /**
@@ -3341,13 +3363,6 @@ already_AddRefed<nsPIDOMWindowOuter> nsGlobalWindowOuter::GetContentInternal(
   if (bc) {
     nsCOMPtr<nsPIDOMWindowOuter> content(bc->GetDOMWindow());
     return content.forget();
-  }
-
-  // If we're contained in <iframe mozbrowser>, then GetContent is the same as
-  // window.top.
-  if (mDocShell && mDocShell->GetIsInMozBrowser()) {
-    nsCOMPtr<nsPIDOMWindowOuter> domWindow(GetInProcessScriptableTop());
-    return domWindow.forget();
   }
 
   nsCOMPtr<nsIDocShellTreeItem> primaryContent;
@@ -4942,9 +4957,10 @@ bool nsGlobalWindowOuter::AlertOrConfirm(bool aAlert, const nsAString& aMessage,
     return false;
   }
 
-  // Always allow tab modal prompts for alert and confirm.
+  // Always allow content modal prompts for alert and confirm.
   if (nsCOMPtr<nsIWritablePropertyBag2> promptBag = do_QueryInterface(prompt)) {
-    promptBag->SetPropertyAsBool(NS_LITERAL_STRING("allowTabModal"), true);
+    promptBag->SetPropertyAsUint32(NS_LITERAL_STRING("modalType"),
+                                   nsIPrompt::MODAL_TYPE_CONTENT);
   }
 
   bool result = false;
@@ -5031,9 +5047,10 @@ void nsGlobalWindowOuter::PromptOuter(const nsAString& aMessage,
     return;
   }
 
-  // Always allow tab modal prompts for prompt.
+  // Always allow content modal prompts for prompt.
   if (nsCOMPtr<nsIWritablePropertyBag2> promptBag = do_QueryInterface(prompt)) {
-    promptBag->SetPropertyAsBool(NS_LITERAL_STRING("allowTabModal"), true);
+    promptBag->SetPropertyAsUint32(NS_LITERAL_STRING("modalType"),
+                                   nsIPrompt::MODAL_TYPE_CONTENT);
   }
 
   // Pass in the default value, if any.
@@ -5383,19 +5400,6 @@ void nsGlobalWindowOuter::ResizeToOuter(int32_t aWidth, int32_t aHeight,
                                         CallerType aCallerType,
                                         ErrorResult& aError) {
   /*
-   * If caller is a browser-element then dispatch a resize event to
-   * the embedder.
-   */
-  if (mDocShell && mDocShell->GetIsMozBrowser()) {
-    CSSIntSize size(aWidth, aHeight);
-    if (!DispatchResizeEvent(size)) {
-      // The embedder chose to prevent the default action for this
-      // event, so let's not resize this window after all...
-      return;
-    }
-  }
-
-  /*
    * If caller is not chrome and the user has not explicitly exempted the site,
    * prevent window.resizeTo() by exiting early
    */
@@ -5423,26 +5427,6 @@ void nsGlobalWindowOuter::ResizeToOuter(int32_t aWidth, int32_t aHeight,
 void nsGlobalWindowOuter::ResizeByOuter(int32_t aWidthDif, int32_t aHeightDif,
                                         CallerType aCallerType,
                                         ErrorResult& aError) {
-  /*
-   * If caller is a browser-element then dispatch a resize event to
-   * parent.
-   */
-  if (mDocShell && mDocShell->GetIsMozBrowser()) {
-    CSSIntSize size;
-    if (NS_FAILED(GetInnerSize(size))) {
-      return;
-    }
-
-    size.width += aWidthDif;
-    size.height += aHeightDif;
-
-    if (!DispatchResizeEvent(size)) {
-      // The embedder chose to prevent the default action for this
-      // event, so let's not resize this window after all...
-      return;
-    }
-  }
-
   /*
    * If caller is not chrome and the user has not explicitly exempted the site,
    * prevent window.resizeBy() by exiting early
@@ -6110,8 +6094,7 @@ bool nsGlobalWindowOuter::CanClose() {
 }
 
 void nsGlobalWindowOuter::CloseOuter(bool aTrustedCaller) {
-  if (!mDocShell || IsInModalState() ||
-      (IsFrame() && !mDocShell->GetIsMozBrowser())) {
+  if (!mDocShell || IsInModalState() || IsFrame()) {
     // window.close() is called on a frame in a frameset, on a window
     // that's already closed, or on a window for which there's
     // currently a modal dialog open. Ignore such calls.

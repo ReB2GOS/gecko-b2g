@@ -723,13 +723,17 @@ void ChunkPool::Iter::next() {
   current_ = current_->info.next;
 }
 
+inline bool GCRuntime::tooManyEmptyChunks(const AutoLockGC& lock) {
+  return emptyChunks(lock).count() > tunables.minEmptyChunkCount(lock);
+}
+
 ChunkPool GCRuntime::expireEmptyChunkPool(const AutoLockGC& lock) {
   MOZ_ASSERT(emptyChunks(lock).verify());
   MOZ_ASSERT(tunables.minEmptyChunkCount(lock) <=
              tunables.maxEmptyChunkCount());
 
   ChunkPool expired;
-  while (emptyChunks(lock).count() > tunables.minEmptyChunkCount(lock)) {
+  while (tooManyEmptyChunks(lock)) {
     Chunk* chunk = emptyChunks(lock).pop();
     prepareToFreeChunk(chunk->info);
     expired.push(chunk);
@@ -1471,8 +1475,6 @@ uint32_t GCRuntime::getParameter(JSGCParamKey key, const AutoLockGC& lock) {
       return tunables.gcZoneAllocThresholdBase() / 1024 / 1024;
     case JSGC_NON_INCREMENTAL_FACTOR:
       return uint32_t(tunables.nonIncrementalFactor() * 100);
-    case JSGC_AVOID_INTERRUPT_FACTOR:
-      return uint32_t(tunables.avoidInterruptFactor() * 100);
     case JSGC_MIN_EMPTY_CHUNK_COUNT:
       return tunables.minEmptyChunkCount(lock);
     case JSGC_MAX_EMPTY_CHUNK_COUNT:
@@ -3022,13 +3024,6 @@ TriggerResult GCRuntime::checkHeapThreshold(const HeapSize& heapSize,
     return TriggerResult{TriggerKind::NonIncremental, usedBytes, niThreshold};
   }
 
-  // Use a higher threshold if starting a GC would reset an in-progress
-  // collection.
-  if (isIncrementalGCInProgress() && !isCollecting &&
-      usedBytes < thresholdBytes * tunables.avoidInterruptFactor()) {
-    return TriggerResult{TriggerKind::None, 0, 0};
-  }
-
   // Start or continue an in progress incremental GC.
   return TriggerResult{TriggerKind::Incremental, usedBytes, thresholdBytes};
 }
@@ -3163,14 +3158,19 @@ void GCRuntime::startDecommit() {
     // explicit Vector containing the Chunks we want to visit.
     MOZ_ASSERT(availableChunks(lock).verify());
     availableChunks(lock).sort();
-    for (ChunkPool::Iter iter(availableChunks(lock)); !iter.done();
-         iter.next()) {
-      if (!toDecommit.append(iter.get())) {
+    for (ChunkPool::Iter chunk(availableChunks(lock)); !chunk.done();
+         chunk.next()) {
+      if (chunk->info.numArenasFreeCommitted && !toDecommit.append(chunk)) {
         // The OOM handler does a full, immediate decommit.
         return onOutOfMallocMemory(lock);
       }
     }
+
+    if (toDecommit.empty() && !tooManyEmptyChunks(lock)) {
+      return;
+    }
   }
+
   decommitTask.setChunksToScan(toDecommit);
 
   if (sweepOnBackgroundThread) {
@@ -3214,9 +3214,7 @@ void js::gc::BackgroundDecommitTask::run() {
   }
 }
 
-void GCRuntime::sweepBackgroundThings(ZoneList& zones, LifoAlloc& freeBlocks) {
-  freeBlocks.freeAll();
-
+void GCRuntime::sweepBackgroundThings(ZoneList& zones) {
   if (zones.isEmpty()) {
     return;
   }
@@ -3311,11 +3309,9 @@ void GCRuntime::sweepFromBackgroundThread(AutoLockHelperThreadState& lock) {
   do {
     ZoneList zones;
     zones.transferFrom(backgroundSweepZones.ref());
-    LifoAlloc freeLifoAlloc(JSContext::TEMP_LIFO_ALLOC_PRIMARY_CHUNK_SIZE);
-    freeLifoAlloc.transferFrom(&lifoBlocksToFree.ref());
 
     AutoUnlockHelperThreadState unlock(lock);
-    sweepBackgroundThings(zones, freeLifoAlloc);
+    sweepBackgroundThings(zones);
 
     // The main thread may call queueZonesAndStartBackgroundSweep() while this
     // is running so we must check there is no more work after releasing the
@@ -3325,9 +3321,7 @@ void GCRuntime::sweepFromBackgroundThread(AutoLockHelperThreadState& lock) {
 
 void GCRuntime::waitBackgroundSweepEnd() {
   sweepTask.join();
-
-  // TODO: Improve assertion to work in incremental GC?
-  if (!isIncrementalGCInProgress()) {
+  if (state() != State::Sweep) {
     assertBackgroundSweepingFinished();
   }
 }

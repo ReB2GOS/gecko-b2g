@@ -64,6 +64,7 @@
 #include "vm/JSFunction.h"
 #include "vm/JSObject.h"
 #include "vm/Opcodes.h"
+#include "vm/PlainObject.h"  // js::PlainObject
 #include "vm/SelfHosting.h"
 #include "vm/Shape.h"
 #include "vm/SharedImmutableStringsCache.h"
@@ -874,9 +875,8 @@ ImmutableScriptData::ImmutableScriptData(uint32_t codeLength,
 }
 
 template <XDRMode mode>
-/* static */
-XDRResult ImmutableScriptData::XDR(XDRState<mode>* xdr,
-                                   UniquePtr<ImmutableScriptData>& isd) {
+static XDRResult XDRImmutableScriptData(XDRState<mode>* xdr,
+                                        UniquePtr<ImmutableScriptData>& isd) {
   uint32_t codeLength = 0;
   uint32_t noteLength = 0;
   uint32_t numResumeOffsets = 0;
@@ -945,18 +945,6 @@ XDRResult ImmutableScriptData::XDR(XDRState<mode>* xdr,
 
   return Ok();
 }
-
-template
-    /* static */
-    XDRResult
-    ImmutableScriptData::XDR(XDRState<XDR_ENCODE>* xdr,
-                             js::UniquePtr<ImmutableScriptData>& script);
-
-template
-    /* static */
-    XDRResult
-    ImmutableScriptData::XDR(XDRState<XDR_DECODE>* xdr,
-                             js::UniquePtr<ImmutableScriptData>& script);
 
 /* static */ size_t RuntimeScriptData::AllocationSize(uint32_t natoms) {
   size_t size = sizeof(RuntimeScriptData);
@@ -1031,7 +1019,7 @@ XDRResult RuntimeScriptData::XDR(XDRState<mode>* xdr, HandleScript script) {
     }
   }
 
-  MOZ_TRY(ImmutableScriptData::XDR<mode>(xdr, rsd->isd_));
+  MOZ_TRY(XDRImmutableScriptData<mode>(xdr, rsd->isd_));
 
   return Ok();
 }
@@ -4059,7 +4047,6 @@ void JSScript::relazify(JSRuntime* rt) {
   //
   // NOTE: Keep in sync with CheckFlagsOnDelazification.
   clearFlag(ImmutableFlags::HasNonSyntacticScope);
-  clearFlag(ImmutableFlags::FunctionHasExtraBodyVarScope);
   clearFlag(ImmutableFlags::NeedsFunctionEnvironmentObjects);
 
   // We should not still be in any side-tables for the debugger or
@@ -4190,7 +4177,9 @@ PrivateScriptData* PrivateScriptData::new_(JSContext* cx, uint32_t ngcthings) {
 bool PrivateScriptData::InitFromStencil(
     JSContext* cx, js::HandleScript script,
     const frontend::ScriptStencil& stencil) {
-  uint32_t ngcthings = stencil.ngcthings;
+  uint32_t ngcthings = stencil.gcThings.length();
+
+  MOZ_ASSERT(ngcthings <= INDEX_LIMIT);
 
   // Create and initialize PrivateScriptData
   if (!JSScript::createPrivateScriptData(cx, script, ngcthings)) {
@@ -4332,9 +4321,6 @@ bool JSScript::fullyInitFromStencil(JSContext* cx,
 
   /* The counts of indexed things must be checked during code generation. */
   MOZ_ASSERT(stencil.natoms <= INDEX_LIMIT);
-  MOZ_ASSERT(stencil.ngcthings <= INDEX_LIMIT);
-  MOZ_ASSERT(script->extent_.lineno == stencil.lineno);
-  MOZ_ASSERT(script->extent_.column == stencil.column);
 
   script->addToImmutableFlags(stencil.immutableFlags);
 

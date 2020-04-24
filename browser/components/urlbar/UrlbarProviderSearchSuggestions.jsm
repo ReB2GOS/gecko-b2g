@@ -120,6 +120,10 @@ class ProviderSearchSuggestions extends UrlbarProvider {
       return false;
     }
 
+    if (!queryContext.allowSearchSuggestions) {
+      return false;
+    }
+
     if (
       queryContext.isPrivate &&
       !UrlbarPrefs.get("browser.search.suggest.enabled.private")
@@ -163,23 +167,22 @@ class ProviderSearchSuggestions extends UrlbarProvider {
       return false;
     }
 
-    // The first token may be a whitelisted host.
+    // Disallow suggestions if only an origin is typed.
     if (
       queryContext.tokens.length == 1 &&
-      queryContext.tokens[0].type == UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN &&
-      Services.uriFixup.isDomainWhitelisted(queryContext.tokens[0].value, -1)
+      queryContext.tokens[0].type == UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN
     ) {
       return false;
     }
 
-    // Disallow fetching search suggestions for strings looking like URLs, or
-    // non-alphanumeric origins, to avoid disclosing information about networks
-    // or passwords.
+    // Disallow fetching search suggestions for strings containing tokens that
+    // look like URLs or non-alphanumeric origins, to avoid disclosing
+    // information about networks or passwords.
     return !queryContext.tokens.some(t => {
       return (
         t.type == UrlbarTokenizer.TYPE.POSSIBLE_URL ||
         (t.type == UrlbarTokenizer.TYPE.POSSIBLE_ORIGIN &&
-          !/^[a-z0-9-]+$/i.test(t.value))
+          !UrlbarTokenizer.REGEXP_SINGLE_WORD_HOST.test(t.value))
       );
     });
   }
@@ -251,9 +254,6 @@ class ProviderSearchSuggestions extends UrlbarProvider {
     if (leadingRestrictionToken === UrlbarTokenizer.RESTRICT.SEARCH) {
       query = substringAfter(query, leadingRestrictionToken).trim();
     }
-
-    // Limit the string sent for search suggestions to a maximum length.
-    query = query.substr(0, UrlbarPrefs.get("maxCharsForSearchSuggestions"));
 
     // Find our search engine. It may have already been set with an alias.
     let engine;

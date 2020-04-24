@@ -1014,17 +1014,17 @@ Search.prototype = {
       }
     }
 
-    // Add the first heuristic result, if any.  Set _addingHeuristicFirstMatch
+    // Add the first heuristic result, if any.  Set _addingHeuristicResult
     // to true so that when the result is added, "heuristic" can be included in
     // its style.
-    this._addingHeuristicFirstMatch = true;
+    this._addingHeuristicResult = true;
     let hasHeuristic = await this._matchFirstHeuristicResult(conn);
-    this._addingHeuristicFirstMatch = false;
+    this._addingHeuristicResult = false;
     if (!this.pending) {
       return;
     }
 
-    // We sleep a little between adding the heuristicFirstMatch and matching
+    // We sleep a little between adding the heuristic result and matching
     // any other searches so we aren't kicking off potentially expensive
     // searches on every keystroke.
     // Though, if there's no heuristic result, we start searching immediately,
@@ -1420,9 +1420,9 @@ Search.prototype = {
             UrlbarPrefs.get("keyword.enabled") &&
             !looksLikeUrl(this._originalSearchString, true)
           ) {
-            this._addingHeuristicFirstMatch = false;
+            this._addingHeuristicResult = false;
             await this._matchCurrentSearchEngine();
-            this._addingHeuristicFirstMatch = true;
+            this._addingHeuristicResult = true;
           }
         }
         return true;
@@ -1448,7 +1448,11 @@ Search.prototype = {
     // Otherwise treat it as a possible URL.  When the string has only one slash
     // at the end, we still treat it as an URL.
     let query, params;
-    if (UrlbarTokenizer.looksLikeOrigin(this._searchString)) {
+    if (
+      UrlbarTokenizer.looksLikeOrigin(this._searchString, {
+        ignoreWhitelist: true,
+      })
+    ) {
       [query, params] = this._originQuery;
     } else {
       [query, params] = this._urlQuery;
@@ -1550,7 +1554,9 @@ Search.prototype = {
       searchStr = searchStr.slice(0, -1);
     }
     // If the search string looks more like a url than a domain, bail out.
-    if (!UrlbarTokenizer.looksLikeOrigin(searchStr)) {
+    if (
+      !UrlbarTokenizer.looksLikeOrigin(searchStr, { ignoreWhitelist: true })
+    ) {
       return false;
     }
 
@@ -1935,7 +1941,7 @@ Search.prototype = {
       throw new Error("Frecency not provided");
     }
 
-    if (this._addingHeuristicFirstMatch) {
+    if (this._addingHeuristicResult) {
       match.type = UrlbarUtils.RESULT_GROUP.HEURISTIC;
     } else if (typeof match.type != "string") {
       match.type = UrlbarUtils.RESULT_GROUP.GENERAL;
@@ -1954,7 +1960,7 @@ Search.prototype = {
       this._maybeRestyleSearchMatch(match);
     }
 
-    if (this._addingHeuristicFirstMatch) {
+    if (this._addingHeuristicResult) {
       match.style += " heuristic";
     }
 

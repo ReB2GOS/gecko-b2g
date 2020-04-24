@@ -1,4 +1,5 @@
 /*! THIS FILE IS AUTO-GENERATED: webpack.system-addon.config.js */
+var NewtabRenderUtils =
 /******/ (function(modules) { // webpackBootstrap
 /******/ 	// The module cache
 /******/ 	var installedModules = {};
@@ -91,7 +92,10 @@
 
 "use strict";
 __webpack_require__.r(__webpack_exports__);
-/* WEBPACK VAR INJECTION */(function(global) {/* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
+/* WEBPACK VAR INJECTION */(function(global) {/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "NewTab", function() { return NewTab; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "renderWithoutState", function() { return renderWithoutState; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "renderCache", function() { return renderCache; });
+/* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
 /* harmony import */ var content_src_components_Base_Base__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(3);
 /* harmony import */ var content_src_lib_detect_user_session_start__WEBPACK_IMPORTED_MODULE_2__ = __webpack_require__(73);
 /* harmony import */ var content_src_lib_init_store__WEBPACK_IMPORTED_MODULE_3__ = __webpack_require__(6);
@@ -113,42 +117,58 @@ __webpack_require__.r(__webpack_exports__);
 
 
 
-const store = Object(content_src_lib_init_store__WEBPACK_IMPORTED_MODULE_3__["initStore"])(common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_7__["reducers"]);
-new content_src_lib_detect_user_session_start__WEBPACK_IMPORTED_MODULE_2__["DetectUserSessionStart"](store).sendEventOrAddListener(); // If this document has already gone into the background by the time we've reached
-// here, we can deprioritize requesting the initial state until the event loop
-// frees up. If, however, the visibility changes, we then send the request.
-
-let didRequest = false;
-let requestIdleCallbackId = 0;
-
-function doRequest() {
-  if (!didRequest) {
-    if (requestIdleCallbackId) {
-      cancelIdleCallback(requestIdleCallbackId);
-    }
-
-    didRequest = true;
-    store.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].AlsoToMain({
-      type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].NEW_TAB_STATE_REQUEST
-    }));
-  }
-}
-
-if (document.hidden) {
-  requestIdleCallbackId = requestIdleCallback(doRequest);
-  addEventListener("visibilitychange", doRequest, {
-    once: true
-  });
-} else {
-  doRequest();
-}
-
-react_dom__WEBPACK_IMPORTED_MODULE_6___default.a.hydrate(react__WEBPACK_IMPORTED_MODULE_5___default.a.createElement(react_redux__WEBPACK_IMPORTED_MODULE_4__["Provider"], {
+const NewTab = ({
+  store,
+  isFirstrun
+}) => react__WEBPACK_IMPORTED_MODULE_5___default.a.createElement(react_redux__WEBPACK_IMPORTED_MODULE_4__["Provider"], {
   store: store
 }, react__WEBPACK_IMPORTED_MODULE_5___default.a.createElement(content_src_components_Base_Base__WEBPACK_IMPORTED_MODULE_1__["Base"], {
-  isFirstrun: global.document.location.href === "about:welcome",
-  strings: global.gActivityStreamStrings
-})), document.getElementById("root"));
+  isFirstrun: isFirstrun
+}));
+function renderWithoutState() {
+  const store = Object(content_src_lib_init_store__WEBPACK_IMPORTED_MODULE_3__["initStore"])(common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_7__["reducers"]);
+  new content_src_lib_detect_user_session_start__WEBPACK_IMPORTED_MODULE_2__["DetectUserSessionStart"](store).sendEventOrAddListener(); // If this document has already gone into the background by the time we've reached
+  // here, we can deprioritize requesting the initial state until the event loop
+  // frees up. If, however, the visibility changes, we then send the request.
+
+  let didRequest = false;
+  let requestIdleCallbackId = 0;
+
+  function doRequest() {
+    if (!didRequest) {
+      if (requestIdleCallbackId) {
+        cancelIdleCallback(requestIdleCallbackId);
+      }
+
+      didRequest = true;
+      store.dispatch(common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionCreators"].AlsoToMain({
+        type: common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__["actionTypes"].NEW_TAB_STATE_REQUEST
+      }));
+    }
+  }
+
+  if (document.hidden) {
+    requestIdleCallbackId = requestIdleCallback(doRequest);
+    addEventListener("visibilitychange", doRequest, {
+      once: true
+    });
+  } else {
+    doRequest();
+  }
+
+  react_dom__WEBPACK_IMPORTED_MODULE_6___default.a.hydrate(react__WEBPACK_IMPORTED_MODULE_5___default.a.createElement(NewTab, {
+    store: store,
+    isFirstrun: global.document.location.href === "about:welcome"
+  }), document.getElementById("root"));
+}
+function renderCache(initialState) {
+  const store = Object(content_src_lib_init_store__WEBPACK_IMPORTED_MODULE_3__["initStore"])(common_Reducers_jsm__WEBPACK_IMPORTED_MODULE_7__["reducers"], initialState);
+  new content_src_lib_detect_user_session_start__WEBPACK_IMPORTED_MODULE_2__["DetectUserSessionStart"](store).sendEventOrAddListener();
+  react_dom__WEBPACK_IMPORTED_MODULE_6___default.a.hydrate(react__WEBPACK_IMPORTED_MODULE_5___default.a.createElement(NewTab, {
+    store: store,
+    isFirstrun: global.document.location.href === "about:welcome"
+  }), document.getElementById("root"));
+}
 /* WEBPACK VAR INJECTION */}.call(this, __webpack_require__(1)))
 
 /***/ }),
@@ -2718,7 +2738,7 @@ const rehydrationMiddleware = ({
   getState.didRehydrate = false;
   getState.didRequestInitialState = false;
   return next => action => {
-    if (getState.didRehydrate) {
+    if (getState.didRehydrate || window.__FROM_STARTUP_CACHE__) {
       return next(action);
     }
 
@@ -2792,8 +2812,8 @@ const queueEarlyMessageMiddleware = ({
  * @return {object}          A redux store
  */
 
-function initStore(reducers) {
-  const store = Object(redux__WEBPACK_IMPORTED_MODULE_1__["createStore"])(mergeStateReducer(Object(redux__WEBPACK_IMPORTED_MODULE_1__["combineReducers"])(reducers)), global.RPMAddMessageListener && Object(redux__WEBPACK_IMPORTED_MODULE_1__["applyMiddleware"])(rehydrationMiddleware, queueEarlyMessageMiddleware, messageMiddleware));
+function initStore(reducers, initialState) {
+  const store = Object(redux__WEBPACK_IMPORTED_MODULE_1__["createStore"])(mergeStateReducer(Object(redux__WEBPACK_IMPORTED_MODULE_1__["combineReducers"])(reducers)), initialState, global.RPMAddMessageListener && Object(redux__WEBPACK_IMPORTED_MODULE_1__["applyMiddleware"])(rehydrationMiddleware, queueEarlyMessageMiddleware, messageMiddleware));
 
   if (global.RPMAddMessageListener) {
     global.RPMAddMessageListener(INCOMING_MESSAGE_NAME, msg => {
@@ -4662,6 +4682,7 @@ CardGrid.defaultProps = {
 __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "DefaultMeta", function() { return DefaultMeta; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "CTAButtonMeta", function() { return CTAButtonMeta; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "_DSCard", function() { return _DSCard; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "DSCard", function() { return DSCard; });
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "PlaceholderDSCard", function() { return PlaceholderDSCard; });
 /* harmony import */ var common_Actions_jsm__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(2);
@@ -4673,9 +4694,12 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _SafeAnchor_SafeAnchor__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(36);
 /* harmony import */ var _DSContextFooter_DSContextFooter_jsx__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(37);
 /* harmony import */ var _FluentOrText_FluentOrText_jsx__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(40);
+/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_8__ = __webpack_require__(23);
+/* harmony import */ var react_redux__WEBPACK_IMPORTED_MODULE_8___default = /*#__PURE__*/__webpack_require__.n(react_redux__WEBPACK_IMPORTED_MODULE_8__);
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
+
 
 
 
@@ -4750,7 +4774,7 @@ const CTAButtonMeta = ({
   display_engagement_labels: display_engagement_labels,
   engagement: engagement
 }));
-class DSCard extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureComponent {
+class _DSCard extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureComponent {
   constructor(props) {
     super(props);
     this.onLinkClick = this.onLinkClick.bind(this);
@@ -4761,7 +4785,34 @@ class DSCard extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureComponent 
 
     this.state = {
       isSeen: false
-    };
+    }; // If this is for the about:home startup cache, then we always want
+    // to render the DSCard, regardless of whether or not its been seen.
+
+    if (props.App.isForStartupCache) {
+      this.state.isSeen = true;
+    } // We want to choose the optimal thumbnail for the underlying DSImage, but
+    // want to do it in a performant way. The breakpoints used in the
+    // CSS of the page are, unfortuntely, not easy to retrieve without
+    // causing a style flush. To avoid that, we hardcode them here.
+    //
+    // The values chosen here were the dimensions of the card thumbnails as
+    // computed by getBoundingClientRect() for each type of viewport width
+    // across both high-density and normal-density displays.
+
+
+    this.dsImageSizes = [{
+      mediaMatcher: "(min-width: 1122px)",
+      width: 296,
+      height: 148
+    }, {
+      mediaMatcher: "(min-width: 866px)",
+      width: 218,
+      height: 109
+    }, {
+      mediaMatcher: "(max-width: 610px)",
+      width: 202,
+      height: 101
+    }];
   }
 
   onLinkClick(event) {
@@ -4858,7 +4909,8 @@ class DSCard extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureComponent 
     }, react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(_DSImage_DSImage_jsx__WEBPACK_IMPORTED_MODULE_1__["DSImage"], {
       extraClassNames: "img",
       source: this.props.image_src,
-      rawSource: this.props.raw_image_src
+      rawSource: this.props.raw_image_src,
+      sizes: this.dsImageSizes
     })), isButtonCTA ? react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(CTAButtonMeta, {
       display_engagement_labels: this.props.display_engagement_labels,
       source: this.props.source,
@@ -4906,10 +4958,13 @@ class DSCard extends react__WEBPACK_IMPORTED_MODULE_4___default.a.PureComponent 
   }
 
 }
-DSCard.defaultProps = {
+_DSCard.defaultProps = {
   windowObj: window // Added to support unit tests
 
 };
+const DSCard = Object(react_redux__WEBPACK_IMPORTED_MODULE_8__["connect"])(state => ({
+  App: state.App
+}))(_DSCard);
 const PlaceholderDSCard = props => react__WEBPACK_IMPORTED_MODULE_4___default.a.createElement(DSCard, {
   placeholder: true
 });
@@ -4923,49 +4978,25 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "DSImage", function() { return DSImage; });
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(9);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
-/* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(12);
-/* harmony import */ var react_dom__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(react_dom__WEBPACK_IMPORTED_MODULE_1__);
 /* This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this file,
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
-
 
 class DSImage extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponent {
   constructor(props) {
     super(props);
     this.onOptimizedImageError = this.onOptimizedImageError.bind(this);
     this.onNonOptimizedImageError = this.onNonOptimizedImageError.bind(this);
+    this.onLoad = this.onLoad.bind(this);
     this.state = {
-      isSeen: false,
+      isLoaded: false,
       optimizedImageFailed: false,
       useTransition: false
     };
   }
 
-  onSeen(entries) {
-    if (this.state) {
-      const entry = entries.find(e => e.isIntersecting);
-
-      if (entry) {
-        if (this.props.optimize) {
-          this.setState({
-            // Thumbor doesn't handle subpixels and just errors out, so rounding...
-            containerWidth: Math.round(entry.boundingClientRect.width),
-            containerHeight: Math.round(entry.boundingClientRect.height)
-          });
-        }
-
-        this.setState({
-          isSeen: true
-        }); // Stop observing since element has been seen
-
-        this.observer.unobserve(react_dom__WEBPACK_IMPORTED_MODULE_1___default.a.findDOMNode(this));
-      }
-    }
-  }
-
   onIdleCallback() {
-    if (!this.state.isSeen) {
+    if (!this.state.isLoaded) {
       this.setState({
         useTransition: true
       });
@@ -4981,21 +5012,9 @@ class DSImage extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponent
 
   componentDidMount() {
     this.idleCallbackId = this.props.windowObj.requestIdleCallback(this.onIdleCallback.bind(this));
-    this.observer = new IntersectionObserver(this.onSeen.bind(this), {
-      // Assume an image will be eventually seen if it is within
-      // half the average Desktop vertical screen size:
-      // http://gs.statcounter.com/screen-resolution-stats/desktop/north-america
-      rootMargin: `540px`
-    });
-    this.observer.observe(react_dom__WEBPACK_IMPORTED_MODULE_1___default.a.findDOMNode(this));
   }
 
   componentWillUnmount() {
-    // Remove observer on unmount
-    if (this.observer) {
-      this.observer.unobserve(react_dom__WEBPACK_IMPORTED_MODULE_1___default.a.findDOMNode(this));
-    }
-
     if (this.idleCallbackId) {
       this.props.windowObj.cancelIdleCallback(this.idleCallbackId);
     }
@@ -5005,31 +5024,52 @@ class DSImage extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponent
     let classNames = `ds-image
       ${this.props.extraClassNames ? ` ${this.props.extraClassNames}` : ``}
       ${this.state && this.state.useTransition ? ` use-transition` : ``}
-      ${this.state && this.state.isSeen ? ` loaded` : ``}
+      ${this.state && this.state.isLoaded ? ` loaded` : ``}
     `;
     let img;
 
-    if (this.state && this.state.isSeen) {
+    if (this.state) {
       if (this.props.optimize && this.props.rawSource && !this.state.optimizedImageFailed) {
-        let source;
-        let source2x;
+        let baseSource = this.props.rawSource;
+        let sizeRules = [];
+        let srcSetRules = [];
 
-        if (this.state && this.state.containerWidth) {
-          let baseSource = this.props.rawSource;
-          source = this.reformatImageURL(baseSource, this.state.containerWidth, this.state.containerHeight);
-          source2x = this.reformatImageURL(baseSource, this.state.containerWidth * 2, this.state.containerHeight * 2);
-          img = react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("img", {
-            alt: this.props.alt_text,
-            crossOrigin: "anonymous",
-            onError: this.onOptimizedImageError,
-            src: source,
-            srcSet: `${source2x} 2x`
-          });
+        for (let rule of this.props.sizes) {
+          let {
+            mediaMatcher,
+            width,
+            height
+          } = rule;
+          let sizeRule = `${mediaMatcher} ${width}px`;
+          sizeRules.push(sizeRule);
+          let srcSetRule = `${this.reformatImageURL(baseSource, width, height)} ${width}w`;
+          let srcSetRule2x = `${this.reformatImageURL(baseSource, width * 2, height * 2)} ${width * 2}w`;
+          srcSetRules.push(srcSetRule);
+          srcSetRules.push(srcSetRule2x);
         }
-      } else if (!this.state.nonOptimizedImageFailed) {
+
+        if (this.props.sizes.length) {
+          // We have to supply a fallback in the very unlikely event that none of
+          // the media queries match. The smallest dimension was chosen arbitrarily.
+          sizeRules.push(`${this.props.sizes[this.props.sizes.length - 1].width}px`);
+        }
+
         img = react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("img", {
+          loading: "lazy",
           alt: this.props.alt_text,
           crossOrigin: "anonymous",
+          onLoad: this.onLoad,
+          onError: this.onOptimizedImageError,
+          sizes: sizeRules.join(","),
+          src: baseSource,
+          srcSet: srcSetRules.join(",")
+        });
+      } else if (!this.state.nonOptimizedImageFailed) {
+        img = react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("img", {
+          loading: "lazy",
+          alt: this.props.alt_text,
+          crossOrigin: "anonymous",
+          onLoad: this.onLoad,
           onError: this.onNonOptimizedImageError,
           src: this.props.source
         });
@@ -5059,6 +5099,12 @@ class DSImage extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponent
     });
   }
 
+  onLoad() {
+    this.setState({
+      isLoaded: true
+    });
+  }
+
 }
 DSImage.defaultProps = {
   source: null,
@@ -5070,8 +5116,9 @@ DSImage.defaultProps = {
   optimize: true,
   // Measure parent container to request exact sizes
   alt_text: null,
-  windowObj: window // Added to support unit tests
-
+  windowObj: window,
+  // Added to support unit tests
+  sizes: []
 };
 
 /***/ }),

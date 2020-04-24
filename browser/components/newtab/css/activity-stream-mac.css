@@ -185,7 +185,7 @@ body {
   .icon.icon-new-window-private {
     background-image: url("chrome://browser/skin/privateBrowsing.svg"); }
   .icon.icon-settings {
-    background-image: url("chrome://browser/skin/settings.svg"); }
+    background-image: url("chrome://global/skin/icons/settings.svg"); }
   .icon.icon-pin {
     background-image: url("../data/content/assets/glyph-pin-16.svg"); }
     .icon.icon-pin:dir(rtl) {
@@ -1035,11 +1035,14 @@ main {
     justify-content: center;
     margin-bottom: 49px; }
     .search-wrapper .logo-and-wordmark .logo {
-      background: url("chrome://branding/content/icon128.png") no-repeat center center;
+      background: url("chrome://branding/content/about-logo.png") no-repeat center;
       background-size: 96px;
       display: inline-block;
       height: 96px;
       width: 96px; }
+      @media (min-resolution: 2x) {
+        .search-wrapper .logo-and-wordmark .logo {
+          background-image: url("chrome://branding/content/about-logo@2x.png"); } }
     .search-wrapper .logo-and-wordmark .wordmark {
       background: url("chrome://branding/content/firefox-wordmark.svg") no-repeat center center;
       background-size: 172px;
@@ -3219,7 +3222,7 @@ main {
   .ds-privacy-modal .modal-link.modal-link-privacy::before {
     background-image: url("../data/content/assets/glyph-info-16.svg"); }
   .ds-privacy-modal .modal-link.modal-link-manage::before {
-    background-image: url("chrome://browser/skin/settings.svg"); }
+    background-image: url("chrome://global/skin/icons/settings.svg"); }
 
 .ds-privacy-modal p {
   line-height: 24px; }

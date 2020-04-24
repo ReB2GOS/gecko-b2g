@@ -1297,7 +1297,7 @@ interface nsIDOMWindowUtils : nsISupports {
   /**
    * Is the window is in a modal state? [See enterModalState()]
    */
-  [noscript] boolean isInModalState();
+  boolean isInModalState();
 
   /**
    * Request set internal desktopMode flag change.
@@ -1505,6 +1505,11 @@ interface nsIDOMWindowUtils : nsISupports {
    * Get the action hint of the currently focused html input, if any.
    */
   readonly attribute AString focusedActionHint;
+
+  /**
+   * Get the inputmode of the currently focused editing host, if any.
+   */
+  readonly attribute AString focusedInputMode;
 
   /**
    * Find the view ID for a given element. This is the reverse of
@@ -1939,6 +1944,14 @@ interface nsIDOMWindowUtils : nsISupports {
    * save them to a folder relative to the current working directory.
    */
   void wrCapture();
+
+  /**
+   * Start capturing the contents of the current WebRender frame and
+   * save them to a folder relative to the current working directory,
+   * as well as any frames generated from this point onward. If called
+   * again, it will stop capturing.
+   */
+  void wrToggleCaptureSequence();
 
   /**
    * Toggle recording of composition on and off.

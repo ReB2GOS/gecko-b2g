@@ -81,8 +81,8 @@
 #include "mozilla/ipc/PParentToChildStreamChild.h"
 #include "mozilla/intl/LocaleService.h"
 #include "mozilla/ipc/TestShellChild.h"
+// Needed for NewJavaScriptChild and ReleaseJavaScriptChild
 #include "mozilla/jsipc/CrossProcessObjectWrappers.h"
-#include "mozilla/jsipc/PJavaScript.h"
 #include "mozilla/layers/APZChild.h"
 #include "mozilla/layers/CompositorManagerChild.h"
 #include "mozilla/layers/ContentProcessController.h"
@@ -228,6 +228,7 @@
 #if defined(MOZ_WIDGET_GONK)
 #  include "nsVolume.h"
 #  include "nsVolumeService.h"
+#  include "SpeakerManagerService.h"
 #endif
 
 #ifdef XP_WIN
@@ -333,7 +334,6 @@ using namespace mozilla::intl;
 using namespace mozilla::layers;
 using namespace mozilla::layout;
 using namespace mozilla::net;
-using namespace mozilla::jsipc;
 using namespace mozilla::widget;
 #if defined(MOZ_WIDGET_GONK)
 using namespace mozilla::system;
@@ -993,7 +993,6 @@ nsresult ContentChild::ProvideWindowCommon(
     PopupIPCTabContext context;
     openerTabId = aTabOpener->GetTabId();
     context.opener() = openerTabId;
-    context.isMozBrowserElement() = aTabOpener->IsMozBrowserElement();
     ipcContext = MakeUnique<IPCTabContext>(context);
   } else {
     // It's possible to not have a BrowserChild opener in the case
@@ -1031,12 +1030,11 @@ nsresult ContentChild::ProvideWindowCommon(
   MutableTabContext newTabContext;
   if (aTabOpener) {
     newTabContext.SetTabContext(
-        aTabOpener->IsMozBrowserElement(), aTabOpener->ChromeOuterWindowID(),
-        aTabOpener->ShowFocusRings(), browsingContext->OriginAttributesRef(),
-        aTabOpener->PresentationURL(), aTabOpener->MaxTouchPoints());
+        aTabOpener->ChromeOuterWindowID(), aTabOpener->ShowFocusRings(),
+        browsingContext->OriginAttributesRef(), aTabOpener->PresentationURL(),
+        aTabOpener->MaxTouchPoints());
   } else {
     newTabContext.SetTabContext(
-        /* isMozBrowserElement */ false,
         /* chromeOuterWindowID */ 0,
         /* showFocusRings */ UIStateChangeType_NoChange,
         browsingContext->OriginAttributesRef(),
@@ -1670,6 +1668,23 @@ mozilla::ipc::IPCResult ContentChild::RecvAudioDefaultDeviceChange() {
   return IPC_OK();
 }
 
+mozilla::ipc::IPCResult ContentChild::RecvSpeakerManagerNotify() {
+#ifdef MOZ_WIDGET_GONK
+  // Only notify the process which has the SpeakerManager instance.
+  RefPtr<SpeakerManagerService> service =
+      SpeakerManagerService::GetSpeakerManagerService();
+  if (service) {
+    service->Notify();
+  }
+  return IPC_OK();
+#else
+  NS_WARNING(
+      "ContentChild::RecvSpeakerManagerNotify shouldn't be called when "
+      "MOZ_WIDGET_GONK is not defined");
+  return IPC_FAIL_NO_REASON(this);
+#endif
+}
+
 mozilla::ipc::IPCResult ContentChild::RecvReinitRenderingForDeviceReset() {
   gfxPlatform::GetPlatform()->CompositorUpdated();
 
@@ -1797,11 +1812,11 @@ static void FirstIdle(void) {
 mozilla::jsipc::PJavaScriptChild* ContentChild::AllocPJavaScriptChild() {
   MOZ_ASSERT(ManagedPJavaScriptChild().IsEmpty());
 
-  return NewJavaScriptChild();
+  return jsipc::NewJavaScriptChild();
 }
 
 bool ContentChild::DeallocPJavaScriptChild(PJavaScriptChild* aChild) {
-  ReleaseJavaScriptChild(aChild);
+  jsipc::ReleaseJavaScriptChild(aChild);
   return true;
 }
 
@@ -2062,14 +2077,6 @@ PTestShellChild* ContentChild::AllocPTestShellChild() {
 bool ContentChild::DeallocPTestShellChild(PTestShellChild* shell) {
   delete shell;
   return true;
-}
-
-jsipc::CPOWManager* ContentChild::GetCPOWManager() {
-  if (PJavaScriptChild* c =
-          LoneManagedOrNullAsserts(ManagedPJavaScriptChild())) {
-    return CPOWManagerFor(c);
-  }
-  return CPOWManagerFor(SendPJavaScriptConstructor());
 }
 
 mozilla::ipc::IPCResult ContentChild::RecvPTestShellConstructor(
@@ -2646,20 +2653,18 @@ mozilla::ipc::IPCResult ContentChild::RecvLoadProcessScript(
 }
 
 mozilla::ipc::IPCResult ContentChild::RecvAsyncMessage(
-    const nsString& aMsg, nsTArray<CpowEntry>&& aCpows,
-    const IPC::Principal& aPrincipal, const ClonedMessageData& aData) {
+    const nsString& aMsg, const ClonedMessageData& aData) {
   AUTO_PROFILER_LABEL_DYNAMIC_LOSSY_NSSTRING("ContentChild::RecvAsyncMessage",
                                              OTHER, aMsg);
   MMPrinter::Print("ContentChild::RecvAsyncMessage", aMsg, aData);
 
-  CrossProcessCpowHolder cpows(this, aCpows);
   RefPtr<nsFrameMessageManager> cpm =
       nsFrameMessageManager::GetChildProcessManager();
   if (cpm) {
     StructuredCloneData data;
     ipc::UnpackClonedMessageDataForChild(aData, data);
-    cpm->ReceiveMessage(cpm, nullptr, aMsg, false, &data, &cpows, aPrincipal,
-                        nullptr, IgnoreErrors());
+    cpm->ReceiveMessage(cpm, nullptr, aMsg, false, &data, nullptr,
+                        IgnoreErrors());
   }
   return IPC_OK();
 }
@@ -2944,7 +2949,7 @@ mozilla::ipc::IPCResult ContentChild::RecvInitJSWindowActorInfos(
 }
 
 mozilla::ipc::IPCResult ContentChild::RecvUnregisterJSWindowActor(
-    const nsString& aName) {
+    const nsCString& aName) {
   RefPtr<JSWindowActorService> actSvc = JSWindowActorService::GetSingleton();
   actSvc->UnregisterWindowActor(aName);
   return IPC_OK();

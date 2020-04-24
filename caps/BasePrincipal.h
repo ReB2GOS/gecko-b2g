@@ -133,6 +133,7 @@ class BasePrincipal : public nsJSPrincipals {
   NS_IMETHOD GetHostPort(nsACString& aRes) override;
   NS_IMETHOD GetHost(nsACString& aRes) override;
   NS_IMETHOD GetPrepath(nsACString& aResult) override;
+  NS_IMETHOD GetFilePath(nsACString& aResult) override;
   NS_IMETHOD GetOriginSuffix(nsACString& aOriginSuffix) final;
   NS_IMETHOD GetIsIpAddress(bool* aIsIpAddress) override;
   NS_IMETHOD GetIsOnion(bool* aIsOnion) override;
@@ -157,6 +158,9 @@ class BasePrincipal : public nsJSPrincipals {
   NS_IMETHOD GetIsScriptAllowedByPolicy(
       bool* aIsScriptAllowedByPolicy) override;
   NS_IMETHOD GetStorageOriginKey(nsACString& aOriginKey) override;
+
+  NS_IMETHOD GetNextSubDomainPrincipal(
+      nsIPrincipal** aNextSubDomainPrincipal) override;
   nsresult ToJSON(nsACString& aJSON);
   static already_AddRefed<BasePrincipal> FromJSON(const nsACString& aJSON);
   // Method populates a passed Json::Value with serializable fields

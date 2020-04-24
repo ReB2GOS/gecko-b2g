@@ -2598,6 +2598,7 @@ class WrappedFunction : public TempObject {
   bool isClassConstructor_ : 1;
   bool isSelfHostedBuiltin_ : 1;
   bool isExtended_ : 1;
+  bool hasJitInfo_ : 1;
 
  public:
   explicit WrappedFunction(JSFunction* fun);
@@ -2613,11 +2614,11 @@ class WrappedFunction : public TempObject {
   bool isClassConstructor() const { return isClassConstructor_; }
   bool isSelfHostedBuiltin() const { return isSelfHostedBuiltin_; }
   bool isExtended() const { return isExtended_; }
+  bool hasJitInfo() const { return hasJitInfo_; }
 
   // fun->native() and fun->jitInfo() can safely be called off-thread: these
   // fields never change.
   JSNative native() const { return fun_->native(); }
-  bool hasJitInfo() const { return fun_->hasJitInfo(); }
   const JSJitInfo* jitInfo() const { return fun_->jitInfo(); }
 
   JSFunction* rawJSFunction() const { return fun_; }
@@ -10474,6 +10475,8 @@ class MGuardToClass : public MUnaryInstruction,
   NAMED_OPERANDS((0, object))
 
   const JSClass* getClass() const { return class_; }
+
+  MDefinition* foldsTo(TempAllocator& alloc) override;
   AliasSet getAliasSet() const override { return AliasSet::None(); }
   bool congruentTo(const MDefinition* ins) const override {
     if (!ins->isGuardToClass()) {

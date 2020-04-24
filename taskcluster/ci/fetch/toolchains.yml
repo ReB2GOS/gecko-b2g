@@ -392,8 +392,8 @@ android-rs-glue:
     description: android-rs-glue source code
     fetch:
         type: git
-        repo: https://github.com/rust-windowing/android-rs-glue
-        revision: e3ac6edea5814e1faca0c31ea8fac6877cb929ea
+        repo: https://github.com/jamienicol/android-rs-glue
+        revision: 7a57ad320de79c74a57a8ce02b1dc69b1ea7332a
 
 clang-5.0:
     description: clang 5.0.2 source code
@@ -463,7 +463,7 @@ lucetc-source:
     fetch:
         type: git
         repo: https://github.com/PLSysSec/lucet_sandbox_compiler/
-        revision: 5e870faf6f95d79d11efc813e56370ad124bbed5
+        revision: a0a1ce981638109f1f76cd1eecf17a0436a20055
 
 dump-syms:
     description: dump_syms source code

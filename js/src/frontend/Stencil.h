@@ -17,37 +17,30 @@
 #include <stdlib.h>  // size_t
 
 #include "frontend/AbstractScopePtr.h"   // AbstractScopePtr, ScopeIndex
-#include "frontend/NameAnalysisTypes.h"  // {AtomVector, FunctionBoxVector}
+#include "frontend/NameAnalysisTypes.h"  // AtomVector
 #include "frontend/ObjLiteral.h"         // ObjLiteralCreationData
 #include "frontend/TypedIndex.h"         // TypedIndex
-#include "gc/AllocKind.h"                // gc::AllocKind
 #include "gc/Barrier.h"                  // HeapPtr, GCPtrAtom
 #include "gc/Rooting.h"  // HandleAtom, HandleModuleObject, HandleScriptSourceObject, MutableHandleScope
 #include "js/GCVariant.h"    // GC Support for mozilla::Variant
 #include "js/RegExpFlags.h"  // JS::RegExpFlags
 #include "js/RootingAPI.h"   // Handle
-#include "js/UniquePtr.h"    // UniquePtr
+#include "js/TypeDecls.h"    // JSContext,JSAtom,JSFunction
+#include "js/UniquePtr.h"    // js::UniquePtr
 #include "js/Utility.h"      // JS::FreePolicy, UniqueTwoByteChars
 #include "js/Vector.h"       // js::Vector
 #include "util/Text.h"       // DuplicateString
 #include "vm/BigIntType.h"   // ParseBigIntLiteral
 #include "vm/JSFunction.h"   // FunctionFlags
-#include "vm/JSScript.h"  // GeneratorKind, FunctionAsyncKind, ScopeNote, JSTryNote, FieldInitializers
-#include "vm/Runtime.h"  // ReportOutOfMemory
+#include "vm/JSScript.h"  // GeneratorKind, FunctionAsyncKind, FieldInitializers
+#include "vm/Runtime.h"   // ReportOutOfMemory
 #include "vm/Scope.h"  // BaseScopeData, FunctionScope, LexicalScope, VarScope, GlobalScope, EvalScope, ModuleScope
 #include "vm/ScopeKind.h"      // ScopeKind
 #include "vm/SharedStencil.h"  // ImmutableScriptFlags
 
-struct JSContext;
-class JSAtom;
-class JSFunction;
-class JSTracer;
+class JS_PUBLIC_API JSTracer;
 
-namespace js {
-
-class Shape;
-
-namespace frontend {
+namespace js::frontend {
 
 struct CompilationInfo;
 class FunctionBox;
@@ -81,13 +74,11 @@ struct LazyScriptCreationData {
   // This is traced by the functionbox which owns this LazyScriptCreationData
   Vector<FunctionIndex> innerFunctionIndexes;
   bool forceStrict = false;
-  bool strict = false;
 
   explicit LazyScriptCreationData(JSContext* cx) : innerFunctionIndexes(cx) {}
 
   bool init(JSContext* cx, const frontend::AtomVector& COB,
-            Vector<FunctionIndex>&& innerIndexes, bool isForceStrict,
-            bool isStrict) {
+            Vector<FunctionIndex>&& innerIndexes, bool isForceStrict) {
     // Check if we will overflow the `ngcthings` field later.
     mozilla::CheckedUint32 ngcthings =
         mozilla::CheckedUint32(COB.length()) +
@@ -98,7 +89,6 @@ struct LazyScriptCreationData {
     }
 
     forceStrict = isForceStrict;
-    strict = isStrict;
     innerFunctionIndexes = std::move(innerIndexes);
 
     if (!closedOverBindings.appendAll(COB)) {
@@ -136,13 +126,8 @@ struct FunctionCreationData {
   // when this copy constructor is run, it doesn't have any lazyScriptData.
   FunctionCreationData(const FunctionCreationData& data)
       : atom(data.atom),
-        kind(data.kind),
-        generatorKind(data.generatorKind),
-        asyncKind(data.asyncKind),
-        allocKind(data.allocKind),
         flags(data.flags),
-        isSelfHosting(data.isSelfHosting),
-        lazyScriptData(mozilla::Nothing()) {
+        immutableFlags(data.immutableFlags) {
     MOZ_RELEASE_ASSERT(!data.lazyScriptData);
   }
 
@@ -150,16 +135,11 @@ struct FunctionCreationData {
 
   // The Parser uses KeepAtoms to prevent GC from collecting atoms
   JSAtom* atom = nullptr;
-  FunctionSyntaxKind kind;  // can't field-initialize and forward declare
-  GeneratorKind generatorKind = GeneratorKind::NotGenerator;
-  FunctionAsyncKind asyncKind = FunctionAsyncKind::SyncFunction;
 
-  gc::AllocKind allocKind = gc::AllocKind::FUNCTION;
   FunctionFlags flags = {};
+  ImmutableScriptFlags immutableFlags = {};
 
-  bool isSelfHosting = false;
-
-  mozilla::Maybe<LazyScriptCreationData> lazyScriptData;
+  mozilla::Maybe<LazyScriptCreationData> lazyScriptData = {};
 
   HandleAtom getAtom(JSContext* cx) const;
 
@@ -437,32 +417,23 @@ class ScriptStencil {
   using ImmutableFlags = ImmutableScriptFlagsEnum;
 
  public:
-  js::UniquePtr<js::ImmutableScriptData> immutableScriptData = nullptr;
-
-  // See `BaseScript::{lineno_,column_}`.
-  unsigned lineno = 0;
-  unsigned column = 0;
-
-  // See `initAtomMap` method.
-  uint32_t natoms = 0;
-
-  // See `finishGCThings` method.
-  uint32_t ngcthings = 0;
-
-  // The flags that will be added to the script when initializing it.
-  ImmutableScriptFlags immutableFlags;
-
-  ScriptThingsVector gcThings;
-
-  // The function to link this script to.
+  // See `BaseScript::functionOrGlobal_`.
   mozilla::Maybe<FunctionIndex> functionIndex;
 
-  // (Only) Class-constructors should use this field.
-  mozilla::Maybe<FieldInitializers> fieldInitializers;
+  // See `BaseScript::immutableFlags_`.
+  ImmutableScriptFlags immutableFlags;
 
-  ScriptStencil(JSContext* cx,
-                UniquePtr<js::ImmutableScriptData> immutableScriptData)
-      : immutableScriptData(std::move(immutableScriptData)), gcThings(cx) {}
+  // See `finishGCThings` and `BaseScript::data_`.
+  mozilla::Maybe<FieldInitializers> fieldInitializers;
+  ScriptThingsVector gcThings;
+
+  // See `initAtomMap` and `BaseScript::sharedData_`.
+  uint32_t natoms = 0;
+  js::UniquePtr<js::ImmutableScriptData> immutableScriptData = nullptr;
+
+  // End of fields.
+
+  ScriptStencil(JSContext* cx) : gcThings(cx) {}
 
   bool isFunction() const {
     return immutableFlags.hasFlag(ImmutableFlags::IsFunction);
@@ -481,8 +452,7 @@ class ScriptStencil {
   virtual void finishInnerFunctions() const = 0;
 };
 
-} /* namespace frontend */
-} /* namespace js */
+} /* namespace js::frontend */
 
 namespace JS {
 template <>

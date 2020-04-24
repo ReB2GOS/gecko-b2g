@@ -28,6 +28,7 @@ class AutoClearTypeInferenceStateOnOOM;
 class AutoSweepObjectGroup;
 class CompilerConstraintList;
 class ObjectGroupRealm;
+class PlainObject;
 
 namespace gc {
 void MergeRealms(JS::Realm* source, JS::Realm* target);
@@ -47,12 +48,6 @@ enum NewObjectKind {
    * singleton and is allocated in the tenured heap.
    */
   SingletonObject,
-
-  /*
-   * CrossCompartmentWrappers use the common Proxy class, but are allowed
-   * to have nursery lifetime.
-   */
-  NurseryAllocatedProxy,
 
   /*
    * Objects which will not benefit from being allocated in the nursery

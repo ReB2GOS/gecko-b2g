@@ -515,6 +515,28 @@
       return popupAnchor;
     }
 
+    set suspendMediaWhenInactive(val) {
+      if (this.isRemoteBrowser) {
+        let { frameLoader } = this;
+        if (frameLoader && frameLoader.remoteTab) {
+          frameLoader.remoteTab.suspendMediaWhenInactive = val;
+        }
+      } else if (this.docShell) {
+        this.docShell.suspendMediaWhenInactive = val;
+      }
+    }
+
+    get suspendMediaWhenInactive() {
+      if (this.isRemoteBrowser) {
+        let { frameLoader } = this;
+        if (frameLoader && frameLoader.remoteTab) {
+          return frameLoader.remoteTab.suspendMediaWhenInactive;
+        }
+        return false;
+      }
+      return this.docShell && this.docShell.suspendMediaWhenInactive;
+    }
+
     set docShellIsActive(val) {
       if (this.isRemoteBrowser) {
         let { frameLoader } = this;
@@ -2189,7 +2211,25 @@
     }
 
     leaveModalState() {
-      this.sendMessageToActor("LeaveModalState", {}, "BrowserElement", "roots");
+      this.sendMessageToActor(
+        "LeaveModalState",
+        { forceLeave: true },
+        "BrowserElement",
+        "roots"
+      );
+    }
+
+    /**
+     * Can be called for a window with or without modal state.
+     * If the window is not in modal state, this is a no-op.
+     */
+    maybeLeaveModalState() {
+      this.sendMessageToActor(
+        "LeaveModalState",
+        { forceLeave: false },
+        "BrowserElement",
+        "roots"
+      );
     }
 
     getDevicePermissionOrigins(key) {
@@ -2205,6 +2245,23 @@
         this._devicePermissionOrigins.set(key, origins);
       }
       return origins;
+    }
+
+    get canPerformProcessSwitch() {
+      return this.getTabBrowser() != null;
+    }
+
+    performProcessSwitch(
+      remoteType,
+      redirectLoadSwitchId,
+      replaceBrowsingContext
+    ) {
+      return this.getTabBrowser().performProcessSwitch(
+        this,
+        remoteType,
+        redirectLoadSwitchId,
+        replaceBrowsingContext
+      );
     }
   }
 

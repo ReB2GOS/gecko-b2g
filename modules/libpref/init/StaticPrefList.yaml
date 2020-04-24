@@ -667,11 +667,7 @@
 
 - name: browser.cache.offline.storage.enable
   type: bool
-#ifdef EARLY_BETA_OR_EARLIER
   value: false
-#else
-  value: true
-#endif
   mirror: always
 
 - name: browser.cache.disk.enable
@@ -905,6 +901,18 @@
   value: @IS_NOT_MOZILLA_OFFICIAL@
   mirror: always
 
+# Image document's automatic image sizing.
+- name: browser.enable_automatic_image_resizing
+  type: bool
+  value: true
+  mirror: always
+
+# Image document's click-to-resize.
+- name: browser.enable_click_image_resizing
+  type: bool
+  value: @IS_NOT_ANDROID@
+  mirror: always
+
 # Render animations and videos as a solid color
 - name: browser.measurement.render_anims_and_video_solid
   type: RelaxedAtomicBool
@@ -1026,12 +1034,6 @@
   type: String
   value: "#551A8B"
   mirror: never
-
-# Enable xul error pages.
-- name: browser.xul.error_pages.enabled
-  type: bool
-  value: true
-  mirror: always
 
 #---------------------------------------------------------------------------
 # Prefs starting with "canvas."
@@ -1305,7 +1307,7 @@
 
 # Whether Alarm API is exposed to the web.
 - name: dom.alarm.enabled
-  type: bool
+  type: RelaxedAtomicBool
   value: false
   mirror: always
 
@@ -4096,7 +4098,7 @@
   value: 10
   mirror: once
 
-- name: gfx.vsync.use-waitforvblank
+- name: gfx.vsync.force-disable-waitforvblank
   type: RelaxedAtomicBool
   value: false
   mirror: always
@@ -4258,6 +4260,11 @@
 - name: gfx.webrender.enable-item-cache
   type: bool
   value: @IS_NIGHTLY_BUILD@
+  mirror: once
+
+- name: gfx.webrender.use-optimized-shaders
+  type: bool
+  value: true
   mirror: once
 
 #ifdef NIGHTLY_BUILD
@@ -4457,6 +4464,15 @@
 
 # Whether we attempt to downscale images during decoding.
 - name: image.downscale-during-decode.enabled
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
+# Whether to honor orientation metadata (such as JPEG EXIF tags) by default.
+# When this pref is enabled, all images used by the platform will be correctly
+# re-oriented, except for content images (HTML <img> and CSS generated content
+# images) with image-orientation:none.
+- name: image.honor-orientation-metadata
   type: RelaxedAtomicBool
   value: true
   mirror: always
@@ -5619,7 +5635,7 @@
 # Is the initial value for the image-orientation property 'from-image'?
 - name: layout.css.image-orientation.initial-from-image
   type: RelaxedAtomicBool
-  value: @IS_NIGHTLY_BUILD@
+  value: true
   mirror: always
   rust: true
 
@@ -6132,6 +6148,13 @@
   type: bool
   value: true
   mirror: always
+
+# Is support for :is() and :where() enabled?
+- name: layout.css.is-where-selectors.enabled
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+  rust: true
 
 # Whether the computed value of line-height: normal returns the `normal`
 # keyword rather than a pixel value based on the first available font.
@@ -7129,6 +7152,12 @@
 # setSinkId will be enabled in bug 1498512. Till then the
 # implementation will remain hidden behind this pref (Bug 1152401, Bug 934425).
 - name: media.setsinkid.enabled
+  type: bool
+  value: false
+  mirror: always
+
+# Turn on this pref can enable test-only events for media element.
+- name: media.testing-only-events
   type: bool
   value: false
   mirror: always
@@ -8205,6 +8234,17 @@
 - name: privacy.dynamic_firstparty.limitForeign
   type: RelaxedAtomicBool
   value: false
+  mirror: always
+
+#---------------------------------------------------------------------------
+# Prefs starting with "prompts."
+#---------------------------------------------------------------------------
+
+# The prompt type to use for the insecure form submit warning.
+# See nsIPromptService::MODAL_TYPE fields for possible values.
+- name: prompts.modalType.insecureFormSubmit
+  type: int32_t
+  value: 2
   mirror: always
 
 #---------------------------------------------------------------------------

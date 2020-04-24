@@ -291,21 +291,10 @@ toolbar .toolbarbutton-1:-moz-focusring {
   border-color: hsla(240,5%,5%,.40);
 }
 
-/* bookmarks menu button */
-
-#BMB_bookmarksPopup[side="top"],
-#BMB_bookmarksPopup[side="bottom"] {
-  margin-inline: -20px;
-}
-
-#BMB_bookmarksPopup[side="left"],
-#BMB_bookmarksPopup[side="right"] {
-  margin-block: -20px;
-}
-
 /* ::::: bookmark buttons ::::: */
 
 toolbarbutton.bookmark-item:not(.subviewbutton) {
+  max-width: 13em;
   margin: 0 2px;
   padding: 4px;
   -moz-appearance: none;
@@ -320,12 +309,6 @@ toolbarbutton.bookmark-item:not(.subviewbutton) {
   padding-block: 7px;
 }
 
-toolbarbutton.bookmark-item {
-  max-width: 13em;
-}
-
-/* Not in a :not(...) clause in the rule above to avoid unduly increasing
- * that rule's specificity. */
 #bookmarks-toolbar-placeholder {
   max-width: unset;
 }

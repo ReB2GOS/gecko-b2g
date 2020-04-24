@@ -1626,13 +1626,22 @@ struct SourceExtent {
         lineno(lineno),
         column(column) {}
 
+  static SourceExtent makeGlobalExtent(uint32_t len) {
+    return SourceExtent(0, len, 0, len, 1, 0);
+  }
+
+  static SourceExtent makeGlobalExtent(
+      uint32_t len, const JS::ReadOnlyCompileOptions& options) {
+    return SourceExtent(0, len, 0, len, options.lineno, options.column);
+  }
+
   uint32_t sourceStart = 0;
   uint32_t sourceEnd = 0;
   uint32_t toStringStart = 0;
   uint32_t toStringEnd = 0;
 
   // Line and column of |sourceStart_| position.
-  uint32_t lineno = 0;
+  uint32_t lineno = 1;
   uint32_t column = 0;  // Count of Code Points
 };
 
@@ -2126,11 +2135,11 @@ setterLevel:                                                                  \
     return offsetof(BaseScript, sharedData_);
   }
   static size_t offsetOfImmutableFlags() {
-    static_assert(offsetof(ImmutableScriptFlags, flags_) == 0,
-                  "Required for JIT flag access");
+    static_assert(sizeof(ImmutableScriptFlags) == sizeof(uint32_t));
     return offsetof(BaseScript, immutableFlags_);
   }
   static constexpr size_t offsetOfMutableFlags() {
+    static_assert(sizeof(MutableScriptFlags) == sizeof(uint32_t));
     return offsetof(BaseScript, mutableFlags_);
   }
   static constexpr size_t offsetOfWarmUpData() {

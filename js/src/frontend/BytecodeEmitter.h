@@ -49,10 +49,10 @@
 #include "vm/Instrumentation.h"            // InstrumentationKind
 #include "vm/Iteration.h"                  // IteratorKind
 #include "vm/JSFunction.h"                 // JSFunction
-#include "vm/JSScript.h"     // JSScript, BaseScript, FieldInitializers
-#include "vm/Runtime.h"      // ReportOutOfMemory
-#include "vm/StringType.h"   // JSAtom
-#include "vm/TryNoteKind.h"  // TryNoteKind
+#include "vm/JSScript.h"      // JSScript, BaseScript, FieldInitializers
+#include "vm/Runtime.h"       // ReportOutOfMemory
+#include "vm/StencilEnums.h"  // TryNoteKind
+#include "vm/StringType.h"    // JSAtom
 
 namespace js {
 namespace frontend {
@@ -107,10 +107,6 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
   BCEParserHandle* parser = nullptr;
 
   CompilationInfo& compilationInfo;
-
-  // First line and column, for JSScript::fullyInitFromStencil.
-  unsigned firstLine = 0;
-  unsigned firstColumn = 0;
 
   uint32_t maxFixedSlots = 0; /* maximum number of fixed frame slots so far */
 
@@ -175,7 +171,7 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
  private:
   // Internal constructor, for delegation use only.
   BytecodeEmitter(BytecodeEmitter* parent, SharedContext* sc,
-                  JS::Handle<JSScript*> script, uint32_t line, uint32_t column,
+                  JS::Handle<JSScript*> script,
                   CompilationInfo& compilationInfo, EmitterMode emitterMode);
 
   void initFromBodyPosition(TokenPos bodyPosition);
@@ -192,23 +188,22 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
  public:
   BytecodeEmitter(BytecodeEmitter* parent, BCEParserHandle* handle,
                   SharedContext* sc, JS::Handle<JSScript*> script,
-                  uint32_t line, uint32_t column,
+
                   CompilationInfo& compilationInfo,
                   EmitterMode emitterMode = Normal);
 
   BytecodeEmitter(BytecodeEmitter* parent, const EitherParser& parser,
                   SharedContext* sc, JS::Handle<JSScript*> script,
-                  uint32_t line, uint32_t column,
                   CompilationInfo& compilationInfo,
                   EmitterMode emitterMode = Normal);
 
   template <typename Unit>
   BytecodeEmitter(BytecodeEmitter* parent,
                   Parser<FullParseHandler, Unit>* parser, SharedContext* sc,
-                  JS::Handle<JSScript*> script, uint32_t line, uint32_t column,
+                  JS::Handle<JSScript*> script,
                   CompilationInfo& compilationInfo,
                   EmitterMode emitterMode = Normal)
-      : BytecodeEmitter(parent, EitherParser(parser), sc, script, line, column,
+      : BytecodeEmitter(parent, EitherParser(parser), sc, script,
                         compilationInfo, emitterMode) {}
 
   MOZ_MUST_USE bool init();

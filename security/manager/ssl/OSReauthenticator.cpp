@@ -85,8 +85,10 @@ std::unique_ptr<char[]> GetUserTokenInfo() {
 static nsresult ReauthenticateUserWindows(const nsAString& aMessageText,
                                           const nsAString& aCaptionText,
                                           const WindowsHandle& hwndParent,
-                                          /* out */ bool& reauthenticated) {
+                                          /* out */ bool& reauthenticated,
+                                          /* out */ bool& isBlankPassword) {
   reauthenticated = false;
+  isBlankPassword = false;
 
   // Check if the user has a blank password before proceeding
   DWORD usernameLength = CREDUI_MAX_USERNAME_LENGTH + 1;
@@ -104,13 +106,13 @@ static nsresult ReauthenticateUserWindows(const nsAString& aMessageText,
         CloseHandle(logonUserHandle);
       }
       reauthenticated = true;
+      isBlankPassword = true;
       return NS_OK;
     }
   }
 
   // Is used in next iteration if the previous login failed.
   DWORD err = 0;
-  uint8_t numAttempts = 3;
   std::unique_ptr<char[]> userTokenInfo = GetUserTokenInfo();
 
   // CredUI prompt.
@@ -123,9 +125,7 @@ static nsresult ReauthenticateUserWindows(const nsAString& aMessageText,
   credui.pszCaptionText = captionText.get();
   credui.hbmBanner = nullptr;  // ignored
 
-  while (!reauthenticated && numAttempts > 0) {
-    --numAttempts;
-
+  while (!reauthenticated) {
     HANDLE lsa;
     // Get authentication handle for future user authentications.
     // https://docs.microsoft.com/en-us/windows/desktop/api/ntsecapi/nf-ntsecapi-lsaconnectuntrusted
@@ -200,9 +200,9 @@ static nsresult ReauthenticateUserWindows(const nsAString& aMessageText,
       MOZ_LOG(gCredentialManagerSecretLog, LogLevel::Debug,
               ("User logged in successfully."));
     } else {
-      MOZ_LOG(
-          gCredentialManagerSecretLog, LogLevel::Debug,
-          ("Login failed with %lx (%lx).", sts, LsaNtStatusToWinError(sts)));
+      err = LsaNtStatusToWinError(sts);
+      MOZ_LOG(gCredentialManagerSecretLog, LogLevel::Debug,
+              ("Login failed with %lx (%lx).", sts, err));
       continue;
     }
 
@@ -222,6 +222,8 @@ static nsresult ReauthenticateUserWindows(const nsAString& aMessageText,
               ("Login successfully (correct user)."));
       reauthenticated = true;
       break;
+    } else {
+      err = ERROR_LOGON_FAILURE;
     }
   }
   return NS_OK;
@@ -231,13 +233,15 @@ static nsresult ReauthenticateUserWindows(const nsAString& aMessageText,
 static nsresult ReauthenticateUser(const nsAString& prompt,
                                    const nsAString& caption,
                                    const WindowsHandle& hwndParent,
-                                   /* out */ bool& reauthenticated) {
+                                   /* out */ bool& reauthenticated,
+                                   /* out */ bool& isBlankPassword) {
   reauthenticated = false;
+  isBlankPassword = false;
 #if defined(XP_WIN)
-  return ReauthenticateUserWindows(prompt, caption, hwndParent,
-                                   reauthenticated);
+  return ReauthenticateUserWindows(prompt, caption, hwndParent, reauthenticated,
+                                   isBlankPassword);
 #elif defined(XP_MACOSX)
-  return ReauthenticateUserMacOS(prompt, reauthenticated);
+  return ReauthenticateUserMacOS(prompt, reauthenticated, isBlankPassword);
 #endif  // Reauthentication is not implemented for this platform.
   return NS_OK;
 }
@@ -248,15 +252,19 @@ static void BackgroundReauthenticateUser(RefPtr<Promise>& aPromise,
                                          const WindowsHandle& hwndParent) {
   nsAutoCString recovery;
   bool reauthenticated;
+  bool isBlankPassword;
   nsresult rv = ReauthenticateUser(aMessageText, aCaptionText, hwndParent,
-                                   reauthenticated);
+                                   reauthenticated, isBlankPassword);
+  nsTArray<bool> results(2);
+  results.AppendElement(reauthenticated);
+  results.AppendElement(isBlankPassword);
   nsCOMPtr<nsIRunnable> runnable(NS_NewRunnableFunction(
       "BackgroundReauthenticateUserResolve",
-      [rv, reauthenticated, aPromise = std::move(aPromise)]() {
+      [rv, results = std::move(results), aPromise = std::move(aPromise)]() {
         if (NS_FAILED(rv)) {
           aPromise->MaybeReject(rv);
         } else {
-          aPromise->MaybeResolve(reauthenticated);
+          aPromise->MaybeResolve(results);
         }
       }));
   NS_DispatchToMainThread(runnable.forget());

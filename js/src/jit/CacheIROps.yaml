@@ -19,6 +19,12 @@
 # If false, the op must be implemented in both BaselineCacheIRCompiler and
 # IonCacheIRCompiler.
 #
+# custom_writer (optional)
+# ========================
+# If true, the generated CacheIRWriter method will be private and has a trailing
+# '_'. This is useful for ops that need custom CacheIRWriter logic on top of the
+# generated code.
+#
 # operands
 # ========
 # List of operands. There are three kinds:
@@ -34,97 +40,105 @@
 # - Immediate (BoolImm, Int32Imm, JSOpImm, ...): a value baked directly into
 #   the bytecode stream. This is useful for bits of state that need to be
 #   available to all CacheIR compilers/transpilers.
+#
+# If there's an operand named 'result', the generated CacheIRWriter method will
+# return a new OperandId of this type.
 
 - name: GuardToObject
   shared: true
+  custom_writer: true
   operands:
-    val: ValId
+    input: ValId
 
 - name: GuardIsObjectOrNull
   shared: true
   operands:
-    val: ValId
+    input: ValId
 
 - name: GuardIsNullOrUndefined
   shared: true
   operands:
-    val: ValId
+    input: ValId
 
 - name: GuardIsNotNullOrUndefined
   shared: true
   operands:
-    val: ValId
+    input: ValId
 
 - name: GuardIsNull
   shared: true
   operands:
-    val: ValId
+    input: ValId
 
 - name: GuardIsUndefined
   shared: true
   operands:
-    val: ValId
+    input: ValId
 
 - name: GuardToBoolean
   shared: true
   operands:
-    val: ValId
+    input: ValId
     result: Int32Id
 
 - name: GuardToString
   shared: true
+  custom_writer: true
   operands:
-    val: ValId
+    input: ValId
 
 - name: GuardToSymbol
   shared: true
+  custom_writer: true
   operands:
-    val: ValId
+    input: ValId
 
 - name: GuardToBigInt
   shared: true
+  custom_writer: true
   operands:
-    val: ValId
+    input: ValId
 
 - name: GuardIsNumber
   shared: true
+  custom_writer: true
   operands:
-    val: ValId
+    input: ValId
 
 - name: GuardToInt32
   shared: true
   operands:
-    val: ValId
+    input: ValId
     result: Int32Id
 
 - name: GuardToInt32Index
   shared: true
   operands:
-    val: ValId
+    input: ValId
     result: Int32Id
 
 - name: GuardToTypedArrayIndex
   shared: true
   operands:
-    val: ValId
+    input: ValId
     result: Int32Id
 
 - name: GuardToInt32ModUint32
   shared: true
   operands:
-    val: ValId
+    input: ValId
     result: Int32Id
 
 - name: GuardToUint8Clamped
   shared: true
   operands:
-    val: ValId
+    input: ValId
     result: Int32Id
 
 - name: GuardType
   shared: true
   operands:
-    val: ValId
+    input: ValId
     type: ValueTypeImm
 
 - name: GuardShape
@@ -157,7 +171,7 @@
   shared: false
   operands:
     obj: ObjId
-    clasp: RawWordField
+    clasp: RawPointerField
 
 # Add a reference to a global in the compartment to keep it alive.
 - name: GuardCompartment
@@ -165,7 +179,7 @@
   operands:
     obj: ObjId
     global: ObjectField
-    compartment: RawWordField
+    compartment: RawPointerField
 
 - name: GuardIsExtensible
   shared: true
@@ -186,7 +200,7 @@
   shared: false
   operands:
     obj: ObjId
-    handler: RawWordField
+    handler: RawPointerField
 
 - name: GuardNotDOMProxy
   shared: true
@@ -203,7 +217,7 @@
   shared: false
   operands:
     str: StrId
-    expected: StringField
+    expected: AtomField
 
 - name: GuardSpecificSymbol
   shared: false
@@ -267,7 +281,7 @@
   operands:
     obj: ObjId
     iter: ObjectField
-    enumeratorsAddr: RawWordField
+    enumeratorsAddr: RawPointerField
     result: ObjId
 
 - name: GuardHasGetterSetter
@@ -314,14 +328,14 @@
   shared: true
   operands:
     obj: ObjId
-    hasShapeWrapper: BoolImm
+    hasExpando: BoolImm
     shapeWrapper: ObjectField
 
-# Guard rhs[slot] == prototypeObject.
+# Guard obj[slot] == proto.
 - name: GuardFunctionPrototype
   shared: true
   operands:
-    rhs: ObjId
+    obj: ObjId
     proto: ObjId
     slot: RawWordField
 
@@ -393,12 +407,14 @@
 
 - name: LoadArgumentFixedSlot
   shared: false
+  custom_writer: true
   operands:
     result: ValId
     slotIndex: ByteImm
 
 - name: LoadArgumentDynamicSlot
   shared: false
+  custom_writer: true
   operands:
     result: ValId
     argc: Int32Id
@@ -414,7 +430,7 @@
   shared: true
   operands:
     obj: ObjId
-    name: StringField
+    name: PropertyNameField
     handleMissing: BoolImm
 
 - name: MegamorphicLoadSlotByValueResult
@@ -428,7 +444,7 @@
   shared: true
   operands:
     obj: ObjId
-    name: StringField
+    name: PropertyNameField
     rhs: ValId
     needsTypeBarrier: BoolImm
 
@@ -458,7 +474,7 @@
   shared: false
   operands:
     obj: ObjId
-    expandoAndGeneration: RawWordField
+    expandoAndGeneration: RawPointerField
     generation: DOMExpandoGenerationField
     result: ValId
 
@@ -496,7 +512,7 @@
     rhs: ValId
     changeGroup: BoolImm
     newGroup: GroupField
-    newShape): ShapeField
+    newShape: ShapeField
 
 - name: AddAndStoreDynamicSlot
   shared: false
@@ -506,7 +522,7 @@
     rhs: ValId
     changeGroup: BoolImm
     newGroup: GroupField
-    newShape): ShapeField
+    newShape: ShapeField
 
 - name: AllocateAndStoreDynamicSlot
   shared: false
@@ -516,7 +532,7 @@
     rhs: ValId
     changeGroup: BoolImm
     newGroup: GroupField
-    newShape): ShapeField
+    newShape: ShapeField
     numNewSlots: RawWordField
 
 - name: StoreTypedObjectReferenceProperty
@@ -535,7 +551,7 @@
     offset: RawWordField
     layout: TypedThingLayoutImm
     type: ScalarTypeImm
-    rhs: ValId
+    rhs: RawId
 
 - name: StoreDenseElement
   shared: false
@@ -570,7 +586,7 @@
     layout: TypedThingLayoutImm
     elementType: ScalarTypeImm
     index: Int32Id
-    rhs: AnyId
+    rhs: RawId
     handleOOB: BoolImm
 
 - name: CallNativeSetter
@@ -599,8 +615,8 @@
   shared: false
   operands:
     obj: ObjId
-    rhs: ValId
     id: IdField
+    rhs: ValId
     strict: BoolImm
 
 - name: CallProxySetByValue
@@ -646,30 +662,33 @@
 
 - name: CallNativeFunction
   shared: false
+  custom_writer: true
   operands:
     callee: ObjId
     argc: Int32Id
     flags: CallFlagsImm
 #ifdef JS_SIMULATOR
-    rawTarget: RawWordField
+    target: RawPointerField
 #else
     ignoresReturnValue: BoolImm
 #endif
 
 - name: CallClassHook
   shared: false
+  custom_writer: true
   operands:
     callee: ObjId
     argc: Int32Id
     flags: CallFlagsImm
-    target: RawWordField
+    target: RawPointerField
 
 # Meta ops generate no code, but contain data for BaselineInspector.
 - name: MetaTwoByte
   shared: true
+  custom_writer: true
   operands:
     kind: MetaTwoByteKindImm
-    offset: FieldOffset
+    functionObject: ObjectField
     templateObject: ObjectField
 
 - name: LoadFixedSlotResult
@@ -822,7 +841,7 @@
   operands:
     val: ValId
     getter: ObjectField
-    samerealm: BoolImm
+    sameRealm: BoolImm
 
 - name: CallNativeGetterResult
   shared: false
@@ -1145,7 +1164,7 @@
 - name: LoadBigIntTruthyResult
   shared: true
   operands:
-    bi: BigIntId
+    bigInt: BigIntId
 
 - name: LoadValueResult
   shared: false
@@ -1179,92 +1198,92 @@
 - name: CompareStringResult
   shared: false
   operands:
+    op: JSOpImm
     lhs: StrId
     rhs: StrId
-    op: JSOpImm
 
 - name: CompareObjectResult
   shared: true
   operands:
+    op: JSOpImm
     lhs: ObjId
     rhs: ObjId
-    op: JSOpImm
 
 - name: CompareSymbolResult
   shared: true
   operands:
+    op: JSOpImm
     lhs: SymId
     rhs: SymId
-    op: JSOpImm
 
 - name: CompareInt32Result
   shared: true
   operands:
+    op: JSOpImm
     lhs: Int32Id
     rhs: Int32Id
-    op: JSOpImm
 
 - name: CompareDoubleResult
   shared: true
   operands:
+    op: JSOpImm
     lhs: NumId
     rhs: NumId
-    op: JSOpImm
 
 - name: CompareBigIntResult
   shared: true
   operands:
+    op: JSOpImm
     lhs: BigIntId
     rhs: BigIntId
-    op: JSOpImm
 
 - name: CompareBigIntInt32Result
   shared: true
   operands:
+    op: JSOpImm
     lhs: BigIntId
     rhs: Int32Id
-    op: JSOpImm
 
 - name: CompareInt32BigIntResult
   shared: true
   operands:
+    op: JSOpImm
     lhs: Int32Id
     rhs: BigIntId
-    op: JSOpImm
 
 - name: CompareBigIntNumberResult
   shared: true
   operands:
+    op: JSOpImm
     lhs: BigIntId
     rhs: NumId
-    op: JSOpImm
 
 - name: CompareNumberBigIntResult
   shared: true
   operands:
+    op: JSOpImm
     lhs: NumId
     rhs: BigIntId
-    op: JSOpImm
 
 - name: CompareBigIntStringResult
   shared: true
   operands:
+    op: JSOpImm
     lhs: BigIntId
     rhs: StrId
-    op: JSOpImm
 
 - name: CompareStringBigIntResult
   shared: true
   operands:
+    op: JSOpImm
     lhs: StrId
     rhs: BigIntId
-    op: JSOpImm
 
 - name: CompareObjectUndefinedNullResult
   shared: true
   operands:
-    obj: ObjId
     op: JSOpImm
+    obj: ObjId
 
 - name: CallPrintString
   shared: true

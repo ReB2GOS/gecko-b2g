@@ -243,9 +243,6 @@ pref("browser.download.forbid_open_with", false);
 // WebAlarms
 pref("dom.alarm.enabled", false);
 
-// Insecure registerProtocolHandler is disabled by default
-pref("dom.registerProtocolHandler.insecure.enabled", false);
-
 // Whether or not indexedDB experimental features are enabled.
 pref("dom.indexedDB.experimental", false);
 // Enable indexedDB logging.
@@ -331,8 +328,6 @@ pref("browser.display.show_image_placeholders", true);
 pref("browser.display.show_loading_image_placeholder", false);
 // min font device pixel size at which to turn on high quality
 pref("browser.display.auto_quality_min_font_size", 20);
-pref("browser.enable_automatic_image_resizing", false);
-pref("browser.enable_click_image_resizing", true);
 
 // See http://whatwg.org/specs/web-apps/current-work/#ping
 pref("browser.send_pings", false);
@@ -811,6 +806,7 @@ pref("toolkit.telemetry.debugSlowSql", false);
 pref("toolkit.telemetry.unified", true);
 // AsyncShutdown delay before crashing in case of shutdown freeze
 #if !defined(MOZ_ASAN) && !defined(MOZ_TSAN)
+  pref("toolkit.asyncshutdown.report_writes_after", 20000); // 20 seconds
   pref("toolkit.asyncshutdown.crash_timeout", 60000); // 1 minute
 #else
   // ASan and TSan builds can be considerably slower. Extend the grace period
@@ -1208,9 +1204,6 @@ pref("javascript.options.mem.gc_allocation_threshold_mb", 27);
 
 // JSGC_NON_INCREMENTAL_FACTOR
 pref("javascript.options.mem.gc_non_incremental_factor", 112);
-
-// JSGC_AVOID_INTERRUPT_FACTOR
-pref("javascript.options.mem.gc_avoid_interrupt_factor", 100);
 
 // JSGC_MIN_EMPTY_CHUNK_COUNT
 pref("javascript.options.mem.gc_min_empty_chunk_count", 1);
@@ -4009,7 +4002,7 @@ pref("network.psl.onUpdate_notify", false);
   pref("widget.content.gtk-theme-override", "");
 #endif
 #ifdef MOZ_WAYLAND
-  pref("widget.wayland_vsync.enabled", false);
+  pref("widget.wayland_vsync.enabled", true);
   pref("widget.wayland.use-opaque-region", true);
 #endif
 
@@ -4385,7 +4378,7 @@ pref("browser.safebrowsing.provider.google.pver", "2.2");
 pref("browser.safebrowsing.provider.google.lists", "goog-badbinurl-shavar,goog-downloadwhite-digest256,goog-phish-shavar,googpub-phish-shavar,goog-malware-shavar,goog-unwanted-shavar");
 pref("browser.safebrowsing.provider.google.updateURL", "https://safebrowsing.google.com/safebrowsing/downloads?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2&key=%GOOGLE_SAFEBROWSING_API_KEY%");
 pref("browser.safebrowsing.provider.google.gethashURL", "https://safebrowsing.google.com/safebrowsing/gethash?client=SAFEBROWSING_ID&appver=%MAJOR_VERSION%&pver=2.2");
-pref("browser.safebrowsing.provider.google.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?client=%NAME%&site=");
+pref("browser.safebrowsing.provider.google.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?site=");
 pref("browser.safebrowsing.provider.google.reportPhishMistakeURL", "https://%LOCALE%.phish-error.mozilla.com/?url=");
 pref("browser.safebrowsing.provider.google.reportMalwareMistakeURL", "https://%LOCALE%.malware-error.mozilla.com/?url=");
 pref("browser.safebrowsing.provider.google.advisoryURL", "https://developers.google.com/safe-browsing/v4/advisory");
@@ -4396,7 +4389,7 @@ pref("browser.safebrowsing.provider.google4.pver", "4");
 pref("browser.safebrowsing.provider.google4.lists", "goog-badbinurl-proto,goog-downloadwhite-proto,goog-phish-proto,googpub-phish-proto,goog-malware-proto,goog-unwanted-proto,goog-harmful-proto,goog-passwordwhite-proto");
 pref("browser.safebrowsing.provider.google4.updateURL", "https://safebrowsing.googleapis.com/v4/threatListUpdates:fetch?$ct=application/x-protobuf&key=%GOOGLE_SAFEBROWSING_API_KEY%&$httpMethod=POST");
 pref("browser.safebrowsing.provider.google4.gethashURL", "https://safebrowsing.googleapis.com/v4/fullHashes:find?$ct=application/x-protobuf&key=%GOOGLE_SAFEBROWSING_API_KEY%&$httpMethod=POST");
-pref("browser.safebrowsing.provider.google4.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?client=%NAME%&site=");
+pref("browser.safebrowsing.provider.google4.reportURL", "https://safebrowsing.google.com/safebrowsing/diagnostic?site=");
 pref("browser.safebrowsing.provider.google4.reportPhishMistakeURL", "https://%LOCALE%.phish-error.mozilla.com/?url=");
 pref("browser.safebrowsing.provider.google4.reportMalwareMistakeURL", "https://%LOCALE%.malware-error.mozilla.com/?url=");
 pref("browser.safebrowsing.provider.google4.advisoryURL", "https://developers.google.com/safe-browsing/v4/advisory");

@@ -901,7 +901,8 @@ impl LonghandIdSet {
     pub fn border_background_properties() -> &'static Self {
         ${static_longhand_id_set(
             "BORDER_BACKGROUND_PROPERTIES",
-            lambda p: (p.logical_group and p.logical_group.startswith("border")) or p.name in ["background-color", "background-image"]
+            lambda p: (p.logical_group and p.logical_group.startswith("border")) or \
+                       p.name in ["background-color", "background-image"]
         )}
         &BORDER_BACKGROUND_PROPERTIES
     }
@@ -3018,6 +3019,13 @@ impl ComputedValues {
         }
         % endfor
         set
+    }
+
+    /// Create a `TransitionPropertyIterator` for this styles transition properties.
+    pub fn transition_properties<'a>(
+        &'a self
+    ) -> animated_properties::TransitionPropertyIterator<'a> {
+        animated_properties::TransitionPropertyIterator::from_style(self)
     }
 }
 

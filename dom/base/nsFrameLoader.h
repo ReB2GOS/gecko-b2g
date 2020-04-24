@@ -111,7 +111,8 @@ class nsFrameLoader final : public nsStubMutationObserver,
   static already_AddRefed<nsFrameLoader> Recreate(Element* aOwner,
                                                   BrowsingContext* aContext,
                                                   const nsAString& aRemoteType,
-                                                  bool aNetworkCreated);
+                                                  bool aNetworkCreated,
+                                                  bool aPreserveContext);
 
   NS_DECLARE_STATIC_IID_ACCESSOR(NS_FRAMELOADER_IID)
 
@@ -254,9 +255,8 @@ class nsFrameLoader final : public nsStubMutationObserver,
   virtual bool DoLoadMessageManagerScript(const nsAString& aURL,
                                           bool aRunInGlobalScope) override;
   virtual nsresult DoSendAsyncMessage(
-      JSContext* aCx, const nsAString& aMessage,
-      mozilla::dom::ipc::StructuredCloneData& aData,
-      JS::Handle<JSObject*> aCpows, nsIPrincipal* aPrincipal) override;
+      const nsAString& aMessage,
+      mozilla::dom::ipc::StructuredCloneData& aData) override;
 
   /**
    * Called from the layout frame associated with this frame loader;
@@ -344,16 +344,6 @@ class nsFrameLoader final : public nsStubMutationObserver,
   }
 
   mozilla::dom::Element* GetOwnerContent() { return mOwnerContent; }
-
-  /**
-   * Tell this FrameLoader to use a particular remote browser.
-   *
-   * This will assert if mBrowserParent is non-null.  In practice,
-   * this means you can't have successfully run TryRemoteBrowser() on
-   * this object, which means you can't have called ShowRemoteFrame()
-   * or ReallyStartLoading().
-   */
-  void InitializeFromBrowserParent(BrowserParent* aBrowserParent);
 
   /**
    * Stashes a detached nsIFrame on the frame loader. We do this when we're

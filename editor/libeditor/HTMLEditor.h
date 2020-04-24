@@ -12,7 +12,6 @@
 #include "mozilla/EditorUtils.h"
 #include "mozilla/ManualNAC.h"
 #include "mozilla/Result.h"
-#include "mozilla/StyleSheet.h"
 #include "mozilla/TextEditor.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/dom/Element.h"
@@ -20,11 +19,9 @@
 
 #include "nsAttrName.h"
 #include "nsCOMPtr.h"
-#include "nsICSSLoaderObserver.h"
 #include "nsIDocumentObserver.h"
 #include "nsIDOMEventListener.h"
 #include "nsIEditorMailSupport.h"
-#include "nsIEditorStyleSheets.h"
 #include "nsIHTMLAbsPosEditor.h"
 #include "nsIHTMLEditor.h"
 #include "nsIHTMLInlineTableEditor.h"
@@ -54,6 +51,7 @@ class ListItemElementSelectionState;
 class MoveNodeResult;
 class ParagraphStateAtSelection;
 class ResizerSelectionListener;
+class Runnable;
 class SplitRangeOffFromNodeResult;
 class SplitRangeOffResult;
 class WSRunObject;
@@ -87,7 +85,6 @@ class HTMLEditor final : public TextEditor,
                          public nsIHTMLAbsPosEditor,
                          public nsITableEditor,
                          public nsIHTMLInlineTableEditor,
-                         public nsIEditorStyleSheets,
                          public nsStubMutationObserver,
                          public nsIEditorMailSupport {
  public:
@@ -120,9 +117,6 @@ class HTMLEditor final : public TextEditor,
 
   // nsIHTMLInlineTableEditor methods (implemented in HTMLInlineTableEditor.cpp)
   NS_DECL_NSIHTMLINLINETABLEEDITOR
-
-  // nsIEditorStyleSheets methods
-  NS_DECL_NSIEDITORSTYLESHEETS
 
   // nsIEditorMailSupport methods
   NS_DECL_NSIEDITORMAILSUPPORT
@@ -771,21 +765,6 @@ class HTMLEditor final : public TextEditor,
   using EditorBase::SetAttributeOrEquivalent;
 
   /**
-   * GetBlockNodeParent() returns parent or nearest ancestor of aNode if
-   * there is a block parent.  If aAncestorLimiter is not nullptr,
-   * this stops looking for the result.
-   */
-  static Element* GetBlockNodeParent(nsINode* aNode,
-                                     nsINode* aAncestorLimiter = nullptr);
-
-  /**
-   * GetBlock() returns aNode itself, or parent or nearest ancestor of aNode
-   * if there is a block parent.  If aAncestorLimiter is not nullptr,
-   * this stops looking for the result.
-   */
-  static Element* GetBlock(nsINode& aNode, nsINode* aAncestorLimiter = nullptr);
-
-  /**
    * Returns container element of ranges in Selection.  If Selection is
    * collapsed, returns focus container node (or its parent element).
    * If Selection selects only one element node, returns the element node.
@@ -878,17 +857,6 @@ class HTMLEditor final : public TextEditor,
    */
   [[nodiscard]] MOZ_CAN_RUN_SCRIPT nsresult RelativeChangeElementZIndex(
       Element& aElement, int32_t aChange, int32_t* aReturn);
-
-  /**
-   * returns true if aParentTag can contain a child of type aChildTag.
-   */
-  virtual bool TagCanContainTag(nsAtom& aParentTag,
-                                nsAtom& aChildTag) const override;
-
-  /**
-   * Returns true if aNode is a container.
-   */
-  virtual bool IsContainer(nsINode* aNode) const override;
 
   /**
    * Join together any adjacent editable text nodes in the range.
@@ -1305,12 +1273,6 @@ class HTMLEditor final : public TextEditor,
    */
   [[nodiscard]] MOZ_CAN_RUN_SCRIPT EditActionResult
   SplitMailCiteElements(const EditorDOMPoint& aPointToSplit);
-
-  /**
-   * CanContainParagraph() returns true if aElement can have a <p> element as
-   * its child or its descendant.
-   */
-  bool CanContainParagraph(Element& aElement) const;
 
   /**
    * InsertBRElement() inserts a <br> element into aInsertToBreak.
@@ -3482,63 +3444,6 @@ class HTMLEditor final : public TextEditor,
    */
   MOZ_CAN_RUN_SCRIPT void CollapseSelectionToDeepestNonTableFirstChild(
       nsINode* aNode);
-
-  /**
-   * Returns TRUE if sheet was loaded, false if it wasn't.
-   */
-  bool EnableExistingStyleSheet(const nsAString& aURL);
-
-  /**
-   * GetStyleSheetForURL() returns a pointer to StyleSheet which was added
-   * with AddOverrideStyleSheetInternal().  If it's not found, returns nullptr.
-   *
-   * @param aURL        URL to the style sheet.
-   */
-  StyleSheet* GetStyleSheetForURL(const nsAString& aURL);
-
-  /**
-   * Add a url + known style sheet to the internal lists.
-   */
-  nsresult AddNewStyleSheetToList(const nsAString& aURL,
-                                  StyleSheet* aStyleSheet);
-
-  /**
-   * Removes style sheet from the internal lists.
-   *
-   * @param aURL        URL to the style sheet.
-   * @return            If the URL is in the internal list, returns the
-   *                    removed style sheet.  Otherwise, i.e., not found,
-   *                    nullptr.
-   */
-  already_AddRefed<StyleSheet> RemoveStyleSheetFromList(const nsAString& aURL);
-
-  /**
-   * Add and apply the style sheet synchronously.
-   *
-   * @param aURL        URL to the style sheet.
-   */
-  nsresult AddOverrideStyleSheetInternal(const nsAString& aURL);
-
-  /**
-   * Remove the style sheet from this editor synchronously.
-   *
-   * @param aURL        URL to the style sheet.
-   * @return            Even if there is no specified style sheet in the
-   *                    internal lists, this returns NS_OK.
-   */
-  nsresult RemoveOverrideStyleSheetInternal(const nsAString& aURL);
-
-  /**
-   * Enable or disable the style sheet synchronously.
-   * aURL is just a key to specify a style sheet in the internal array.
-   * I.e., the style sheet has already been registered with
-   * AddOverrideStyleSheetInternal().
-   *
-   * @param aURL        URL to the style sheet.
-   * @param aEnable     true if enable the style sheet.  false if disable it.
-   */
-  void EnableStyleSheetInternal(const nsAString& aURL, bool aEnable);
-
   /**
    * MaybeCollapseSelectionAtFirstEditableNode() may collapse selection at
    * proper position to staring to edit.  If there is a non-editable node
@@ -3886,8 +3791,6 @@ class HTMLEditor final : public TextEditor,
    * failed to set selection to some other content in the document.
    */
   [[nodiscard]] MOZ_CAN_RUN_SCRIPT nsresult SetSelectionAtDocumentStart();
-
-  static Element* GetEnclosingTable(nsINode* aNode);
 
   // Methods for handling plaintext quotations
   MOZ_CAN_RUN_SCRIPT nsresult PasteAsPlaintextQuotation(int32_t aSelectionType);
@@ -4476,6 +4379,9 @@ class HTMLEditor final : public TextEditor,
   // Used by TopLevelEditSubActionData::mChangedRange.
   mutable RefPtr<nsRange> mChangedRangeForTopLevelEditSubAction;
 
+  RefPtr<Runnable> mPendingRootElementUpdatedRunner;
+  RefPtr<Runnable> mPendingDocumentModifiedRunner;
+
   bool mCRInParagraphCreatesParagraph;
 
   bool mCSSAware;
@@ -4485,10 +4391,6 @@ class HTMLEditor final : public TextEditor,
   // then, it'll be referred and incremented by
   // GetNextSelectedTableCellElement().
   mutable uint32_t mSelectedCellIndex;
-
-  // Maintain a list of associated style sheets and their urls.
-  nsTArray<nsString> mStyleSheetURLs;
-  nsTArray<RefPtr<StyleSheet>> mStyleSheets;
 
   // resizing
   bool mIsObjectResizingEnabled;

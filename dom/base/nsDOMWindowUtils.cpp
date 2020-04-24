@@ -1691,6 +1691,16 @@ nsDOMWindowUtils::GetFocusedActionHint(nsAString& aType) {
 }
 
 NS_IMETHODIMP
+nsDOMWindowUtils::GetFocusedInputMode(nsAString& aInputMode) {
+  nsCOMPtr<nsIWidget> widget = GetWidget();
+  if (!widget) {
+    return NS_ERROR_FAILURE;
+  }
+  aInputMode = widget->GetInputContext().mHTMLInputInputmode;
+  return NS_OK;
+}
+
+NS_IMETHODIMP
 nsDOMWindowUtils::GetViewId(Element* aElement, nsViewID* aResult) {
   if (aElement && nsLayoutUtils::FindIDFor(aElement, aResult)) {
     return NS_OK;
@@ -4099,6 +4109,14 @@ NS_IMETHODIMP
 nsDOMWindowUtils::WrCapture() {
   if (WebRenderBridgeChild* wrbc = GetWebRenderBridge()) {
     wrbc->Capture();
+  }
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+nsDOMWindowUtils::WrToggleCaptureSequence() {
+  if (WebRenderBridgeChild* wrbc = GetWebRenderBridge()) {
+    wrbc->ToggleCaptureSequence();
   }
   return NS_OK;
 }

@@ -78,6 +78,7 @@ include ClientIPCTypes;
 include HangTypes;
 include PrefsTypes;
 include NeckoChannelParams;
+include PSMIPCTypes;
 
 #if defined(MOZ_SANDBOX) && defined(MOZ_DEBUG) && defined(ENABLE_TESTS)
 include protocol PSandboxTesting;
@@ -106,7 +107,6 @@ using mozilla::LayoutDeviceIntPoint from "Units.h";
 using struct LookAndFeelInt from "mozilla/widget/WidgetMessageUtils.h";
 using class mozilla::dom::MessagePort from "mozilla/dom/MessagePort.h";
 using class mozilla::dom::ipc::StructuredCloneData from "mozilla/dom/ipc/StructuredCloneData.h";
-using mozilla::DataStorageType from "ipc/DataStorageIPCUtils.h";
 using mozilla::OriginAttributes from "mozilla/ipc/BackgroundUtils.h";
 using struct mozilla::layers::TextureFactoryIdentifier from "mozilla/layers/CompositorTypes.h";
 using mozilla::layers::CompositorOptions from "mozilla/layers/CompositorOptions.h";
@@ -301,17 +301,6 @@ struct DeviceStorageLocationInfo {
   nsString appsstorage;
 };
 
-struct DataStorageItem {
-  nsCString key;
-  nsCString value;
-  DataStorageType type;
-};
-
-struct DataStorageEntry {
-  DataStorageItem[] items;
-  nsString filename;
-};
-
 // Note: Any changes to this structure should also be changed in
 // FileSystemUpdate below.
 struct VolumeInfo {
@@ -392,7 +381,7 @@ struct JSWindowActorEventDecl
 
 struct JSWindowActorInfo
 {
-  nsString name;
+  nsCString name;
   bool allFrames;
   nsCString? url;
 
@@ -636,6 +625,8 @@ child:
 
     async AudioDefaultDeviceChange();
 
+    async SpeakerManagerNotify();
+
     async NetworkLinkTypeChange(uint32_t type);
 
     // Re-create the rendering stack for a device reset.
@@ -787,7 +778,7 @@ child:
     /**
      * Unregister a previously registered JSWindowActor in the child process.
      */
-    async UnregisterJSWindowActor(nsString name);
+    async UnregisterJSWindowActor(nsCString name);
 
     async SetXPCOMProcessAttributes(XPCOMInitData xpcomInit,
                                     StructuredCloneData initialData,
@@ -1160,12 +1151,7 @@ parent:
     // PrefService message
     sync GetGfxVars() returns (GfxVarUpdate[] vars);
 
-    sync SyncMessage(nsString aMessage, ClonedMessageData aData,
-                     CpowEntry[] aCpows, Principal aPrincipal)
-      returns (StructuredCloneData[] retval);
-
-    nested(inside_sync) sync RpcMessage(nsString aMessage, ClonedMessageData aData,
-                                        CpowEntry[] aCpows, Principal aPrincipal)
+    sync SyncMessage(nsString aMessage, ClonedMessageData aData)
       returns (StructuredCloneData[] retval);
 
     async ShowAlert(nsIAlertNotification alert);
@@ -1266,9 +1252,6 @@ parent:
     sync GetIconForExtension(nsCString aFileExt, uint32_t aIconSize)
         returns (uint8_t[] bits);
 
-    sync GetShowPasswordSetting()
-        returns (bool showPassword);
-
     // Notify the parent of the presence or absence of private docshells
     async PrivateDocShellsExist(bool aExist);
 
@@ -1291,6 +1274,13 @@ parent:
                                     bool aAnyActiveChannel);
 
     async AudioChannelChangeDefVolChannel(int32_t aChannel, bool aHidden);
+
+    sync SpeakerManagerForceSpeaker(bool aEnable,
+                                    bool aVisible,
+                                    bool aAudioChannelActive,
+                                    uint64_t aWindowID);
+
+    sync SpeakerManagerGetSpeakerStatus() returns (bool value);
 
     sync KeywordToURI(nsCString keyword, bool isPrivateContext)
         returns (nsString providerName, nsIInputStream postData, nsIURI uri);
@@ -1797,8 +1787,7 @@ both:
                                            BrowsingContextTransaction aTransaction,
                                            uint64_t aEpoch);
 
-    async AsyncMessage(nsString aMessage, CpowEntry[] aCpows,
-                       Principal aPrincipal, ClonedMessageData aData);
+    async AsyncMessage(nsString aMessage, ClonedMessageData aData);
 
     /**
      * Notify `push-subscription-modified` observers in the parent and child.

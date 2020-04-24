@@ -79,6 +79,7 @@
 #include "vm/Iteration.h"
 #include "vm/JSContext.h"
 #include "vm/JSObject.h"
+#include "vm/PlainObject.h"    // js::PlainObject
 #include "vm/PromiseObject.h"  // js::PromiseObject, js::PromiseSlot_*
 #include "vm/ProxyObject.h"
 #include "vm/SavedStacks.h"
@@ -569,7 +570,6 @@ static bool MinorGC(JSContext* cx, unsigned argc, Value* vp) {
   _("dynamicMarkSlice", JSGC_DYNAMIC_MARK_SLICE, true)                       \
   _("allocationThreshold", JSGC_ALLOCATION_THRESHOLD, true)                  \
   _("nonIncrementalFactor", JSGC_NON_INCREMENTAL_FACTOR, true)               \
-  _("avoidInterruptFactor", JSGC_AVOID_INTERRUPT_FACTOR, true)               \
   _("minEmptyChunkCount", JSGC_MIN_EMPTY_CHUNK_COUNT, true)                  \
   _("maxEmptyChunkCount", JSGC_MAX_EMPTY_CHUNK_COUNT, true)                  \
   _("compactingEnabled", JSGC_COMPACTING_ENABLED, true)                      \
@@ -5288,7 +5288,7 @@ static bool ParseRegExp(JSContext* cx, unsigned argc, Value* vp) {
   }
 
   CompileOptions options(cx);
-  frontend::TokenStream dummyTokenStream(cx, options, nullptr, 0, nullptr);
+  frontend::DummyTokenStream dummyTokenStream(cx, options);
 
   // Data lifetime is controlled by LifoAllocScope.
   LifoAllocScope allocScope(&cx->tempLifoAlloc());

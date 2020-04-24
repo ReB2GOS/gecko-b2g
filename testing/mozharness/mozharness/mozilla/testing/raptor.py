@@ -204,6 +204,13 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             "help": "The number of times a cold load test is repeated (for cold load tests only, "
                     "where the browser is shutdown and restarted between test iterations)."
         }],
+        [["--project"], {
+            "action": "store",
+            "dest": "project",
+            "default": "mozilla-central",
+            "type": "str",
+            "help": "Name of the project (try, mozilla-central, etc.)"
+        }],
         [["--test-url-params"], {
             "action": "store",
             "dest": "test_url_params",
@@ -284,6 +291,12 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             "dest": "cold",
             "default": False,
             "help": "Enable cold page-load for browsertime tp6",
+        }],
+        [["--verbose"], {
+            "action": "store_true",
+            "dest": "verbose",
+            "default": False,
+            "help": "Verbose output",
         }],
 
     ] + testing_config_options + \

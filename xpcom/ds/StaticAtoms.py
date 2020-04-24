@@ -1553,6 +1553,7 @@ STATIC_ATOMS = [
     Atom("text_rendering", "text-rendering"),
     Atom("textLength", "textLength"),
     Atom("textPath", "textPath"),
+    Atom("transform_origin", "transform-origin"),
     Atom("tref", "tref"),
     Atom("tspan", "tspan"),
     Atom("turbulence", "turbulence"),
@@ -1911,6 +1912,9 @@ STATIC_ATOMS = [
     # Audio channel events
     Atom("onmozinterruptbegin", "onmozinterruptbegin"),
     Atom("onmozinterruptend", "onmozinterruptend"),
+
+    # SpeakerManager event
+    Atom("onspeakerforcedchange", "onspeakerforcedchange"),
 
     # MediaDevices device change event
     Atom("ondevicechange", "ondevicechange"),

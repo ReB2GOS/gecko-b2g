@@ -149,8 +149,6 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(HTMLEditor, TextEditor)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mTypeInState)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mComposerCommandsUpdater)
   NS_IMPL_CYCLE_COLLECTION_UNLINK(mChangedRangeForTopLevelEditSubAction)
-  NS_IMPL_CYCLE_COLLECTION_UNLINK(mStyleSheets)
-
   tmp->HideAnonymousEditingUIs();
 NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 
@@ -158,7 +156,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(HTMLEditor, TextEditor)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTypeInState)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mComposerCommandsUpdater)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mChangedRangeForTopLevelEditSubAction)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStyleSheets)
 
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTopLeftHandle)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTopHandle)
@@ -195,7 +192,6 @@ NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(HTMLEditor)
   NS_INTERFACE_MAP_ENTRY(nsIHTMLAbsPosEditor)
   NS_INTERFACE_MAP_ENTRY(nsIHTMLInlineTableEditor)
   NS_INTERFACE_MAP_ENTRY(nsITableEditor)
-  NS_INTERFACE_MAP_ENTRY(nsIEditorStyleSheets)
   NS_INTERFACE_MAP_ENTRY(nsIMutationObserver)
   NS_INTERFACE_MAP_ENTRY(nsIEditorMailSupport)
 NS_INTERFACE_MAP_END_INHERITING(TextEditor)
@@ -249,15 +245,6 @@ nsresult HTMLEditor::Init(Document& aDoc, Element* aRoot,
   // init the type-in state
   mTypeInState = new TypeInState();
 
-  if (!IsInteractionAllowed()) {
-    // ignore any errors from this in case the file is missing
-    DebugOnly<nsresult> rvIgnored = AddOverrideStyleSheetInternal(
-        NS_LITERAL_STRING("resource://gre/res/EditorOverride.css"));
-    NS_WARNING_ASSERTION(NS_SUCCEEDED(rvIgnored),
-                         "HTMLEditor::AddOverrideStyleSheetInternal("
-                         "EditorOverride.css) failed, but ignored");
-  }
-
   // XXX `eNotEditing` is a lie since InitEditorContentAndSelection() may
   //     insert padding `<br>`.
   AutoEditActionDataSetter editActionData(*this, EditAction::eNotEditing);
@@ -295,14 +282,6 @@ void HTMLEditor::PreDestroy(bool aDestroyingFrames) {
   RefPtr<Document> document = GetDocument();
   if (document) {
     document->RemoveMutationObserver(this);
-  }
-
-  while (!mStyleSheetURLs.IsEmpty()) {
-    DebugOnly<nsresult> rv =
-        RemoveOverrideStyleSheetInternal(mStyleSheetURLs[0]);
-    NS_WARNING_ASSERTION(
-        NS_SUCCEEDED(rv),
-        "HTMLEditor::RemoveOverrideStyleSheetInternal() failed, but ignored");
   }
 
   // Clean up after our anonymous content -- we don't want these nodes to
@@ -583,10 +562,11 @@ nsresult HTMLEditor::MaybeCollapseSelectionAtFirstEditableNode(
     // container element.
     if (forwardScanFromPointToPutCaretResult.ReachedSpecialContent() &&
         forwardScanFromPointToPutCaretResult.GetContent() &&
-        TagCanContainTag(*forwardScanFromPointToPutCaretResult.GetContent()
-                              ->NodeInfo()
-                              ->NameAtom(),
-                         *nsGkAtoms::textTagName)) {
+        HTMLEditUtils::CanNodeContain(
+            *forwardScanFromPointToPutCaretResult.GetContent()
+                 ->NodeInfo()
+                 ->NameAtom(),
+            *nsGkAtoms::textTagName)) {
       pointToPutCaret =
           forwardScanFromPointToPutCaretResult.RawPointAfterContent();
       continue;
@@ -626,7 +606,9 @@ nsresult HTMLEditor::MaybeCollapseSelectionAtFirstEditableNode(
     // block can not contain anything that's visible, such a block only
     // makes sense if it is visible by itself, like a <hr>.  We want to
     // place the caret in front of that block.
-    if (!IsContainer(forwardScanFromPointToPutCaretResult.GetContent())) {
+    if (!forwardScanFromPointToPutCaretResult.GetContent() ||
+        !HTMLEditUtils::IsContainerNode(
+            *forwardScanFromPointToPutCaretResult.GetContent())) {
       pointToPutCaret =
           forwardScanFromPointToPutCaretResult.RawPointAtContent();
       break;
@@ -717,11 +699,14 @@ nsresult HTMLEditor::HandleKeyPressEvent(WidgetKeyboardEvent* aKeyboardEvent) {
         return NS_ERROR_FAILURE;
       }
 
-      nsCOMPtr<nsINode> node = selection->GetRangeAt(0)->GetStartContainer();
-      MOZ_ASSERT(node);
+      nsINode* startContainer = selection->GetRangeAt(0)->GetStartContainer();
+      MOZ_ASSERT(startContainer);
+      if (!startContainer->IsContent()) {
+        break;
+      }
 
-      nsCOMPtr<Element> blockParent = GetBlock(*node);
-
+      Element* blockParent = HTMLEditUtils::GetInclusiveAncestorBlockElement(
+          *startContainer->AsContent());
       if (!blockParent) {
         break;
       }
@@ -809,61 +794,11 @@ NS_IMETHODIMP HTMLEditor::NodeIsBlock(nsINode* aNode, bool* aIsBlock) {
 bool HTMLEditor::IsEmptyInlineNode(nsIContent& aContent) const {
   MOZ_ASSERT(IsEditActionDataAvailable());
 
-  if (!HTMLEditUtils::IsInlineElement(aContent) || !IsContainer(&aContent)) {
+  if (!HTMLEditUtils::IsInlineElement(aContent) ||
+      !HTMLEditUtils::IsContainerNode(aContent)) {
     return false;
   }
   return IsEmptyNode(aContent);
-}
-
-/**
- * GetBlockNodeParent returns enclosing block level ancestor, if any.
- */
-Element* HTMLEditor::GetBlockNodeParent(nsINode* aNode,
-                                        nsINode* aAncestorLimiter) {
-  MOZ_ASSERT(aNode);
-  MOZ_ASSERT(!aAncestorLimiter || aNode == aAncestorLimiter ||
-                 EditorUtils::IsDescendantOf(*aNode, *aAncestorLimiter),
-             "aNode isn't in aAncestorLimiter");
-
-  // The caller has already reached the limiter.
-  if (aNode == aAncestorLimiter) {
-    return nullptr;
-  }
-
-  if (!aNode->GetParent()) {
-    return nullptr;
-  }
-
-  for (Element* element :
-       InclusiveAncestorsOfType<Element>(*aNode->GetParent())) {
-    if (HTMLEditUtils::IsBlockElement(*element)) {
-      return element;
-    }
-    // Now, we have reached the limiter, there is no block in its ancestors.
-    if (element == aAncestorLimiter) {
-      return nullptr;
-    }
-  }
-
-  return nullptr;
-}
-
-/**
- * Returns the node if it's a block, otherwise GetBlockNodeParent
- */
-Element* HTMLEditor::GetBlock(nsINode& aNode, nsINode* aAncestorLimiter) {
-  MOZ_ASSERT(!aAncestorLimiter || &aNode == aAncestorLimiter ||
-                 EditorUtils::IsDescendantOf(aNode, *aAncestorLimiter),
-             "aNode isn't in aAncestorLimiter");
-
-  if (!aNode.IsContent()) {
-    return nullptr;
-  }
-
-  if (HTMLEditUtils::IsBlockElement(*aNode.AsContent())) {
-    return aNode.AsElement();
-  }
-  return GetBlockNodeParent(&aNode, aAncestorLimiter);
 }
 
 /**
@@ -1080,9 +1015,10 @@ EditActionResult HTMLEditor::HandleTabKeyPressInTable(
   }
 
   // find enclosing table
-  RefPtr<Element> table = GetEnclosingTable(cellElement);
+  RefPtr<Element> table =
+      HTMLEditUtils::GetClosestAncestorTableElement(*cellElement);
   if (!table) {
-    NS_WARNING("HTMLEditor::GetEnclosingTable() failed");
+    NS_WARNING("HTMLEditor::GetClosestAncestorTableElement() failed");
     return EditActionIgnored();
   }
 
@@ -1110,7 +1046,8 @@ EditActionResult HTMLEditor::HandleTabKeyPressInTable(
 
     nsCOMPtr<nsINode> node = postOrderIter.GetCurrentNode();
     if (node && HTMLEditUtils::IsTableCell(node) &&
-        GetEnclosingTable(node) == table) {
+        HTMLEditUtils::GetClosestAncestorTableElement(*node->AsElement()) ==
+            table) {
       aKeyboardEvent->PreventDefault();
       CollapseSelectionToDeepestNonTableFirstChild(node);
       return EditActionHandled(
@@ -1223,10 +1160,11 @@ void HTMLEditor::CollapseSelectionToDeepestNonTableFirstChild(nsINode* aNode) {
 
   nsCOMPtr<nsINode> node = aNode;
 
-  for (nsCOMPtr<nsIContent> child = node->GetFirstChild(); child;
+  for (nsIContent* child = node->GetFirstChild(); child;
        child = child->GetFirstChild()) {
     // Stop if we find a table, don't want to go into nested tables
-    if (HTMLEditUtils::IsTable(child) || !IsContainer(child)) {
+    if (HTMLEditUtils::IsTable(child) ||
+        !HTMLEditUtils::IsContainerNode(*child)) {
       break;
     }
     node = child;
@@ -1827,7 +1765,7 @@ EditorDOMPoint HTMLEditor::InsertNodeIntoProperAncestorWithTransaction(
   // Search up the parent chain to find a suitable container.
   EditorDOMPoint pointToInsert(aPointToInsert);
   MOZ_ASSERT(pointToInsert.IsSet());
-  while (!CanContain(*pointToInsert.GetContainer(), aNode)) {
+  while (!HTMLEditUtils::CanNodeContain(*pointToInsert.GetContainer(), aNode)) {
     // If the current parent is a root (body or table element)
     // then go no further - we can't insert.
     if (pointToInsert.IsContainerHTMLElement(nsGkAtoms::body) ||
@@ -2113,7 +2051,8 @@ nsresult HTMLEditor::GetCSSBackgroundColorState(bool* aMixed,
   if (aBlockLevel) {
     // we are querying the block background (and not the text background), let's
     // climb to the block container
-    Element* blockParent = GetBlock(*contentToExamine);
+    Element* blockParent =
+        HTMLEditUtils::GetInclusiveAncestorBlockElement(*contentToExamine);
     if (NS_WARN_IF(!blockParent)) {
       return NS_OK;
     }
@@ -3104,202 +3043,6 @@ nsresult HTMLEditor::SetHTMLBackgroundColorWithTransaction(
   return rv;
 }
 
-NS_IMETHODIMP HTMLEditor::AddOverrideStyleSheet(const nsAString& aURL) {
-  AutoEditActionDataSetter editActionData(*this,
-                                          EditAction::eAddOverrideStyleSheet);
-  if (NS_WARN_IF(!editActionData.CanHandle())) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-
-  nsresult rv = AddOverrideStyleSheetInternal(aURL);
-  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
-                       "HTMLEditor::AddOverrideStyleSheetInternal() failed");
-  return rv;
-}
-
-nsresult HTMLEditor::AddOverrideStyleSheetInternal(const nsAString& aURL) {
-  // Enable existing sheet if already loaded.
-  if (EnableExistingStyleSheet(aURL)) {
-    return NS_OK;
-  }
-
-  // Make sure the pres shell doesn't disappear during the load.
-  RefPtr<PresShell> presShell = GetPresShell();
-  if (NS_WARN_IF(!presShell)) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-
-  nsCOMPtr<nsIURI> uaURI;
-  nsresult rv = NS_NewURI(getter_AddRefs(uaURI), aURL);
-  if (NS_FAILED(rv)) {
-    NS_WARNING("NS_NewURI() failed");
-    return rv;
-  }
-
-  // We MUST ONLY load synchronous local files (no @import)
-  // XXXbz Except this will actually try to load remote files
-  // synchronously, of course..
-  // Editor override style sheets may want to style Gecko anonymous boxes
-  auto result = presShell->GetDocument()->CSSLoader()->LoadSheetSync(
-      uaURI, css::eAgentSheetFeatures, css::Loader::UseSystemPrincipal::Yes);
-  // Synchronous loads should ALWAYS return completed
-  if (result.isErr()) {
-    NS_WARNING("css::Loader::LoadSheetSync() failed");
-    return result.unwrapErr();
-  }
-
-  RefPtr<StyleSheet> sheet = result.unwrap();
-
-  // Add the override style sheet
-  // (This checks if already exists)
-  DebugOnly<nsresult> rvIgnored = presShell->AddOverrideStyleSheet(sheet);
-  NS_WARNING_ASSERTION(
-      NS_SUCCEEDED(rvIgnored),
-      "PresShell::AddOverrideStyleSheet() failed, but ignored");
-  presShell->GetDocument()->ApplicableStylesChanged();
-
-  // Add URL and style sheet to our lists
-  rv = AddNewStyleSheetToList(aURL, sheet);
-  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
-                       "HTMLEditor::AddNewStyleSheetToList() failed");
-  return rv;
-}
-
-// Do NOT use transaction system for override style sheets
-NS_IMETHODIMP HTMLEditor::RemoveOverrideStyleSheet(const nsAString& aURL) {
-  AutoEditActionDataSetter editActionData(
-      *this, EditAction::eRemoveOverrideStyleSheet);
-  if (NS_WARN_IF(!editActionData.CanHandle())) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-
-  nsresult rv = RemoveOverrideStyleSheetInternal(aURL);
-  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
-                       "HTMLEditor::RemoveOverrideStyleSheetInternal() failed");
-  return rv;
-}
-
-nsresult HTMLEditor::RemoveOverrideStyleSheetInternal(const nsAString& aURL) {
-  if (NS_WARN_IF(!IsInitialized())) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-
-  // Make sure we remove the stylesheet from our internal list in all
-  // cases.
-  RefPtr<StyleSheet> sheet = RemoveStyleSheetFromList(aURL);
-  if (!sheet) {
-    return NS_OK;  // It's okay even if not found.
-  }
-
-  RefPtr<PresShell> presShell = GetPresShell();
-  if (NS_WARN_IF(!presShell)) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-
-  DebugOnly<nsresult> rvIgnored = presShell->RemoveOverrideStyleSheet(sheet);
-  NS_WARNING_ASSERTION(
-      NS_SUCCEEDED(rvIgnored),
-      "PresShell::RemoveOverrideStyleSheet() failed, but ignored");
-  presShell->GetDocument()->ApplicableStylesChanged();
-
-  return NS_OK;
-}
-
-NS_IMETHODIMP HTMLEditor::EnableStyleSheet(const nsAString& aURL,
-                                           bool aEnable) {
-  AutoEditActionDataSetter editActionData(*this, EditAction::eEnableStyleSheet);
-  if (NS_WARN_IF(!editActionData.CanHandle())) {
-    return NS_ERROR_NOT_INITIALIZED;
-  }
-
-  EnableStyleSheetInternal(aURL, aEnable);
-  return NS_OK;
-}
-
-void HTMLEditor::EnableStyleSheetInternal(const nsAString& aURL, bool aEnable) {
-  RefPtr<StyleSheet> sheet = GetStyleSheetForURL(aURL);
-  if (!sheet) {
-    return;
-  }
-
-  // Ensure the style sheet is owned by our document.
-  RefPtr<Document> document = GetDocument();
-  NS_WARNING_ASSERTION(
-      document, "EditorBase::GetDocument() returned nullptr, but ignored");
-  sheet->SetAssociatedDocumentOrShadowRoot(
-      document, StyleSheet::NotOwnedByDocumentOrShadowRoot);
-
-  sheet->SetDisabled(!aEnable);
-}
-
-bool HTMLEditor::EnableExistingStyleSheet(const nsAString& aURL) {
-  RefPtr<StyleSheet> sheet = GetStyleSheetForURL(aURL);
-
-  // Enable sheet if already loaded.
-  if (!sheet) {
-    return false;
-  }
-
-  // Ensure the style sheet is owned by our document.
-  RefPtr<Document> document = GetDocument();
-  NS_WARNING_ASSERTION(
-      document, "EditorBase::GetDocument() returned nullptr, but ignored");
-  sheet->SetAssociatedDocumentOrShadowRoot(
-      document, StyleSheet::NotOwnedByDocumentOrShadowRoot);
-
-  // FIXME: This used to do sheet->SetDisabled(false), figure out if we can
-  // just remove all this code in bug 1449522, since it seems unused.
-  return true;
-}
-
-nsresult HTMLEditor::AddNewStyleSheetToList(const nsAString& aURL,
-                                            StyleSheet* aStyleSheet) {
-  uint32_t countSS = mStyleSheets.Length();
-  uint32_t countU = mStyleSheetURLs.Length();
-
-  if (countSS != countU) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  if (NS_WARN_IF(!mStyleSheetURLs.AppendElement(aURL))) {
-    return NS_ERROR_UNEXPECTED;
-  }
-
-  return NS_WARN_IF(!mStyleSheets.AppendElement(aStyleSheet))
-             ? NS_ERROR_UNEXPECTED
-             : NS_OK;
-}
-
-already_AddRefed<StyleSheet> HTMLEditor::RemoveStyleSheetFromList(
-    const nsAString& aURL) {
-  // is it already in the list?
-  size_t foundIndex = mStyleSheetURLs.IndexOf(aURL);
-  if (foundIndex == mStyleSheetURLs.NoIndex) {
-    return nullptr;
-  }
-
-  RefPtr<StyleSheet> removingStyleSheet = mStyleSheets[foundIndex];
-  MOZ_ASSERT(removingStyleSheet);
-
-  // Attempt both removals; if one fails there's not much we can do.
-  mStyleSheets.RemoveElementAt(foundIndex);
-  mStyleSheetURLs.RemoveElementAt(foundIndex);
-
-  return removingStyleSheet.forget();
-}
-
-StyleSheet* HTMLEditor::GetStyleSheetForURL(const nsAString& aURL) {
-  // is it already in the list?
-  size_t foundIndex;
-  foundIndex = mStyleSheetURLs.IndexOf(aURL);
-  if (foundIndex == mStyleSheetURLs.NoIndex) {
-    return nullptr;
-  }
-
-  MOZ_ASSERT(mStyleSheets[foundIndex]);
-  return mStyleSheets[foundIndex];
-}
-
 nsresult HTMLEditor::DeleteSelectionWithTransaction(
     EDirection aAction, EStripWrappers aStripWrappers) {
   MOZ_ASSERT(IsEditActionDataAvailable());
@@ -3333,7 +3076,8 @@ nsresult HTMLEditor::DeleteSelectionWithTransaction(
   // Don't strip wrappers if this is the only wrapper in the block.  Then we'll
   // add a <br> later, so it won't be an empty wrapper in the end.
   // XXX Looks like that we should specify editing host as limiter.
-  Element* blockElement = HTMLEditor::GetBlock(content);
+  Element* blockElement =
+      HTMLEditUtils::GetInclusiveAncestorBlockElement(content);
   if (!blockElement) {
     return NS_OK;
   }
@@ -3689,11 +3433,18 @@ void HTMLEditor::DoContentInserted(nsIContent* aChild,
 
   if (ShouldReplaceRootElement()) {
     UpdateRootElement();
-    nsContentUtils::AddScriptRunner(NewRunnableMethod(
-        "HTMLEditor::NotifyRootChanged", this, &HTMLEditor::NotifyRootChanged));
+    if (mPendingRootElementUpdatedRunner) {
+      return;
+    }
+    mPendingRootElementUpdatedRunner = NewRunnableMethod(
+        "HTMLEditor::NotifyRootChanged", this, &HTMLEditor::NotifyRootChanged);
+    nsContentUtils::AddScriptRunner(
+        do_AddRef(mPendingRootElementUpdatedRunner));
+    return;
   }
+
   // We don't need to handle our own modifications
-  else if (!GetTopLevelEditSubAction() && container->IsEditable()) {
+  if (!GetTopLevelEditSubAction() && container->IsEditable()) {
     if (EditorUtils::IsPaddingBRElementForEmptyEditor(*aChild)) {
       // Ignore insertion of the padding <br> element.
       return;
@@ -3742,11 +3493,18 @@ MOZ_CAN_RUN_SCRIPT_BOUNDARY void HTMLEditor::ContentRemoved(
 
   if (SameCOMIdentity(aChild, mRootElement)) {
     mRootElement = nullptr;
-    nsContentUtils::AddScriptRunner(NewRunnableMethod(
-        "HTMLEditor::NotifyRootChanged", this, &HTMLEditor::NotifyRootChanged));
-    // We don't need to handle our own modifications
-  } else if (!GetTopLevelEditSubAction() &&
-             aChild->GetParentNode()->IsEditable()) {
+    if (mPendingRootElementUpdatedRunner) {
+      return;
+    }
+    mPendingRootElementUpdatedRunner = NewRunnableMethod(
+        "HTMLEditor::NotifyRootChanged", this, &HTMLEditor::NotifyRootChanged);
+    nsContentUtils::AddScriptRunner(
+        do_AddRef(mPendingRootElementUpdatedRunner));
+    return;
+  }
+
+  // We don't need to handle our own modifications
+  if (!GetTopLevelEditSubAction() && aChild->GetParentNode()->IsEditable()) {
     if (aChild && EditorUtils::IsPaddingBRElementForEmptyEditor(*aChild)) {
       // Ignore removal of the padding <br> element for empty editor.
       return;
@@ -3760,33 +3518,6 @@ MOZ_CAN_RUN_SCRIPT_BOUNDARY void HTMLEditor::ContentRemoved(
         NS_SUCCEEDED(rv),
         "HTMLEditor::OnDocumentModified() failed, but ignored");
   }
-}
-
-bool HTMLEditor::TagCanContainTag(nsAtom& aParentTag, nsAtom& aChildTag) const {
-  int32_t childTagEnum;
-  // XXX Should this handle #cdata-section too?
-  if (&aChildTag == nsGkAtoms::textTagName) {
-    childTagEnum = eHTMLTag_text;
-  } else {
-    childTagEnum = nsHTMLTags::AtomTagToId(&aChildTag);
-  }
-
-  int32_t parentTagEnum = nsHTMLTags::AtomTagToId(&aParentTag);
-  return HTMLEditUtils::CanContain(parentTagEnum, childTagEnum);
-}
-
-bool HTMLEditor::IsContainer(nsINode* aNode) const {
-  MOZ_ASSERT(aNode);
-
-  int32_t tagEnum;
-  // XXX Should this handle #cdata-section too?
-  if (aNode->IsText()) {
-    tagEnum = eHTMLTag_text;
-  } else {
-    tagEnum = nsHTMLTags::StringTagToId(aNode->NodeName());
-  }
-
-  return HTMLEditUtils::IsContainer(tagEnum);
 }
 
 nsresult HTMLEditor::SelectEntireDocument() {
@@ -3922,21 +3653,6 @@ bool HTMLEditor::SetCaretInTableCell(Element* aElement) {
   NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
                        "HTMLEditor::CollapseSelectionToStartOf() failed");
   return NS_SUCCEEDED(rv);
-}
-
-/**
- * GetEnclosingTable() finds ancestor who is a table, if any.
- */
-Element* HTMLEditor::GetEnclosingTable(nsINode* aNode) {
-  MOZ_ASSERT(aNode);
-
-  for (nsCOMPtr<Element> block = GetBlockNodeParent(aNode); block;
-       block = GetBlockNodeParent(block)) {
-    if (HTMLEditUtils::IsTable(block)) {
-      return block;
-    }
-  }
-  return nullptr;
 }
 
 /**
@@ -4356,7 +4072,8 @@ bool HTMLEditor::IsEmptyNodeImpl(nsINode& aNode, bool aSingleBRDoesntCount,
   // anchors are containers, named anchors are "empty" but we don't
   // want to treat them as such.  Also, don't call ListItems or table
   // cells empty if caller desires.  Form Widgets not empty.
-  if (!IsContainer(&aNode) ||
+  if (!aNode.IsContent() ||
+      !HTMLEditUtils::IsContainerNode(*aNode.AsContent()) ||
       (HTMLEditUtils::IsNamedAnchor(&aNode) ||
        HTMLEditUtils::IsFormWidget(&aNode) ||
        (aListOrCellNotEmpty && (HTMLEditUtils::IsListItem(&aNode) ||
@@ -4632,10 +4349,11 @@ nsresult HTMLEditor::SetCSSBackgroundColorWithTransaction(
         // If the range is in a text node, set background color of its parent
         // block.
         if (startOfRange.IsInTextNode()) {
-          if (RefPtr<Element> blockParent =
-                  GetBlockNodeParent(startOfRange.GetContainer())) {
+          if (RefPtr<Element> blockElement =
+                  HTMLEditUtils::GetAncestorBlockElement(
+                      *startOfRange.ContainerAsText())) {
             mCSSEditUtils->SetCSSEquivalentToHTMLStyle(
-                blockParent, nullptr, nsGkAtoms::bgcolor, &aColor, false);
+                blockElement, nullptr, nsGkAtoms::bgcolor, &aColor, false);
             if (NS_WARN_IF(Destroyed())) {
               return NS_ERROR_EDITOR_DESTROYED;
             }
@@ -4665,10 +4383,11 @@ nsresult HTMLEditor::SetCSSBackgroundColorWithTransaction(
           if (NS_WARN_IF(startOfRange.IsInDataNode())) {
             continue;
           }
-          if (RefPtr<Element> blockParent =
-                  GetBlock(*startOfRange.GetChild())) {
+          if (RefPtr<Element> blockElement =
+                  HTMLEditUtils::GetInclusiveAncestorBlockElement(
+                      *startOfRange.GetChild())) {
             mCSSEditUtils->SetCSSEquivalentToHTMLStyle(
-                blockParent, nullptr, nsGkAtoms::bgcolor, &aColor, false);
+                blockElement, nullptr, nsGkAtoms::bgcolor, &aColor, false);
             if (NS_WARN_IF(Destroyed())) {
               return NS_ERROR_EDITOR_DESTROYED;
             }
@@ -4708,12 +4427,12 @@ nsresult HTMLEditor::SetCSSBackgroundColorWithTransaction(
       if (startOfRange.IsInTextNode() &&
           EditorUtils::IsEditableContent(*startOfRange.ContainerAsText(),
                                          EditorType::HTML)) {
-        RefPtr<Element> blockParent =
-            GetBlockNodeParent(startOfRange.GetContainer());
-        if (blockParent && handledBlockParent != blockParent) {
-          handledBlockParent = blockParent;
+        RefPtr<Element> blockElement = HTMLEditUtils::GetAncestorBlockElement(
+            *startOfRange.ContainerAsText());
+        if (blockElement && handledBlockParent != blockElement) {
+          handledBlockParent = blockElement;
           mCSSEditUtils->SetCSSEquivalentToHTMLStyle(
-              blockParent, nullptr, nsGkAtoms::bgcolor, &aColor, false);
+              blockElement, nullptr, nsGkAtoms::bgcolor, &aColor, false);
           if (NS_WARN_IF(Destroyed())) {
             return NS_ERROR_EDITOR_DESTROYED;
           }
@@ -4722,12 +4441,13 @@ nsresult HTMLEditor::SetCSSBackgroundColorWithTransaction(
 
       // Then, set background color of each block or block parent of all nodes
       // in the range entirely.
-      for (auto& content : arrayOfContents) {
-        RefPtr<Element> blockParent = GetBlock(content);
-        if (blockParent && handledBlockParent != blockParent) {
-          handledBlockParent = blockParent;
+      for (OwningNonNull<nsIContent>& content : arrayOfContents) {
+        RefPtr<Element> blockElement =
+            HTMLEditUtils::GetInclusiveAncestorBlockElement(content);
+        if (blockElement && handledBlockParent != blockElement) {
+          handledBlockParent = blockElement;
           mCSSEditUtils->SetCSSEquivalentToHTMLStyle(
-              blockParent, nullptr, nsGkAtoms::bgcolor, &aColor, false);
+              blockElement, nullptr, nsGkAtoms::bgcolor, &aColor, false);
           if (NS_WARN_IF(Destroyed())) {
             return NS_ERROR_EDITOR_DESTROYED;
           }
@@ -4739,11 +4459,11 @@ nsresult HTMLEditor::SetCSSBackgroundColorWithTransaction(
       if (endOfRange.IsInTextNode() &&
           EditorUtils::IsEditableContent(*endOfRange.ContainerAsText(),
                                          EditorType::HTML)) {
-        RefPtr<Element> blockParent =
-            GetBlockNodeParent(endOfRange.GetContainer());
-        if (blockParent && handledBlockParent != blockParent) {
+        RefPtr<Element> blockElement = HTMLEditUtils::GetAncestorBlockElement(
+            *endOfRange.ContainerAsText());
+        if (blockElement && handledBlockParent != blockElement) {
           mCSSEditUtils->SetCSSEquivalentToHTMLStyle(
-              blockParent, nullptr, nsGkAtoms::bgcolor, &aColor, false);
+              blockElement, nullptr, nsGkAtoms::bgcolor, &aColor, false);
           if (NS_WARN_IF(Destroyed())) {
             return NS_ERROR_EDITOR_DESTROYED;
           }
@@ -5201,6 +4921,10 @@ bool HTMLEditor::ShouldReplaceRootElement() const {
 }
 
 void HTMLEditor::NotifyRootChanged() {
+  MOZ_ASSERT(mPendingRootElementUpdatedRunner,
+             "HTMLEditor::NotifyRootChanged() should be called via a runner");
+  mPendingRootElementUpdatedRunner = nullptr;
+
   nsCOMPtr<nsIMutationObserver> kungFuDeathGrip(this);
 
   AutoEditActionDataSetter editActionData(*this, EditAction::eNotEditing);
@@ -5416,6 +5140,10 @@ nsHTMLDocument* HTMLEditor::GetHTMLDocument() const {
 }
 
 nsresult HTMLEditor::OnModifyDocument() {
+  MOZ_ASSERT(mPendingDocumentModifiedRunner,
+             "HTMLEditor::OnModifyDocument() should be called via a runner");
+  mPendingDocumentModifiedRunner = nullptr;
+
   if (IsEditActionDataAvailable()) {
     return OnModifyDocumentInternal();
   }
@@ -5434,6 +5162,7 @@ nsresult HTMLEditor::OnModifyDocument() {
 
 nsresult HTMLEditor::OnModifyDocumentInternal() {
   MOZ_ASSERT(IsEditActionDataAvailable());
+  MOZ_ASSERT(!mPendingDocumentModifiedRunner);
 
   // EnsureNoPaddingBRElementForEmptyEditor() below may cause a flush, which
   // could destroy the editor

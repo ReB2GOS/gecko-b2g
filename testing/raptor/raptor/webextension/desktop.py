@@ -28,13 +28,18 @@ class WebExtensionDesktop(PerftestDesktop, WebExtension):
         LOG.info("creating browser runner using mozrunner")
         self.output_handler = OutputHandler()
         process_args = {"processOutputLine": [self.output_handler]}
+        firefox_args = ["--allow-downgrade"]
         runner_cls = runners[self.config["app"]]
         self.runner = runner_cls(
             self.config["binary"],
             profile=self.profile,
+            cmdargs=firefox_args,
             process_args=process_args,
             symbols_path=self.config["symbols_path"],
         )
+
+        # Force Firefox to immediately exit for content crashes
+        self.runner.env["MOZ_CRASHREPORTER_SHUTDOWN"] = "1"
 
         if self.config["enable_webrender"]:
             self.runner.env["MOZ_WEBRENDER"] = "1"

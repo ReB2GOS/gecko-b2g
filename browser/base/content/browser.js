@@ -76,7 +76,7 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   TabModalPrompt: "chrome://global/content/tabprompts.jsm",
   TabCrashHandler: "resource:///modules/ContentCrashHandlers.jsm",
   TelemetryEnvironment: "resource://gre/modules/TelemetryEnvironment.jsm",
-  Translation: "resource:///modules/translation/Translation.jsm",
+  Translation: "resource:///modules/translation/TranslationParent.jsm",
   UITour: "resource:///modules/UITour.jsm",
   UpdateUtils: "resource://gre/modules/UpdateUtils.jsm",
   UrlbarInput: "resource:///modules/UrlbarInput.jsm",
@@ -1324,13 +1324,14 @@ var gKeywordURIFixup = {
           return;
         }
 
+        let displayHostName = "http://" + hostName + "/";
         let message = gNavigatorBundle.getFormattedString(
           "keywordURIFixup.message",
-          [hostName]
+          [displayHostName]
         );
         let yesMessage = gNavigatorBundle.getFormattedString(
           "keywordURIFixup.goTo",
-          [hostName]
+          [displayHostName]
         );
 
         let buttons = [
@@ -1805,7 +1806,6 @@ var gBrowserInit = {
     // loading the frame script to ensure that we don't miss any
     // message sent between when the frame script is loaded and when
     // the listener is registered.
-    LanguageDetectionListener.init();
     CaptivePortalWatcher.init();
     ZoomUI.init(window);
 
@@ -3142,13 +3142,8 @@ function readFromClipboard() {
 /**
  * Open the View Source dialog.
  *
- * @param aArgsOrDocument
- *        Either an object or a Document. Passing a Document is deprecated,
- *        and is not supported with e10s. This function will throw if
- *        aArgsOrDocument is a CPOW.
- *
- *        If aArgsOrDocument is an object, that object can take the
- *        following properties:
+ * @param args
+ *        An object with the following properties:
  *
  *        URL (required):
  *          A string URL for the page we'd like to view the source of.
@@ -3163,27 +3158,7 @@ function readFromClipboard() {
  *        lineNumber (optional):
  *          The line number to focus on once the source is loaded.
  */
-async function BrowserViewSourceOfDocument(aArgsOrDocument) {
-  let args;
-
-  if (aArgsOrDocument instanceof Document) {
-    let doc = aArgsOrDocument;
-    // Deprecated API - callers should pass args object instead.
-    if (Cu.isCrossProcessWrapper(doc)) {
-      throw new Error(
-        "BrowserViewSourceOfDocument cannot accept a CPOW as a document."
-      );
-    }
-
-    let win = doc.defaultView;
-    let browser = win.docShell.chromeEventHandler;
-    let outerWindowID = win.windowUtils.outerWindowID;
-    let URL = browser.currentURI.spec;
-    args = { browser, outerWindowID, URL };
-  } else {
-    args = aArgsOrDocument;
-  }
-
+async function BrowserViewSourceOfDocument(args) {
   // Check if external view source is enabled.  If so, try it.  If it fails,
   // fallback to internal view source.
   if (Services.prefs.getBoolPref("view_source.editor.external")) {
@@ -3358,28 +3333,6 @@ function UpdateUrlbarSearchSplitterState() {
     urlbar.parentNode.insertBefore(splitter, ibefore);
   } else if (splitter) {
     splitter.remove();
-  }
-
-  if (!ibefore && urlbar.hasAttribute("width")) {
-    urlbar.parentNode
-      .querySelectorAll("toolbarspring")
-      .forEach(n => n.removeAttribute("width"));
-    urlbar.removeAttribute("width");
-    Services.xulStore.removeValue(
-      document.documentURI,
-      "urlbar-container",
-      "width"
-    );
-    let searchbarNode =
-      searchbar || gNavToolbox.palette.querySelector("#search-container");
-    if (searchbarNode) {
-      searchbarNode.removeAttribute("width");
-    }
-    Services.xulStore.removeValue(
-      document.documentURI,
-      "search-container",
-      "width"
-    );
   }
 }
 
@@ -7394,17 +7347,6 @@ var gPageStyleMenu = {
   },
 };
 
-var LanguageDetectionListener = {
-  init() {
-    window.messageManager.addMessageListener(
-      "Translation:DocumentState",
-      msg => {
-        Translation.documentStateReceived(msg.target, msg.data);
-      }
-    );
-  },
-};
-
 // Note that this is also called from non-browser windows on OSX, which do
 // share menu items but not much else. See nonbrowser-mac.js.
 var BrowserOffline = {
@@ -8867,13 +8809,14 @@ const SafeBrowsingNotificationBox = {
 function TabModalPromptBox(browser) {
   this._weakBrowserRef = Cu.getWeakReference(browser);
   /*
-   * This WeakMap holds the TabModalPrompt instances, key to the <tabmodalprompt> prompt
+   * These WeakMaps holds the TabModalPrompt instances, key to the <tabmodalprompt> prompt
    * in the DOM. We don't want to hold the instances directly to avoid leaking.
    *
    * WeakMap also prevents us from reading back its insertion order.
    * Order of the elements in the DOM should be the only order to consider.
    */
-  this.prompts = new WeakMap();
+  this._contentPrompts = new WeakMap();
+  this._tabPrompts = new WeakMap();
 }
 
 TabModalPromptBox.prototype = {
@@ -8897,10 +8840,24 @@ TabModalPromptBox.prototype = {
     onCloseCallback.apply(this, args);
   },
 
+  getPrompt(promptEl) {
+    if (promptEl.classList.contains("tab-prompt")) {
+      return this._tabPrompts.get(promptEl);
+    }
+    return this._contentPrompts.get(promptEl);
+  },
+
   appendPrompt(args, onCloseCallback) {
     let browser = this.browser;
     let newPrompt = new TabModalPrompt(browser.ownerGlobal);
-    this.prompts.set(newPrompt.element, newPrompt);
+
+    if (args.modalType === Ci.nsIPrompt.MODAL_TYPE_TAB) {
+      newPrompt.element.classList.add("tab-prompt");
+      this._tabPrompts.set(newPrompt.element, newPrompt);
+    } else {
+      newPrompt.element.classList.add("content-prompt");
+      this._contentPrompts.set(newPrompt.element, newPrompt);
+    }
 
     browser.parentNode.insertBefore(
       newPrompt.element,
@@ -8908,7 +8865,7 @@ TabModalPromptBox.prototype = {
     );
     browser.setAttribute("tabmodalPromptShowing", true);
 
-    let prompts = this.listPrompts();
+    let prompts = this.listPrompts(args.modalType);
     if (prompts.length > 1) {
       // Let's hide ourself behind the current prompt.
       newPrompt.element.hidden = true;
@@ -8950,11 +8907,16 @@ TabModalPromptBox.prototype = {
   },
 
   removePrompt(aPrompt) {
-    this.prompts.delete(aPrompt.element);
+    if (aPrompt.modalType === Ci.nsIPrompt.MODAL_TYPE_TAB) {
+      this._tabPrompts.delete(aPrompt.element);
+    } else {
+      this._contentPrompts.delete(aPrompt.element);
+    }
+
     let browser = this.browser;
     aPrompt.element.remove();
 
-    let prompts = this.listPrompts();
+    let prompts = this.listPrompts(aPrompt.modalType);
     if (prompts.length) {
       let prompt = prompts[prompts.length - 1];
       prompt.element.hidden = false;
@@ -8966,15 +8928,29 @@ TabModalPromptBox.prototype = {
     }
   },
 
-  listPrompts(aPrompt) {
+  listPrompts(aModalType = null) {
     // Get the nodelist, then return the TabModalPrompt instances as an array
-    const XUL_NS =
-      "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-    let els = this.browser.parentNode.getElementsByTagNameNS(
-      XUL_NS,
-      "tabmodalprompt"
+    let selector = "tabmodalprompt";
+    let promptMap;
+
+    if (aModalType != null) {
+      if (aModalType === Ci.nsIPrompt.MODAL_TYPE_TAB) {
+        selector += ".tab-prompt";
+        promptMap = this._tabPrompts;
+      } else {
+        selector += ".content-prompt";
+        promptMap = this._contentPrompts;
+      }
+    }
+
+    let elements = this.browser.parentNode.querySelectorAll(selector);
+
+    if (promptMap) {
+      return [...elements].map(el => promptMap.get(el));
+    }
+    return [...elements].map(
+      el => this._contentPrompts.get(el) || this._tabPrompts.get(el)
     );
-    return Array.from(els).map(el => this.prompts.get(el));
   },
 
   onNextPromptShowAllowFocusCheckboxFor(principal) {

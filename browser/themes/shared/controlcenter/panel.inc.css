@@ -1040,7 +1040,7 @@ description#identity-popup-content-verifier,
 }
 
 .protections-popup-settings-icon {
-  list-style-image: url(chrome://browser/skin/settings.svg);
+  list-style-image: url(chrome://global/skin/icons/settings.svg);
 }
 
 .protections-popup-show-report-icon {
@@ -1066,6 +1066,11 @@ description#identity-popup-content-verifier,
 
 #protections-popup-trackers-blocked-counter-description {
   color: var(--protections-popup-description-color);
+}
+
+#protections-popup-footer-protection-type-label {
+    margin-inline-end: var(--horizontal-padding);
+    color: var(--protections-popup-description-color);
 }
 
 .protections-popup-description {

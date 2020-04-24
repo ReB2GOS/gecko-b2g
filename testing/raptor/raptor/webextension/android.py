@@ -81,6 +81,7 @@ class WebExtensionAndroid(PerftestAndroid, WebExtension):
             args=[
                 "--profile",
                 self.remote_profile,
+                "--allow-downgrade",
                 "use_multiprocess",
                 self.config["e10s"],
             ],
@@ -127,12 +128,16 @@ class WebExtensionAndroid(PerftestAndroid, WebExtension):
 
         extra_args = [
             "-profile", self.remote_profile,
+            "--allow-downgrade",
             "--es", "env0",
             "LOG_VERBOSE=1",
             "--es", "env1",
             "R_LOG_LEVEL=6",
             "--es", "env2",
             "MOZ_WEBRENDER=%d" % self.config["enable_webrender"],
+            # Force the app to immediately exit for content crashes
+            "--es", "env3",
+            "MOZ_CRASHREPORTER_SHUTDOWN=1",
         ]
 
         try:
