@@ -33,7 +33,11 @@ pref("security.tls.insecure_fallback_hosts", "");
 // https://tools.ietf.org/html/draft-davidben-http2-tls13-00
 pref("security.tls.enable_post_handshake_auth", false);
 pref("security.tls.hello_downgrade_check", true);
-pref("security.tls.enable_delegated_credentials", false);
+#ifdef NIGHTLY_BUILD
+  pref("security.tls.enable_delegated_credentials", true);
+#else if MOZ_UPDATE_CHANNEL != esr
+  pref("security.tls.enable_delegated_credentials", false);
+#endif
 
 pref("security.ssl.treat_unsafe_negotiation_as_broken", false);
 pref("security.ssl.require_safe_negotiation",  false);
@@ -229,8 +233,6 @@ pref("browser.bookmarks.max_backups",       5);
 pref("browser.cache.disk.capacity",         256000);
 
 pref("browser.cache.disk_cache_ssl",        true);
-// 0 = once-per-session, 1 = each-time, 2 = never, 3 = when-appropriate/automatically
-pref("browser.cache.check_doc_frequency",   3);
 // The half life used to re-compute cache entries frecency in hours.
 pref("browser.cache.frecency_half_life_hours", 6);
 
@@ -977,7 +979,6 @@ pref("editor.use_div_for_default_newlines",  true);
 // Prefs specific to seamonkey composer belong in
 // comm-central/editor/ui/composer.js
 pref("editor.use_custom_colors", false);
-pref("editor.singleLine.pasteNewlines",      2);
 pref("editor.use_css",                       false);
 pref("editor.css.default_length_unit",       "px");
 pref("editor.resizing.preserve_ratio",       true);
@@ -1264,9 +1265,6 @@ pref("logging.config.clear_on_startup", true);
 pref("network.tickle-wifi.enabled", false);
 pref("network.tickle-wifi.duration", 400);
 pref("network.tickle-wifi.delay", 16);
-
-// Turn off interprocess security checks. Needed to run xpcshell tests.
-pref("network.disable.ipc.security", true);
 
 // Default action for unlisted external protocol handlers
 pref("network.protocol-handler.external-default", true);      // OK to load
@@ -2532,17 +2530,6 @@ pref("layout.word_select.stop_at_punctuation", true);
 // word selection/arrow-key movement purposes.
 pref("layout.word_select.stop_at_underscore", false);
 
-// controls caret style and word-delete during text selection
-// 0 = use platform default
-// 1 = caret moves and blinks as when there is no selection; word
-//     delete deselects the selection and then deletes word
-// 2 = caret moves to selection edge and is not visible during selection;
-//     word delete deletes the selection (Mac and Linux default)
-// 3 = caret moves and blinks as when there is no selection; word delete
-//     deletes the selection
-// Windows default is 1 for word delete behavior, the rest as for 2.
-pref("layout.selection.caret_style", 0);
-
 // Override DPI. A value of -1 means use the maximum of 96 and the system DPI.
 // A value of 0 means use the system DPI. A positive value is used as the DPI.
 // This sets the physical size of a device pixel and thus controls the
@@ -2717,15 +2704,6 @@ pref("browser.tabs.remote.separateFileUriProcess", true);
 // Pref to control whether we put all data: uri's in the default
 // web process when running with fission.
 pref("browser.tabs.remote.dataUriInDefaultWebProcess", false);
-
-// Pref that enables top level web content pages that are opened from file://
-// URI pages to run in the file content process.
-// This has been added in case breaking any window references between these
-// sorts of pages, which we have to do when we run them in the normal web
-// content process, causes compatibility issues.
-//
-// This is going away and for now is disabled.
-pref("browser.tabs.remote.allowLinkedWebInFileUriProcess", false);
 
 // This pref will cause assertions when a remoteType triggers a process switch
 // to a new remoteType it should not be able to trigger.
@@ -4131,7 +4109,6 @@ pref("alerts.showFavicons", false);
 #endif
 // whether to prevent the top level widget from going fullscreen
 pref("full-screen-api.ignore-widgets", false);
-pref("full-screen-api.pointer-lock.enabled", true);
 // transition duration of fade-to-black and fade-from-black, unit: ms
 #ifndef MOZ_WIDGET_GTK
   pref("full-screen-api.transition-duration.enter", "200 200");
@@ -4799,7 +4776,7 @@ pref("services.common.log.logger.tokenserverclient", "Debug");
   pref("identity.fxaccounts.auth.uri", "https://api.accounts.firefox.com/v1");
 
   // Percentage chance we skip an extension storage sync (kinto life support).
-  pref("services.sync.extension-storage.skipPercentageChance", 20);
+  pref("services.sync.extension-storage.skipPercentageChance", 50);
 #endif // MOZ_SERVICES_SYNC
 
 // Marionette is the remote protocol that lets OOP programs communicate with,
@@ -4896,6 +4873,12 @@ pref("devtools.errorconsole.deprecation_warnings", true);
 #endif
 
 pref("devtools.debugger.features.watchpoints", true);
+
+#ifdef NIGHTLY_BUILD
+  pref("devtools.debugger.features.windowless-service-workers", true);
+#else
+  pref("devtools.debugger.features.windowless-service-workers", false);
+#endif
 
 // Disable remote debugging protocol logging.
 pref("devtools.debugger.log", false);

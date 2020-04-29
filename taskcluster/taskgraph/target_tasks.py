@@ -27,6 +27,7 @@ TARGET_TASK_BLACKLIST = [
     r'linux1804-32',   # hide linux32 tests - bug 1599197
     r'linux-',  # hide all linux32 tasks by default - bug 1599197
     r'linux.*web-platform-tests.*-fis-',  # hide wpt linux fission tests - bug 1610879
+    r'web-platform-tests.*backlog',  # hide wpt jobs that are not implemented yet - bug 1572820
 ]
 
 
@@ -535,6 +536,12 @@ def target_tasks_general_perf_testing(full_task_graph, parameters, graph_config)
         if 'raptor-speedometer' in try_name \
                 and 'pgo' in platform \
                 and ('-fenix' in try_name or '-fennec68' in try_name):
+            return True
+
+        # Run the live site tests
+        if 'browsertime' in try_name \
+                and 'pgo' in platform \
+                and '-live' in try_name:
             return True
 
         # Run the following tests on android geckoview

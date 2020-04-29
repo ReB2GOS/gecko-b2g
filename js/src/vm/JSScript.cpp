@@ -58,6 +58,7 @@
 #include "vm/BytecodeLocation.h"
 #include "vm/BytecodeUtil.h"
 #include "vm/Compression.h"
+#include "vm/FunctionFlags.h"  // js::FunctionFlags
 #include "vm/HelperThreads.h"  // js::RunPendingSourceCompressions
 #include "vm/JSAtom.h"
 #include "vm/JSContext.h"
@@ -4047,7 +4048,6 @@ void JSScript::relazify(JSRuntime* rt) {
   //
   // NOTE: Keep in sync with CheckFlagsOnDelazification.
   clearFlag(ImmutableFlags::HasNonSyntacticScope);
-  clearFlag(ImmutableFlags::NeedsFunctionEnvironmentObjects);
 
   // We should not still be in any side-tables for the debugger or
   // code-coverage. The finalizer will not be able to clean them up once

@@ -1885,6 +1885,11 @@ void nsDisplayListBuilder::MarkPreserve3DFramesForDisplayList(
       if (child->Combines3DTransformWithAncestors()) {
         MarkFrameForDisplay(child, aDirtyFrame);
       }
+
+      if (child->IsBlockWrapper()) {
+        // Mark preserve-3d frames inside the block wrapper.
+        MarkPreserve3DFramesForDisplayList(child);
+      }
     }
   }
 }
@@ -7059,42 +7064,6 @@ void nsDisplaySubDocument::Disown() {
   }
 }
 
-UniquePtr<ScrollMetadata> nsDisplaySubDocument::ComputeScrollMetadata(
-    LayerManager* aLayerManager,
-    const ContainerLayerParameters& aContainerParameters) {
-  if (!(mFlags & nsDisplayOwnLayerFlags::GenerateScrollableLayer)) {
-    return UniquePtr<ScrollMetadata>(nullptr);
-  }
-
-  nsPresContext* presContext = mFrame->PresContext();
-  nsIFrame* rootScrollFrame = presContext->PresShell()->GetRootScrollFrame();
-  bool isRootContentDocument = presContext->IsRootContentDocumentCrossProcess();
-  PresShell* presShell = presContext->PresShell();
-  ContainerLayerParameters params(
-      aContainerParameters.mXScale * presShell->GetResolution(),
-      aContainerParameters.mYScale * presShell->GetResolution(), nsIntPoint(),
-      aContainerParameters);
-
-  nsRect viewport = mFrame->GetRect() - mFrame->GetPosition() +
-                    mFrame->GetOffsetToCrossDoc(ReferenceFrame());
-
-  nsIScrollableFrame* scrollableFrame = rootScrollFrame->GetScrollTargetFrame();
-  if (isRootContentDocument) {
-    viewport.SizeTo(scrollableFrame->GetScrollPortRect().Size());
-  }
-
-  UniquePtr<ScrollMetadata> metadata =
-      MakeUnique<ScrollMetadata>(nsLayoutUtils::ComputeScrollMetadata(
-          mFrame, rootScrollFrame, rootScrollFrame->GetContent(),
-          ReferenceFrame(), aLayerManager, mScrollParentId, viewport, Nothing(),
-          isRootContentDocument, Some(params)));
-  if (scrollableFrame) {
-    scrollableFrame->NotifyApzTransaction();
-  }
-
-  return metadata;
-}
-
 static bool UseDisplayPortForViewport(nsDisplayListBuilder* aBuilder,
                                       nsIFrame* aFrame) {
   return aBuilder->IsPaintingToWindow() &&
@@ -10097,8 +10066,7 @@ static Maybe<wr::WrClipId> CreateSimpleClipRegion(
       MOZ_ASSERT_UNREACHABLE("Unhandled shape id?");
       return Nothing();
   }
-  wr::WrClipId clipId =
-      aBuilder.DefineClip(Nothing(), rect, &clipRegions, nullptr);
+  wr::WrClipId clipId = aBuilder.DefineClip(Nothing(), rect, &clipRegions);
   return Some(clipId);
 }
 
@@ -10117,8 +10085,7 @@ static Maybe<wr::WrClipId> CreateWRClipPathAndMasks(
     return Nothing();
   }
 
-  wr::WrClipId clipId = aBuilder.DefineClip(
-      Nothing(), wr::ToLayoutRect(aBounds), nullptr, mask.ptr());
+  wr::WrClipId clipId = aBuilder.DefineImageMaskClip(mask.ref());
 
   return Some(clipId);
 }

@@ -136,11 +136,8 @@ ImageDocument::ImageDocument()
       mObservingImageLoader(false),
       mTitleUpdateInProgress(false),
       mHasCustomTitle(false),
-      mOriginalZoomLevel(1.0)
-#if defined(MOZ_WIDGET_ANDROID)
-      ,
+      mOriginalZoomLevel(1.0),
       mOriginalResolution(1.0)
-#endif
 {
 }
 
@@ -180,9 +177,7 @@ nsresult ImageDocument::StartDocumentLoad(const char* aCommand,
   }
 
   mOriginalZoomLevel = IsSiteSpecific() ? 1.0 : GetZoomLevel();
-#if defined(MOZ_WIDGET_ANDROID)
   mOriginalResolution = GetResolution();
-#endif
 
   NS_ASSERTION(aDocListener, "null aDocListener");
   *aDocListener = new ImageListener(this);
@@ -259,9 +254,7 @@ void ImageDocument::OnPageShow(bool aPersisted,
                                bool aOnlySystemGroup) {
   if (aPersisted) {
     mOriginalZoomLevel = IsSiteSpecific() ? 1.0 : GetZoomLevel();
-#if defined(MOZ_WIDGET_ANDROID)
     mOriginalResolution = GetResolution();
-#endif
   }
   RefPtr<ImageDocument> kungFuDeathGrip(this);
   UpdateSizeFromLayout();
@@ -290,17 +283,16 @@ void ImageDocument::ShrinkToFit() {
     if (imageHeight > mVisibleHeight) {
       classList->Add(NS_LITERAL_STRING("overflowingVertical"), IgnoreErrors());
     } else {
-      classList->Remove(NS_LITERAL_STRING("overflowingVertical"), IgnoreErrors());
+      classList->Remove(NS_LITERAL_STRING("overflowingVertical"),
+                        IgnoreErrors());
     }
     return;
   }
-#if defined(MOZ_WIDGET_ANDROID)
   if (GetResolution() != mOriginalResolution && mImageIsResized) {
     // Don't resize if resolution has changed, e.g., through pinch-zooming on
     // Android.
     return;
   }
-#endif
 
   // Keep image content alive while changing the attributes.
   RefPtr<HTMLImageElement> image = mImageContent;
@@ -689,43 +681,28 @@ void ImageDocument::UpdateTitleAndCharset() {
 }
 
 void ImageDocument::ResetZoomLevel() {
-  nsCOMPtr<nsIDocShell> docShell(mDocumentContainer);
-  if (docShell) {
-    if (nsContentUtils::IsChildOfSameType(this)) {
-      return;
-    }
+  if (nsContentUtils::IsChildOfSameType(this)) {
+    return;
+  }
 
-    nsCOMPtr<nsIContentViewer> cv;
-    docShell->GetContentViewer(getter_AddRefs(cv));
-    if (cv) {
-      cv->SetFullZoom(mOriginalZoomLevel);
-    }
+  if (RefPtr<BrowsingContext> bc = GetBrowsingContext()) {
+    bc->SetFullZoom(mOriginalZoomLevel);
   }
 }
 
 float ImageDocument::GetZoomLevel() {
-  float zoomLevel = mOriginalZoomLevel;
-  nsCOMPtr<nsIDocShell> docShell(mDocumentContainer);
-  if (docShell) {
-    nsCOMPtr<nsIContentViewer> cv;
-    docShell->GetContentViewer(getter_AddRefs(cv));
-    if (cv) {
-      cv->GetFullZoom(&zoomLevel);
-    }
+  if (BrowsingContext* bc = GetBrowsingContext()) {
+    return bc->FullZoom();
   }
-  return zoomLevel;
+  return mOriginalZoomLevel;
 }
 
-#if defined(MOZ_WIDGET_ANDROID)
 float ImageDocument::GetResolution() {
-  float resolution = mOriginalResolution;
-  RefPtr<PresShell> presShell = GetPresShell();
-  if (presShell) {
-    resolution = presShell->GetResolution();
+  if (PresShell* presShell = GetPresShell()) {
+    return presShell->GetResolution();
   }
-  return resolution;
+  return mOriginalResolution;
 }
-#endif
 
 }  // namespace dom
 }  // namespace mozilla

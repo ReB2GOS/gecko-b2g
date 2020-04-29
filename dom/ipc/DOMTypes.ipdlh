@@ -11,6 +11,7 @@ include "mozilla/layers/LayersMessageUtils.h";
 
 include IPCBlob;
 include IPCStream;
+include protocol PIPCBlobInputStream;
 include ProtocolTypes;
 include protocol PSHEntry;
 
@@ -285,6 +286,8 @@ struct DocShellLoadStateInit
   // nsCOMPtr<nsIDocShell> mSourceDocShell;
   // bool mIsSrcDocLoad; // useless without sourcedocshell
   // nsIChannel pendingRedirectedChannel; // sent through other mechanism
+
+  uint32_t LoadIdentifier;
 };
 
 struct TimedChannelInfo
@@ -318,7 +321,7 @@ struct ReplacementChannelConfigInit
   nsCString? method;
   nsIReferrerInfo referrerInfo;
   TimedChannelInfo? timedChannel;
-  nsIInputStream uploadStream;
+  nullable PIPCBlobInputStream uploadStream;
   bool uploadStreamHasHeaders;
   nsCString? contentType;
   nsCString? contentLength;

@@ -3,7 +3,9 @@
 # file, You can obtain one at http://mozilla.org/MPL/2.0/.
 import os
 import mozinfo
+
 from mozproxy import get_playback
+from mozproxy.utils import LOG
 from mozperftest.layers import Layer
 
 
@@ -11,26 +13,23 @@ HERE = os.path.dirname(__file__)
 
 
 class ProxyRunner(Layer):
-    name = "proxy"
+    """Use a proxy
+    """
 
-    arguments = {
-        "--proxy": {"action": "store_true", "default": False, "help": "Use a proxy"}
-    }
+    name = "proxy"
+    activated = False
 
     def __init__(self, env, mach_cmd):
         super(ProxyRunner, self).__init__(env, mach_cmd)
         self.proxy = None
+        LOG.info = self.info
+        LOG.error = self.error
 
     def setup(self):
         pass
 
     def __call__(self, metadata):
-        if not self.get_arg("proxy"):
-            return metadata
-
         self.metadata = metadata
-        if not self.get_arg("proxy"):
-            return metadata
 
         # replace with artifacts
         config = {

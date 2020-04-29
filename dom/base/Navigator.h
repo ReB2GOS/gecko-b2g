@@ -77,12 +77,6 @@ namespace network {
 class Connection;
 }  // namespace network
 
-namespace system {
-#ifdef MOZ_AUDIO_CHANNEL_MANAGER
-class AudioChannelManager;
-#endif
-}  // namespace system
-
 class DeviceStorageAreaListener;
 class Presentation;
 class LegacyMozTCPSocket;
@@ -197,7 +191,6 @@ class Navigator final : public nsISupports, public nsWrapperCache {
 
   already_AddRefed<LegacyMozTCPSocket> MozTCPSocket();
   network::Connection* GetConnection(ErrorResult& aRv);
-  nsDOMCameraManager* GetMozCameras(ErrorResult& aRv);
   MediaDevices* GetMediaDevices(ErrorResult& aRv);
 
   void GetGamepads(nsTArray<RefPtr<Gamepad>>& aGamepads, ErrorResult& aRv);
@@ -216,10 +209,6 @@ class Navigator final : public nsISupports, public nsWrapperCache {
                                               ErrorResult& aRv);
 
   Presentation* GetPresentation(ErrorResult& aRv);
-
-#ifdef MOZ_AUDIO_CHANNEL_MANAGER
-  system::AudioChannelManager* GetMozAudioChannelManager(ErrorResult& aRv);
-#endif  // MOZ_AUDIO_CHANNEL_MANAGER
 
   bool SendBeacon(const nsAString& aUrl, const Nullable<fetch::BodyInit>& aData,
                   ErrorResult& aRv);
@@ -255,8 +244,6 @@ class Navigator final : public nsISupports, public nsWrapperCache {
   AddonManager* GetMozAddonManager(ErrorResult& aRv);
 
   // WebIDL helper methods
-  static bool HasCameraSupport(JSContext* /* unused */,
-                               JSObject* aGlobal);
 #ifdef MOZ_NFC
   static bool HasNFCSupport(JSContext* /* unused */, JSObject* aGlobal);
 #endif // MOZ_NFC
@@ -320,10 +307,6 @@ class Navigator final : public nsISupports, public nsWrapperCache {
 // FIXME
 //  RefPtr<MobileConnectionArray> mMobileConnections;
 #endif
-#ifdef MOZ_AUDIO_CHANNEL_MANAGER
-  RefPtr<system::AudioChannelManager> mAudioChannelManager;
-#endif
-  RefPtr<nsDOMCameraManager> mCameraManager;
   RefPtr<MediaDevices> mMediaDevices;
   nsTArray<nsWeakPtr> mDeviceStorageStores;
   RefPtr<ServiceWorkerContainer> mServiceWorkerContainer;

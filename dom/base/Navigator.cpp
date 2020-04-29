@@ -84,11 +84,6 @@
 
 #include "mozilla/dom/MediaDevices.h"
 #include "MediaManager.h"
-#include "DOMCameraManager.h"
-
-#ifdef MOZ_AUDIO_CHANNEL_MANAGER
-#  include "AudioChannelManager.h"
-#endif
 
 #include "nsJSUtils.h"
 
@@ -155,10 +150,6 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(Navigator)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mConnection)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mStorageManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCredentials)
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCameraManager)
-#ifdef MOZ_AUDIO_CHANNEL_MANAGER
-  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAudioChannelManager)
-#endif
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMediaDevices)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mServiceWorkerContainer)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mMediaCapabilities)
@@ -217,14 +208,7 @@ void Navigator::Invalidate() {
     mConnection = nullptr;
   }
 
-  mCameraManager = nullptr;
   mMediaDevices = nullptr;
-
-#ifdef MOZ_AUDIO_CHANNEL_MANAGER
-  if (mAudioChannelManager) {
-    mAudioChannelManager = nullptr;
-  }
-#endif
 
   uint32_t len = mDeviceStorageStores.Length();
   for (uint32_t i = 0; i < len; ++i) {
@@ -1872,23 +1856,6 @@ network::Connection* Navigator::GetConnection(ErrorResult& aRv) {
   return mConnection;
 }
 
-nsDOMCameraManager*
-Navigator::GetMozCameras(ErrorResult& aRv)
-{
-  if (!mCameraManager) {
-    if (!mWindow ||
-        !mWindow->GetOuterWindow() ||
-        mWindow->GetOuterWindow()->GetCurrentInnerWindow() != mWindow) {
-      aRv.Throw(NS_ERROR_NOT_AVAILABLE);
-      return nullptr;
-    }
-
-    mCameraManager = nsDOMCameraManager::CreateInstance(mWindow);
-  }
-
-  return mCameraManager;
-}
-
 already_AddRefed<ServiceWorkerContainer>
 Navigator::ServiceWorker()
 {
@@ -1929,39 +1896,11 @@ void Navigator::OnNavigation() {
   if (manager) {
     manager->OnNavigation(mWindow->WindowID());
   }
-  if (mCameraManager) {
-    mCameraManager->OnNavigation(mWindow->WindowID());
-  }
 }
-
-#ifdef MOZ_AUDIO_CHANNEL_MANAGER
-system::AudioChannelManager* Navigator::GetMozAudioChannelManager(
-    ErrorResult& aRv) {
-  if (!mAudioChannelManager) {
-    if (!mWindow) {
-      aRv.Throw(NS_ERROR_UNEXPECTED);
-      return nullptr;
-    }
-    mAudioChannelManager = new system::AudioChannelManager();
-    mAudioChannelManager->Init(mWindow);
-  }
-
-  return mAudioChannelManager;
-}
-#endif
 
 JSObject* Navigator::WrapObject(JSContext* cx,
                                 JS::Handle<JSObject*> aGivenProto) {
   return Navigator_Binding::Wrap(cx, this, aGivenProto);
-}
-
-/* static */
-bool
-Navigator::HasCameraSupport(JSContext* /* unused */, JSObject* aGlobal)
-{
-  nsCOMPtr<nsPIDOMWindowInner> win = GetWindowFromGlobal(aGlobal);
-  bool test = win && nsDOMCameraManager::CheckPermission(win);
-  return true;
 }
 
 /* static */

@@ -79,6 +79,9 @@ linux64-plain/opt:
             - linux64-cbindgen
             - linux64-lucetc
             - wasi-sysroot
+    optimization:
+        push-interval-10:
+            - linux
 
 linux64-fuzzing/debug:
     description: "Linux64 Fuzzing Debug"
@@ -125,7 +128,7 @@ linux64-fuzzing/debug:
             # this dependency can be removed.
             - linux64-fix-stacks
     optimization:
-        fuzzing-builds:
+        build-fuzzing:
             - linux
 
 linux64/debug:
@@ -209,6 +212,9 @@ linux64-plain/debug:
             - linux64-cbindgen
             - linux64-lucetc
             - wasi-sysroot
+    optimization:
+        push-interval-10:
+            - linux
 
 linux64-devedition/opt:
     description: "Linux64 devedition (shippable)"
@@ -837,7 +843,7 @@ linux64-tsan-fuzzing/opt:
             - linux64-lucetc
             - wasi-sysroot
     optimization:
-        fuzzing-builds:
+        build-fuzzing:
             - linux
 
 linux64-asan-fuzzing/opt:
@@ -883,7 +889,7 @@ linux64-asan-fuzzing/opt:
             - linux64-lucetc
             - wasi-sysroot
     optimization:
-        fuzzing-builds:
+        build-fuzzing:
             - linux
 
 linux64-asan-fuzzing-ccov/opt:
@@ -971,7 +977,7 @@ linux64-fuzzing-ccov/opt:
             - linux64-lucetc
             - wasi-sysroot
     optimization:
-        fuzzing-builds:
+        build-fuzzing:
             - linux
 
 linux64-asan-reporter-nightly/opt:
@@ -1400,6 +1406,9 @@ linux64-aarch64/opt:
             - linux64-node
             - linux64-lucetc
             - wasi-sysroot
+    optimization:
+        push-interval-10:
+            - linux
 
 linux-gcp/debug:
     description: "Linux32 Debug - built on GCP"

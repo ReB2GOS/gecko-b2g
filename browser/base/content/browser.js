@@ -2255,6 +2255,10 @@ var gBrowserInit = {
     });
 
     scheduleIdleTask(() => {
+      CombinedStopReload.animationDisabledDuringStartup = false;
+    });
+
+    scheduleIdleTask(() => {
       // setup simple gestures support
       gGestureSupport.init(true);
 
@@ -5540,6 +5544,8 @@ var LinkTargetDisplay = {
 };
 
 var CombinedStopReload = {
+  animationDisabledDuringStartup: true,
+
   // Try to initialize. Returns whether initialization was successful, which
   // may mean we had already initialized.
   ensureInitialized() {
@@ -5652,6 +5658,7 @@ var CombinedStopReload = {
       aWebProgress.isTopLevel &&
       aWebProgress.isLoadingDocument &&
       !gBrowser.tabAnimationsInProgress &&
+      !this.animationDisabledDuringStartup &&
       this.stopReloadContainer.closest("#nav-bar-customization-target") &&
       window.matchMedia("(prefers-reduced-motion: no-preference)").matches;
 
@@ -5675,6 +5682,7 @@ var CombinedStopReload = {
       aWebProgress.isTopLevel &&
       !aWebProgress.isLoadingDocument &&
       !gBrowser.tabAnimationsInProgress &&
+      !this.animationDisabledDuringStartup &&
       this._loadTimeExceedsMinimumForAnimation() &&
       this.stopReloadContainer.closest("#nav-bar-customization-target") &&
       window.matchMedia("(prefers-reduced-motion: no-preference)").matches;
@@ -8882,16 +8890,19 @@ TabModalPromptBox.prototype = {
       /* Ignore exceptions for host-less URIs */
     }
     if (hostForAllowFocusCheckbox) {
-      let allowFocusRow = document.createXULElement("row");
-      allowFocusCheckbox = document.createXULElement("checkbox");
-      let spacer = document.createXULElement("spacer");
+      let allowFocusRow = document.createElement("div");
+
+      let spacer = document.createElement("div");
       allowFocusRow.appendChild(spacer);
+
+      allowFocusCheckbox = document.createXULElement("checkbox");
       let label = gTabBrowserBundle.formatStringFromName(
         "tabs.allowTabFocusByPromptForSite",
         [hostForAllowFocusCheckbox]
       );
       allowFocusCheckbox.setAttribute("label", label);
       allowFocusRow.appendChild(allowFocusCheckbox);
+
       newPrompt.ui.rows.append(allowFocusRow);
     }
 

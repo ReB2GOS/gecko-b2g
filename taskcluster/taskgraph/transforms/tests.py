@@ -1264,6 +1264,7 @@ CHUNK_SUITES_BLACKLIST = (
     'awsy',
     'cppunittest',
     'crashtest',
+    'crashtest-qr',
     'firefox-ui-functional-local',
     'firefox-ui-functional-remote',
     'geckoview-junit',
@@ -1280,6 +1281,7 @@ CHUNK_SUITES_BLACKLIST = (
     'mochitest-webgl2-ext',
     'raptor',
     'reftest',
+    'reftest-qr',
     'reftest-gpu',
     'reftest-no-accel',
     'talos',
@@ -1292,6 +1294,7 @@ CHUNK_SUITES_BLACKLIST = (
     'web-platform-tests',
     'web-platform-tests-crashtest',
     'web-platform-tests-reftest',
+    'web-platform-tests-reftest-backlog',
     'web-platform-tests-wdspec',
 )
 """These suites will be chunked at test runtime rather than here in the taskgraph."""

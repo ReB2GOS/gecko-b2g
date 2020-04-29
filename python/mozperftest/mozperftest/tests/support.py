@@ -9,16 +9,28 @@ from mozperftest.environment import MachEnvironment
 
 
 @contextlib.contextmanager
-def temp_file(name="temp"):
+def temp_file(name="temp", content=None):
     tempdir = tempfile.mkdtemp()
     path = os.path.join(tempdir, name)
+    if content is not None:
+        with open(path, "w") as f:
+            f.write(content)
     try:
         yield path
     finally:
         shutil.rmtree(tempdir)
 
 
-def get_running_env():
+@contextlib.contextmanager
+def temp_dir():
+    tempdir = tempfile.mkdtemp()
+    try:
+        yield tempdir
+    finally:
+        shutil.rmtree(tempdir)
+
+
+def get_running_env(**kwargs):
     from mozbuild.base import MozbuildObject
 
     config = MozbuildObject.from_environment()
@@ -35,7 +47,7 @@ def get_running_env():
         "browsertime-clobber": False,
         "browsertime-install-url": None,
     }
-
+    mach_args.update(kwargs)
     env = MachEnvironment(mach_cmd, "script", **mach_args)
     metadata = Metadata(mach_cmd, env, "script")
     return mach_cmd, metadata, env

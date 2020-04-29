@@ -641,18 +641,12 @@ class ContentParent final
 
   static bool IsInputEventQueueSupported();
 
-  mozilla::ipc::IPCResult RecvAttachBrowsingContext(
-      BrowsingContext::IPCInitializer&& aInit);
+  mozilla::ipc::IPCResult RecvCreateBrowsingContext(
+      uint64_t aGroupId, BrowsingContext::IPCInitializer&& aInit);
 
-  mozilla::ipc::IPCResult RecvDetachBrowsingContext(
-      uint64_t aContextId, DetachBrowsingContextResolver&& aResolve);
-
-  mozilla::ipc::IPCResult RecvCacheBrowsingContextChildren(
-      const MaybeDiscarded<BrowsingContext>& aContext);
-
-  mozilla::ipc::IPCResult RecvRestoreBrowsingContextChildren(
+  mozilla::ipc::IPCResult RecvDiscardBrowsingContext(
       const MaybeDiscarded<BrowsingContext>& aContext,
-      nsTArray<MaybeDiscarded<BrowsingContext>>&& aChildren);
+      DiscardBrowsingContextResolver&& aResolve);
 
   mozilla::ipc::IPCResult RecvWindowClose(
       const MaybeDiscarded<BrowsingContext>& aContext, bool aTrustedCaller);
@@ -1016,7 +1010,8 @@ class ContentParent final
       PSystemMessageServiceParent* aActor) override;
 
   PWebBrowserPersistDocumentParent* AllocPWebBrowserPersistDocumentParent(
-      PBrowserParent* aBrowser, const uint64_t& aOuterWindowID);
+      PBrowserParent* aBrowser,
+      const MaybeDiscarded<BrowsingContext>& aContext);
 
   bool DeallocPWebBrowserPersistDocumentParent(
       PWebBrowserPersistDocumentParent* aActor);
@@ -1335,15 +1330,23 @@ class ContentParent final
       const nsCString& aTrackingOrigin, const int& aAllowMode,
       FirstPartyStorageAccessGrantedForOriginResolver&& aResolver);
 
+  mozilla::ipc::IPCResult RecvCompleteAllowAccessFor(
+      const MaybeDiscarded<BrowsingContext>& aParentContext,
+      uint64_t aTopLevelWindowId, const Principal& aTrackingPrincipal,
+      const nsCString& aTrackingOrigin, uint32_t aCookieBehavior,
+      const ContentBlockingNotifier::StorageAccessGrantedReason& aReason,
+      CompleteAllowAccessForResolver&& aResolver);
+
   mozilla::ipc::IPCResult RecvStoreUserInteractionAsPermission(
       const Principal& aPrincipal);
 
-  mozilla::ipc::IPCResult RecvNotifyMediaStateChanged(
+  mozilla::ipc::IPCResult RecvNotifyMediaPlaybackChanged(
       const MaybeDiscarded<BrowsingContext>& aContext,
-      ControlledMediaState aState);
+      MediaPlaybackState aState);
 
   mozilla::ipc::IPCResult RecvNotifyMediaAudibleChanged(
-      const MaybeDiscarded<BrowsingContext>& aContext, bool aAudible);
+      const MaybeDiscarded<BrowsingContext>& aContext,
+      MediaAudibleState aState);
 
   mozilla::ipc::IPCResult RecvNotifyPictureInPictureModeChanged(
       const MaybeDiscarded<BrowsingContext>& aContext, bool aEnabled);
@@ -1376,6 +1379,9 @@ class ContentParent final
       PSHEntryParent* aNewLSHE, PSHEntryParent* aNewOSHE,
       const MaybeDiscarded<BrowsingContext>& aMaybeContext);
 
+  mozilla::ipc::IPCResult RecvAbortOtherOrientationPendingPromises(
+      const MaybeDiscarded<BrowsingContext>& aContext);
+
   // Notify the ContentChild to enable the input event prioritization when
   // initializing.
   void MaybeEnableRemoteInputEventQueue();
@@ -1393,9 +1399,6 @@ class ContentParent final
                                const bool& aAnonymize,
                                const bool& aMinimizeMemoryUsage,
                                const Maybe<FileDescriptor>& aDMDFile) override;
-
-  static void HoldBrowsingContextGroup(BrowsingContextGroup* aBCG);
-  static void ReleaseBrowsingContextGroup(BrowsingContextGroup* aBCG);
 
   void OnBrowsingContextGroupSubscribe(BrowsingContextGroup* aGroup);
   void OnBrowsingContextGroupUnsubscribe(BrowsingContextGroup* aGroup);

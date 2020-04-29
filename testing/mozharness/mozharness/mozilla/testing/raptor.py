@@ -13,8 +13,9 @@ import os
 import re
 import sys
 import subprocess
+import tempfile
 
-from shutil import copyfile
+from shutil import copyfile, rmtree
 
 import mozharness
 
@@ -256,6 +257,12 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             "default": "settled",
             "help": "Name of profile scenario.",
         }],
+        [["--live-sites"], {
+            "dest": "live_sites",
+            "action": "store_true",
+            "default": False,
+            "help": "Run tests using live sites instead of recorded sites.",
+        }],
         [["--debug-mode"], {
             "dest": "debug_mode",
             "action": "store_true",
@@ -308,6 +315,7 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
         kwargs.setdefault('all_actions', ['clobber',
                                           'download-and-extract',
                                           'populate-webroot',
+                                          'install-chrome-android',
                                           'install-chromium-distribution',
                                           'create-virtualenv',
                                           'install',
@@ -384,6 +392,7 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
         self.power_test = self.config.get('power_test')
         self.memory_test = self.config.get('memory_test')
         self.cpu_test = self.config.get('cpu_test')
+        self.live_sites = self.config.get('live_sites')
         self.disable_perf_tuning = self.config.get('disable_perf_tuning')
         self.conditioned_profile_scenario = self.config.get('conditioned_profile_scenario',
                                                             'settled')
@@ -428,6 +437,48 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
 
         self.abs_dirs = abs_dirs
         return self.abs_dirs
+
+    def install_chrome_android(self):
+        '''Install Google Chrome for Android in production from tooltool'''
+        if self.app != "chrome-m":
+            self.info("Google Chrome for Android not required")
+            return
+        if self.config.get("run_local"):
+            self.info(
+                "Google Chrome for Android will not be installed "
+                "from tooltool when running locally"
+            )
+            return
+        self.info("Fetching and installing Google Chrome for Android")
+
+        # Fetch the APK
+        tmpdir = tempfile.mkdtemp()
+        self.tooltool_fetch(
+            os.path.join(
+                self.raptor_path,
+                "raptor",
+                "tooltool-manifests",
+                "chrome-android",
+                "chrome80.manifest"
+            ),
+            output_dir=tmpdir
+        )
+
+        # Find the downloaded APK
+        files = os.listdir(tmpdir)
+        if len(files) > 1:
+            raise Exception("Found more than one chrome APK file after tooltool download")
+        chromeapk = os.path.join(tmpdir, files[0])
+
+        # Disable verification and install the APK
+        self.device.shell_output("settings put global verifier_verify_adb_installs 0")
+        self.install_apk(chromeapk, replace=True)
+
+        # Re-enable verification and delete the temporary directory
+        self.device.shell_output("settings put global verifier_verify_adb_installs 1")
+        rmtree(tmpdir)
+
+        self.info("Google Chrome for Android successfully installed")
 
     def install_chromium_distribution(self):
         '''Install Google Chromium distribution in production'''
@@ -571,6 +622,8 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
             options.extend(['--memory-test'])
         if self.config.get('cpu_test', False):
             options.extend(['--cpu-test'])
+        if self.config.get('live_sites', False):
+            options.extend(['--live-sites'])
         if self.config.get('disable_perf_tuning', False):
             options.extend(['--disable-perf-tuning'])
         if self.config.get('cold', False):
@@ -614,13 +667,13 @@ class Raptor(TestingMixin, MercurialScript, CodeCoverageMixin, AndroidMixin):
         if not os.path.isdir(upload_dir):
             self.mkdir_p(upload_dir)
 
-    def install_apk(self, apk):
+    def install_apk(self, apk, replace=False):
         # Override AndroidMixin's install_apk in order to capture
         # logcat during the installation. If the installation fails,
         # the logcat file will be left in the upload directory.
         self.logcat_start()
         try:
-            super(Raptor, self).install_apk(apk)
+            super(Raptor, self).install_apk(apk, replace=replace)
         finally:
             self.logcat_stop()
 

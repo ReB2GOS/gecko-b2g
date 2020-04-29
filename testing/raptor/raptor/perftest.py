@@ -84,6 +84,7 @@ either Raptor or browsertime."""
         power_test=False,
         cpu_test=False,
         memory_test=False,
+        live_sites=False,
         is_release_build=False,
         debug_mode=False,
         post_startup_delay=POST_DELAY_DEFAULT,
@@ -122,6 +123,7 @@ either Raptor or browsertime."""
             "power_test": power_test,
             "memory_test": memory_test,
             "cpu_test": cpu_test,
+            "live_sites": live_sites,
             "is_release_build": is_release_build,
             "enable_control_server_wait": memory_test or cpu_test,
             "e10s": e10s,
@@ -468,7 +470,7 @@ either Raptor or browsertime."""
 
     def get_playback_config(self, test):
         platform = self.config["platform"]
-        playback_dir = os.path.join(here, "playback")
+        playback_dir = os.path.join(here, "tooltool-manifests", "playback")
 
         self.config.update(
             {
@@ -635,8 +637,10 @@ class PerftestAndroid(Perftest):
 
         try:
             LOG.info("copying profile to device: %s" % self.remote_profile)
-            self.device.rm(self.remote_profile, force=True, recursive=True)
-            # self.device.mkdir(self.remote_profile)
+            # We must use root=True since the remote profile has been
+            # modified by gecko and has content which is only
+            # accessible to the gecko user.
+            self.device.rm(self.remote_profile, force=True, recursive=True, root=True)
             self.device.push(self.profile.profile, self.remote_profile)
             self.device.chmod(self.remote_profile, recursive=True, root=True)
 

@@ -494,6 +494,8 @@ function stripAnyPrefix(str) {
  *        Whether to trim the trailing slash.
  * @param {boolean} options.trimEmptyQuery
  *        Whether to trim a trailing `?`.
+ * @param {boolean} options.trimEmptyHash
+ *        Whether to trim a trailing `#`.
  * @returns {array} [modified, prefix, suffix]
  *          modified: {string} The modified spec.
  *          prefix: {string} The parts stripped from the prefix, if any.
@@ -513,13 +515,17 @@ function stripPrefixAndTrim(spec, options = {}) {
     spec = spec.slice(4);
     prefix += "www.";
   }
-  if (options.trimSlash && spec.endsWith("/")) {
+  if (options.trimEmptyHash && spec.endsWith("#")) {
     spec = spec.slice(0, -1);
-    suffix += "/";
+    suffix = "#" + suffix;
   }
   if (options.trimEmptyQuery && spec.endsWith("?")) {
     spec = spec.slice(0, -1);
-    suffix += "?";
+    suffix = "?" + suffix;
+  }
+  if (options.trimSlash && spec.endsWith("/")) {
+    spec = spec.slice(0, -1);
+    suffix = "/" + suffix;
   }
   return [spec, prefix, suffix];
 }
@@ -558,8 +564,9 @@ function makeKeyForMatch(match) {
       stripHttp: true,
       stripHttps: true,
       stripWww: true,
-      trimEmptyQuery: true,
       trimSlash: true,
+      trimEmptyQuery: true,
+      trimEmptyHash: true,
     });
     return [key, prefix, null];
   }
@@ -589,20 +596,6 @@ function makeKeyForMatch(match) {
   }
 
   return [key, prefix, action];
-}
-
-/**
- * Returns whether the passed in string looks like a url.
- */
-function looksLikeUrl(str, ignoreAlphanumericHosts = false) {
-  // Single word including special chars.
-  return (
-    !REGEXP_SPACES.test(str) &&
-    (["/", "@", ":", "["].some(c => str.includes(c)) ||
-      (ignoreAlphanumericHosts
-        ? /^([\[\]A-Z0-9-]+\.){3,}[^.]+$/i.test(str)
-        : str.includes(".")))
-  );
 }
 
 /**
@@ -1004,14 +997,12 @@ Search.prototype = {
     // Check for Preloaded Sites Expiry before Autofill
     await this._checkPreloadedSitesExpiry();
 
-    // If the query is simply "@", then the results should be a list of all the
-    // search engines with "@" aliases, without a hueristic result.
-    if (this._trimmedOriginalSearchString == "@") {
-      let added = await this._addSearchEngineTokenAliasMatches();
-      if (added) {
-        this._autocompleteSearch.finishSearch(true);
-        return;
-      }
+    // If the query is simply "@" and we have tokenAliasEngines then return
+    // early. UrlbarProviderTokenAliasEngines will add engine results.
+    let tokenAliasEngines = await PlacesSearchAutocompleteProvider.tokenAliasEngines();
+    if (this._trimmedOriginalSearchString == "@" && tokenAliasEngines.length) {
+      this._autocompleteSearch.finishSearch(true);
+      return;
     }
 
     // Add the first heuristic result, if any.  Set _addingHeuristicResult
@@ -1257,25 +1248,6 @@ Search.prototype = {
     return true;
   },
 
-  /**
-   * Adds matches for all the engines with "@" aliases, if any.
-   *
-   * @returns {bool} True if any results were added, false if not.
-   */
-  async _addSearchEngineTokenAliasMatches() {
-    let engines = await PlacesSearchAutocompleteProvider.tokenAliasEngines();
-    if (!engines || !engines.length) {
-      return false;
-    }
-    for (let { engine, tokenAliases } of engines) {
-      this._addSearchEngineMatch({
-        engine,
-        alias: tokenAliases[0],
-      });
-    }
-    return true;
-  },
-
   async _matchSearchEngineTokenAliasForAutofill() {
     // We need an "@engine" heuristic token.
     let token = this._heuristicToken;
@@ -1410,15 +1382,20 @@ Search.prototype = {
       // but isn't in the whitelist.
       let matched = await this._matchUnknownUrl();
       if (matched) {
-        // Since we can't tell if this is a real URL and
-        // whether the user wants to visit or search for it,
-        // we always provide an alternative searchengine match.
+        // Since we can't tell if this is a real URL and whether the user wants
+        // to visit or search for it, we provide an alternative searchengine
+        // match if the string looks like an alphanumeric origin or an e-mail.
+        let str = this._originalSearchString;
         try {
-          new URL(this._originalSearchString);
+          new URL(str);
         } catch (ex) {
           if (
             UrlbarPrefs.get("keyword.enabled") &&
-            !looksLikeUrl(this._originalSearchString, true)
+            (UrlbarTokenizer.looksLikeOrigin(str, {
+              noIp: true,
+              noPort: true,
+            }) ||
+              UrlbarTokenizer.REGEXP_COMMON_EMAIL.test(str))
           ) {
             this._addingHeuristicResult = false;
             await this._matchCurrentSearchEngine();
@@ -1913,10 +1890,8 @@ Search.prototype = {
       return;
     }
 
-    // Do not apply the special style if the user is doing a search from the
-    // location bar but the entered terms match an irrelevant portion of the
-    // URL. For example, "https://www.google.com/search?q=terms&client=firefox"
-    // when searching for "Firefox".
+    // Here we check that the user typed all or part of the search string in the
+    // search history result.
     let terms = parseResult.terms.toLowerCase();
     if (
       this._searchTokens.length &&
@@ -1925,15 +1900,46 @@ Search.prototype = {
       return;
     }
 
+    // The URL for the search suggestion formed by the user's typed query.
+    let [typedSuggestionUrl] = UrlbarUtils.getSearchQueryUrl(
+      parseResult.engine,
+      this._searchTokens.map(t => t.value).join(" ")
+    );
+
+    let historyParams = new URL(match.value).searchParams;
+    let typedParams = new URL(typedSuggestionUrl).searchParams;
+
+    // Checking the two URLs have the same query parameters with the same
+    // values, or a subset value in the case of the query parameter.
+    // Parameter order doesn't matter.
+    if (
+      Array.from(historyParams).length != Array.from(typedParams).length ||
+      !Array.from(historyParams.entries()).every(
+        ([key, value]) =>
+          // We want to match all non-search-string GET parameters exactly, to avoid
+          // restyling non-first pages of search results, or image results as web
+          // results.
+          // We let termsParameterName through because we already checked that the
+          // typed query is a subset of the search history query above with
+          // this._searchTokens.every(...).
+          key == parseResult.termsParameterName ||
+          value === typedParams.get(key)
+      )
+    ) {
+      return;
+    }
+
     // Turn the match into a searchengine action with a favicon.
     match.value = makeActionUrl("searchengine", {
-      engineName: parseResult.engineName,
+      engineName: parseResult.engine.name,
       input: parseResult.terms,
+      searchSuggestion: parseResult.terms,
       searchQuery: parseResult.terms,
+      isSearchHistory: true,
     });
-    match.comment = parseResult.engineName;
+    match.comment = parseResult.engine.name;
     match.icon = match.icon || match.iconUrl;
-    match.style = "action searchengine favicon";
+    match.style = "action searchengine favicon suggestion";
   },
 
   _addMatch(match) {

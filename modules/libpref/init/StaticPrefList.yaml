@@ -184,6 +184,11 @@
   value: false
   mirror: always
 
+- name: accessibility.ARIAReflection.enabled
+  type: bool
+  value: false
+  mirror: always
+
 #ifdef ANDROID
   #---------------------------------------------------------------------------
   # Prefs starting with "android."
@@ -402,11 +407,6 @@
   value: 0.01f
   mirror: always
 
-- name: apz.frame_delay.enabled
-  type: RelaxedAtomicBool
-  value: true
-  mirror: always
-
 - name: apz.touch_acceleration_factor_x
   type: float
   value: 1.0f
@@ -566,6 +566,11 @@
   value: 150
   mirror: always
 
+- name: apz.windows.force_disable_direct_manipulation
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
 - name: apz.x_skate_highmem_adjust
   type: AtomicFloat
   value: 0.0f
@@ -649,6 +654,7 @@
   type: String
   value: "#EE0000"
   mirror: never
+
 - name: browser.anchor_color
   type: String
   value: "#0000EE"
@@ -775,6 +781,16 @@
 - name: browser.cache.disk.content_type_media_limit
   type: RelaxedAtomicInt32
   value: 50
+  mirror: always
+
+# How often to validate document in cache
+#   0 = once-per-session,
+#   1 = each-time,
+#   2 = never,
+#   3 = when-appropriate/automatically
+- name: browser.cache.check_doc_frequency
+  type: RelaxedAtomicUint32
+  value: 3
   mirror: always
 
 - name: browser.contentblocking.database.enabled
@@ -974,6 +990,18 @@
   value: true
   mirror: always
 
+- name: browser.tabs.documentchannel.ppdc
+  type: bool
+  value: false
+  mirror: always
+
+# If set, use DocumentChannel to directly initiate loads from
+# parent-process BrowsingContexts
+- name: browser.tabs.documentchannel.parent-initiated
+  type: bool
+  value: false 
+  mirror: always
+
 - name: browser.tabs.remote.desktopbehavior
   type: bool
   value: false
@@ -1006,13 +1034,6 @@
 #endif
   mirror: always
 
-# The percentage of the screen that needs to be scrolled before toolbar
-# manipulation is allowed.
-- name: browser.ui.scroll-toolbar-threshold
-  type: RelaxedAtomicInt32
-  value: 10
-  mirror: always
-
 # When true, zooming will be enabled on all sites, even ones that declare
 # user-scalable=no.
 - name: browser.ui.zoom.force-user-scalable
@@ -1034,6 +1055,11 @@
   type: String
   value: "#551A8B"
   mirror: never
+
+- name: browser.find.anonymous_content.enabled
+  type: bool
+  value: true
+  mirror: always
 
 #---------------------------------------------------------------------------
 # Prefs starting with "canvas."
@@ -2342,7 +2368,7 @@
   # See bug 1626846 for setting this to false by default.
 -   name: dom.quotaManager.useDOSDevicePathSyntax
     type: RelaxedAtomicBool
-    value: false
+    value: true
     mirror: always
     do_not_use_directly: true
 #endif
@@ -3197,6 +3223,11 @@
   value: true
   mirror: always
 
+- name: dom.window.content.untrusted.enabled
+  type: bool
+  value: @IS_NOT_EARLY_BETA_OR_EARLIER@
+  mirror: always
+
 - name: dom.worker.canceling.timeoutMilliseconds
   type: RelaxedAtomicUint32
   value: 30000    # 30 seconds
@@ -3318,6 +3349,26 @@
 - name: editor.positioning.enabled_by_default
   type: bool
   value: false
+  mirror: always
+
+# Whether user pastes should be truncated.
+- name: editor.truncate_user_pastes
+  type: bool
+  value: false
+  mirror: always
+
+# How line breakers are treated in single line editor:
+# * 0: Only remove the leading and trailing newlines.
+# * 1: Remove the first newline and all characters following it.
+# * 2: Replace newlines with spaces (default of Firefox).
+# * 3: Remove newlines from the string.
+# * 4: Replace newlines with commas (default of Thunderbird).
+# * 5: Collapse newlines and surrounding whitespace characters and
+#      remove them from the string.
+# Other values are treated as 1.
+- name: editor.singleLine.pasteNewlines
+  type: int32_t
+  value: 2
   mirror: always
 
 #---------------------------------------------------------------------------
@@ -3537,6 +3588,11 @@
   mirror: always
 
 - name: full-screen-api.exit-on.windowRaise
+  type: bool
+  value: true
+  mirror: always
+
+- name: full-screen-api.pointer-lock.enabled
   type: bool
   value: true
   mirror: always
@@ -4265,6 +4321,23 @@
 - name: gfx.webrender.use-optimized-shaders
   type: bool
   value: true
+  mirror: once
+
+# When gl debug message is a high severity message, forwward it to gfx critical
+# note.
+- name: gfx.webrender.gl-debug-message-critical-note
+  type: bool
+#if defined(XP_WIN) && defined(NIGHTLY_BUILD)
+  value: true
+#else
+  value: false
+#endif
+  mirror: once
+
+# Enable printing gl debug messages
+- name: gfx.webrender.gl-debug-message-print
+  type: bool
+  value: false
   mirror: once
 
 #ifdef NIGHTLY_BUILD
@@ -5444,13 +5517,13 @@
 # Whether we get notified of history queries for visited even if unvisited.
 - name: layout.css.notify-of-unvisited
   type: RelaxedAtomicBool
-  value: false
+  value: true
   mirror: always
 
 # Whether we always restyle / repaint as a result of a visited query
 - name: layout.css.always-repaint-on-unvisited
   type: RelaxedAtomicBool
-  value: false
+  value: true
   mirror: always
 
 # Make `zoom` a `transform` + `transform-origin` alias.
@@ -5550,12 +5623,6 @@
   mirror: always
   rust: true
 
-# Is support for CSS contain enabled?
-- name: layout.css.contain.enabled
-  type: bool
-  value: true
-  mirror: always
-
 # Should stray control characters be rendered visibly?
 - name: layout.css.control-characters.visible
   type: RelaxedAtomicBool
@@ -5623,6 +5690,13 @@
 - name: layout.css.grid-template-subgrid-value.enabled
   type: RelaxedAtomicBool
   value: true
+  mirror: always
+  rust: true
+
+# Is support for CSS masonry layout enabled?
+- name: layout.css.grid-template-masonry-value.enabled
+  type: RelaxedAtomicBool
+  value: false
   mirror: always
   rust: true
 
@@ -6050,6 +6124,20 @@
   value: false
   mirror: always
 
+# Controls caret style and word-delete during text selection.
+# 0: Use platform default
+# 1: Caret moves and blinks as when there is no selection; word
+#    delete deselects the selection and then deletes word.
+# 2: Caret moves to selection edge and is not visible during selection;
+#    word delete deletes the selection (Mac and Linux default).
+# 3: Caret moves and blinks as when there is no selection; word delete
+#    deletes the selection.
+# Windows default is 1 for word delete behavior, the rest as for 2.
+- name: layout.selection.caret_style
+  type: int32_t
+  value: 0
+  mirror: always
+
 # If layout.show_previous_page is true then during loading of a new page we
 # will draw the previous page if the new page has painting suppressed.
 - name: layout.show_previous_page
@@ -6152,7 +6240,7 @@
 # Is support for :is() and :where() enabled?
 - name: layout.css.is-where-selectors.enabled
   type: RelaxedAtomicBool
-  value: false
+  value: @IS_NIGHTLY_BUILD@
   mirror: always
   rust: true
 
@@ -7063,6 +7151,13 @@
   value: false
   mirror: always
 
+# The getDisplayMedia method is always SecureContext regardless of the above two
+# prefs. But it is not implemented on android, and can be turned off elsewhere.
+- name: media.getdisplaymedia.enabled
+  type: bool
+  value: @IS_NOT_ANDROID@
+  mirror: always
+
 # WebRTC prefs follow
 
 # Enables RTCPeerConnection support. Note that, when true, this pref enables
@@ -7375,7 +7470,7 @@
 # with userinfo
 - name: network.auth.confirmAuth.enabled
   type: bool
-  value: false
+  value: true
   mirror: always
 
 # See the full list of values in nsICookieService.idl.
@@ -8041,6 +8136,11 @@
   value: @IS_NIGHTLY_BUILD@
   mirror: always
 
+- name: privacy.trackingprotection.testing.report_blocked_node
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
 # Whether to spoof user locale to English (used as part of Resist
 # Fingerprinting).
 # 0 - will prompt
@@ -8240,9 +8340,17 @@
 # Prefs starting with "prompts."
 #---------------------------------------------------------------------------
 
-# The prompt type to use for the insecure form submit warning.
+# Prompt modal type prefs
 # See nsIPromptService::MODAL_TYPE fields for possible values.
+
+# Insecure form submit warning.
 - name: prompts.modalType.insecureFormSubmit
+  type: int32_t
+  value: 2
+  mirror: always
+
+# nsHttpChannelAuthProvider#ConfirmAuth anti-phishing prompts.
+- name: prompts.modalType.confirmAuth
   type: int32_t
   value: 2
   mirror: always
@@ -8859,20 +8967,12 @@
 
 - name: webgl.max-contexts
   type: RelaxedAtomicUint32
-#ifdef ANDROID
-  value: 16
-#else
-  value: 32
-#endif
+  value: 1000
   mirror: always
 
 - name: webgl.max-contexts-per-principal
   type: RelaxedAtomicUint32
-#ifdef ANDROID
-  value: 8
-#else
-  value: 16
-#endif
+  value: 300
   mirror: always
 
 - name: webgl.max-warnings-per-context

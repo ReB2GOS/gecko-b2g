@@ -77,7 +77,7 @@ class MOZ_RAII JS_PUBLIC_API CustomAutoRooter : private AutoGCRooter {
  public:
   template <typename CX>
   explicit CustomAutoRooter(const CX& cx MOZ_GUARD_OBJECT_NOTIFIER_PARAM)
-      : AutoGCRooter(cx, AutoGCRooter::Tag::Custom) {
+      : AutoGCRooter(cx, AutoGCRooter::Kind::Custom) {
     MOZ_GUARD_OBJECT_NOTIFIER_INIT;
   }
 
@@ -767,15 +767,6 @@ extern JS_PUBLIC_API bool GetFirstArgumentAsTypeHint(JSContext* cx,
                                                      JSType* result);
 
 } /* namespace JS */
-
-template <typename T>
-struct JSConstScalarSpec {
-  const char* name;
-  T val;
-};
-
-using JSConstDoubleSpec = JSConstScalarSpec<double>;
-using JSConstIntegerSpec = JSConstScalarSpec<int32_t>;
 
 extern JS_PUBLIC_API JSObject* JS_InitClass(
     JSContext* cx, JS::HandleObject obj, JS::HandleObject parent_proto,
@@ -1568,14 +1559,6 @@ extern JS_PUBLIC_API JSObject* JS_DefineObject(JSContext* cx,
                                                const char* name,
                                                const JSClass* clasp = nullptr,
                                                unsigned attrs = 0);
-
-extern JS_PUBLIC_API bool JS_DefineConstDoubles(JSContext* cx,
-                                                JS::HandleObject obj,
-                                                const JSConstDoubleSpec* cds);
-
-extern JS_PUBLIC_API bool JS_DefineConstIntegers(JSContext* cx,
-                                                 JS::HandleObject obj,
-                                                 const JSConstIntegerSpec* cis);
 
 extern JS_PUBLIC_API bool JS_DefineProperties(JSContext* cx,
                                               JS::HandleObject obj,

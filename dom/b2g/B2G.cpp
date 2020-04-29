@@ -44,8 +44,14 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(B2G)
 #ifdef MOZ_B2G_BT
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mBluetooth)
 #endif
+#ifdef MOZ_B2G_CAMERA
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCameraManager)
+#endif
 #ifndef DISABLE_WIFI
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWifiManager)
+#endif
+#ifdef MOZ_AUDIO_CHANNEL_MANAGER
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAudioChannelManager)
 #endif
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -219,6 +225,26 @@ bluetooth::BluetoothManager* B2G::GetBluetooth(ErrorResult& aRv) {
 }
 #endif  // MOZ_B2G_BT
 
+#ifdef MOZ_B2G_CAMERA
+nsDOMCameraManager* B2G::GetCameras(ErrorResult& aRv) {
+  if (!mCameraManager) {
+    if (!mOwner) {
+      aRv.Throw(NS_ERROR_UNEXPECTED);
+      return nullptr;
+    }
+    nsPIDOMWindowInner* innerWindow = mOwner->AsInnerWindow();
+    if (!innerWindow) {
+      aRv.Throw(NS_ERROR_UNEXPECTED);
+      return nullptr;
+    }
+
+    mCameraManager = nsDOMCameraManager::CreateInstance(innerWindow);
+  }
+
+  return mCameraManager;
+}
+#endif // MOZ_B2G_CAMERA
+
 #ifndef DISABLE_WIFI
 WifiManager* B2G::GetWifiManager(ErrorResult& aRv) {
   if (!mWifiManager) {
@@ -235,6 +261,14 @@ WifiManager* B2G::GetWifiManager(ErrorResult& aRv) {
   return mWifiManager;
 }
 #endif
+
+/* static */
+bool B2G::HasCameraSupport(JSContext* /* unused */, JSObject* aGlobal) {
+#ifndef MOZ_B2G_CAMERA
+  return false;
+#endif
+  return true;
+}
 
 /* static */
 bool B2G::HasWifiManagerSupport(JSContext* /* unused */, JSObject* aGlobal) {
@@ -273,6 +307,20 @@ DownloadManager* B2G::GetDownloadManager(ErrorResult& aRv) {
   }
   return mDownloadManager;
 }
+
+#ifdef MOZ_AUDIO_CHANNEL_MANAGER
+system::AudioChannelManager* B2G::GetAudioChannelManager(ErrorResult& aRv) {
+  if (!mAudioChannelManager) {
+    if (!mOwner) {
+      aRv.Throw(NS_ERROR_UNEXPECTED);
+      return nullptr;
+    }
+    mAudioChannelManager = new system::AudioChannelManager();
+    mAudioChannelManager->Init(mOwner);
+  }
+  return mAudioChannelManager;
+}
+#endif
 
 }  // namespace dom
 }  // namespace mozilla

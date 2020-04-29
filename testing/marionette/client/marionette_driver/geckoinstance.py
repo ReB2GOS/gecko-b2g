@@ -77,7 +77,7 @@ class GeckoInstance(object):
         "extensions.update.enabled": False,
         "extensions.update.notifyUser": False,
         # Make sure opening about:addons won"t hit the network
-        "extensions.webservice.discoverURL": "http://%(server)s/dummy/discoveryURL",
+        "extensions.getAddons.discovery.api_url": "data:, ",
 
         # Allow the application to have focus even it runs in the background
         "focusmanager.testmode": True,
@@ -93,8 +93,6 @@ class GeckoInstance(object):
 
         "javascript.options.showInConsole": True,
 
-        # Enable Marionette component
-        "marionette.enabled": True,
         # (deprecated and can be removed when Firefox 60 ships)
         "marionette.defaultPrefs.enabled": True,
 

@@ -333,6 +333,12 @@ this.LoginHelper = {
       return true;
     }
 
+    // We can only match logins now if either of these flags are true, so
+    // avoid doing the work of constructing URL objects if neither is true.
+    if (!aOptions.acceptDifferentSubdomains && !aOptions.schemeUpgrades) {
+      return false;
+    }
+
     try {
       let loginURI = Services.io.newURI(aLoginOrigin);
       let searchURI = Services.io.newURI(aSearchOrigin);
@@ -835,6 +841,41 @@ this.LoginHelper = {
 
     // We assume that managementURL has a '?' already
     window.openTrustedLinkIn(destination, "tab");
+  },
+
+  /**
+   * Checks if a field type is password compatible.
+   *
+   * @param {Element} element
+   *                  the field we want to check.
+   *
+   * @returns {Boolean} true if the field can
+   *                    be treated as a password input
+   */
+  isPasswordFieldType(element) {
+    if (ChromeUtils.getClassName(element) !== "HTMLInputElement") {
+      return false;
+    }
+
+    if (!element.isConnected) {
+      // If the element isn't connected then it isn't visible to the user so
+      // shouldn't be considered. It must have been connected in the past.
+      return false;
+    }
+
+    if (!element.hasBeenTypePassword) {
+      return false;
+    }
+
+    // Ensure the element is of a type that could have autocomplete.
+    // These include the types with user-editable values. If not, even if it used to be
+    // a type=password, we can't treat it as a password input now
+    let acInfo = element.getAutocompleteInfo();
+    if (!acInfo) {
+      return false;
+    }
+
+    return true;
   },
 
   /**

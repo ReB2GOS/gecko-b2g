@@ -1021,8 +1021,10 @@ class nsIFrame : public nsQueryFrame {
     return ContentSize(GetWritingMode());
   }
   mozilla::LogicalSize ContentSize(mozilla::WritingMode aWritingMode) const {
-    const auto bp = GetLogicalUsedBorderAndPadding(aWritingMode)
-                        .ApplySkipSides(GetLogicalSkipSides());
+    mozilla::WritingMode wm = GetWritingMode();
+    const auto bp = GetLogicalUsedBorderAndPadding(wm)
+                        .ApplySkipSides(GetLogicalSkipSides())
+                        .ConvertTo(aWritingMode, wm);
     const auto size = GetLogicalSize(aWritingMode);
     return mozilla::LogicalSize(
         aWritingMode,
@@ -3388,7 +3390,7 @@ class nsIFrame : public nsQueryFrame {
   Sides GetSkipSides(const ReflowInput* aReflowInput = nullptr) const;
   virtual LogicalSides GetLogicalSkipSides(
       const ReflowInput* aReflowInput = nullptr) const {
-    return LogicalSides();
+    return LogicalSides(mWritingMode);
   }
 
   /**
@@ -4082,6 +4084,12 @@ class nsIFrame : public nsQueryFrame {
    */
   inline bool IsFlexOrGridItem() const;
   inline bool IsFlexOrGridContainer() const;
+
+  /**
+   * Return true if this frame has masonry layout in aAxis.
+   * @note only valid to call on nsGridContainerFrames
+   */
+  inline bool IsMasonry(mozilla::LogicalAxis aAxis) const;
 
   /**
    * @return true if this frame is used as a table caption.

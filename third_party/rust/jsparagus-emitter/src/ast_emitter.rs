@@ -5,7 +5,7 @@
 use crate::array_emitter::*;
 use crate::block_emitter::BlockEmitter;
 use crate::compilation_info::CompilationInfo;
-use crate::emitter::{EmitError, EmitOptions, EmitResult, InstructionWriter};
+use crate::emitter::{EmitError, EmitOptions, InstructionWriter};
 use crate::emitter_scope::{EmitterScopeStack, NameLocation};
 use crate::expression_emitter::*;
 use crate::object_emitter::*;
@@ -17,52 +17,58 @@ use crate::reference_op_emitter::{
 };
 use crate::regexp::RegExpItem;
 use crate::script_emitter::ScriptEmitter;
-use ast::source_atom_set::{CommonSourceAtomSetIndices, SourceAtomSet, SourceAtomSetIndex};
-use ast::source_slice_list::SourceSliceList;
+use crate::stencil::{EmitResult, ScriptStencilIndex, ScriptStencilList};
+use ast::source_atom_set::{CommonSourceAtomSetIndices, SourceAtomSetIndex};
 use ast::types::*;
-use scope::data::ScopeDataMap;
 
-use crate::forward_jump_emitter::{ForwardJumpEmitter, JumpKind};
+use crate::control_structures::{
+    BreakEmitter, CForEmitter, ContinueEmitter, ControlStructureStack, DoWhileEmitter,
+    ForwardJumpEmitter, JumpKind, LabelEmitter, WhileEmitter,
+};
 
 /// Emit a program, converting the AST directly to bytecode.
 pub fn emit_program<'alloc>(
     ast: &Program,
     options: &EmitOptions,
-    atoms: SourceAtomSet<'alloc>,
-    slices: SourceSliceList<'alloc>,
-    scope_data_map: ScopeDataMap,
+    mut compilation_info: CompilationInfo<'alloc>,
 ) -> Result<EmitResult<'alloc>, EmitError> {
-    let mut emitter = AstEmitter::new(options, atoms, slices, scope_data_map);
+    let mut scripts = ScriptStencilList::new();
+    let emitter = AstEmitter::new(options, &mut compilation_info, &mut scripts);
 
     match ast {
-        Program::Script(script) => emitter.emit_script(script)?,
+        Program::Script(script) => {
+            emitter.emit_script(script)?;
+        }
         _ => {
             return Err(EmitError::NotImplemented("TODO: modules"));
         }
     }
 
-    Ok(emitter.emit.into_emit_result(emitter.compilation_info))
+    Ok(EmitResult::new(compilation_info, scripts.into()))
 }
 
 pub struct AstEmitter<'alloc, 'opt> {
     pub emit: InstructionWriter,
-    pub options: &'opt EmitOptions,
-    pub compilation_info: CompilationInfo<'alloc>,
     pub scope_stack: EmitterScopeStack,
+    pub options: &'opt EmitOptions,
+    pub compilation_info: &'opt mut CompilationInfo<'alloc>,
+    pub scripts: &'opt mut ScriptStencilList,
+    pub control_stack: ControlStructureStack,
 }
 
 impl<'alloc, 'opt> AstEmitter<'alloc, 'opt> {
     fn new(
         options: &'opt EmitOptions,
-        atoms: SourceAtomSet<'alloc>,
-        slices: SourceSliceList<'alloc>,
-        scope_data_map: ScopeDataMap,
+        compilation_info: &'opt mut CompilationInfo<'alloc>,
+        scripts: &'opt mut ScriptStencilList,
     ) -> Self {
         Self {
             emit: InstructionWriter::new(),
-            options,
-            compilation_info: CompilationInfo::new(atoms, slices, scope_data_map),
             scope_stack: EmitterScopeStack::new(),
+            options,
+            compilation_info,
+            scripts,
+            control_stack: ControlStructureStack::new(),
         }
     }
 
@@ -70,12 +76,41 @@ impl<'alloc, 'opt> AstEmitter<'alloc, 'opt> {
         self.scope_stack.lookup_name(name)
     }
 
-    fn emit_script(&mut self, ast: &Script) -> Result<(), EmitError> {
+    fn emit_script(mut self, ast: &Script) -> Result<ScriptStencilIndex, EmitError> {
+        let scope_data_map = &self.compilation_info.scope_data_map;
+        let function_map = &self.compilation_info.function_map;
+
+        let scope_index = scope_data_map.get_global_index();
+        let scope_data = scope_data_map.get_global_at(scope_index);
+
+        let top_level_functions: Vec<&Function> = scope_data
+            .functions
+            .iter()
+            .map(|key| *function_map.get(key).expect("function should exist"))
+            .collect();
+
         ScriptEmitter {
+            top_level_functions: top_level_functions.iter(),
+            top_level_function: |emitter, fun| emitter.emit_top_level_function_declaration(fun),
             statements: ast.statements.iter(),
             statement: |emitter, statement| emitter.emit_statement(statement),
         }
-        .emit(self)
+        .emit(&mut self)?;
+
+        Ok(self.scripts.push(self.emit.into()))
+    }
+
+    fn emit_top_level_function_declaration(&mut self, fun: &Function) -> Result<(), EmitError> {
+        let _name = fun
+            .name
+            .as_ref()
+            .expect("function declaration should have name")
+            .name
+            .value;
+
+        Err(EmitError::NotImplemented(
+            "TODO: top level FunctionDeclaration",
+        ))
     }
 
     fn emit_statement(&mut self, ast: &Statement) -> Result<(), EmitError> {
@@ -91,17 +126,29 @@ impl<'alloc, 'opt> AstEmitter<'alloc, 'opt> {
                 }
                 .emit(self)?;
             }
-            Statement::BreakStatement { .. } => {
-                return Err(EmitError::NotImplemented("TODO: BreakStatement"));
+            Statement::BreakStatement { label, .. } => {
+                BreakEmitter {
+                    jump: JumpKind::Goto,
+                    label: label.as_ref().map(|x| x.value),
+                }
+                .emit(self);
             }
-            Statement::ContinueStatement { .. } => {
-                return Err(EmitError::NotImplemented("TODO: ContinueStatement"));
+            Statement::ContinueStatement { label, .. } => {
+                ContinueEmitter {
+                    jump: JumpKind::Goto,
+                    label: label.as_ref().map(|x| x.value),
+                }
+                .emit(self);
             }
             Statement::DebuggerStatement { .. } => {
                 return Err(EmitError::NotImplemented("TODO: DebuggerStatement"));
             }
-            Statement::DoWhileStatement { .. } => {
-                return Err(EmitError::NotImplemented("TODO: DoWhileStatement"));
+            Statement::DoWhileStatement { block, test, .. } => {
+                DoWhileEmitter {
+                    block: |emitter| emitter.emit_statement(block),
+                    test: |emitter| emitter.emit_expression(test),
+                }
+                .emit(self)?;
             }
             Statement::EmptyStatement { .. } => (),
             Statement::ExpressionStatement(ast) => {
@@ -116,14 +163,40 @@ impl<'alloc, 'opt> AstEmitter<'alloc, 'opt> {
             Statement::ForOfStatement { .. } => {
                 return Err(EmitError::NotImplemented("TODO: ForOfStatement"));
             }
-            Statement::ForStatement { .. } => {
-                return Err(EmitError::NotImplemented("TODO: ForStatement"));
+            Statement::ForStatement {
+                init,
+                test,
+                update,
+                block,
+                ..
+            } => {
+                CForEmitter {
+                    maybe_init: init,
+                    maybe_test: test,
+                    maybe_update: update,
+                    init: |emitter, val| match val {
+                        VariableDeclarationOrExpression::VariableDeclaration(ast) => {
+                            emitter.emit_variable_declaration_statement(ast)
+                        }
+                        VariableDeclarationOrExpression::Expression(expr) => {
+                            emitter.emit_expression(expr)
+                        }
+                    },
+                    test: |emitter, expr| emitter.emit_expression(expr),
+                    update: |emitter, expr| emitter.emit_expression(expr),
+                    block: |emitter| emitter.emit_statement(block),
+                }
+                .emit(self)?;
             }
             Statement::IfStatement(if_statement) => {
                 self.emit_if(if_statement)?;
             }
-            Statement::LabeledStatement { .. } => {
-                return Err(EmitError::NotImplemented("TODO: LabeledStatement"));
+            Statement::LabelledStatement { label, body, .. } => {
+                LabelEmitter {
+                    name: label.value,
+                    body: |emitter| emitter.emit_statement(body),
+                }
+                .emit(self)?;
             }
             Statement::ReturnStatement { .. } => {
                 return Err(EmitError::NotImplemented("TODO: ReturnStatement"));
@@ -149,8 +222,12 @@ impl<'alloc, 'opt> AstEmitter<'alloc, 'opt> {
             Statement::VariableDeclarationStatement(ast) => {
                 self.emit_variable_declaration_statement(ast)?;
             }
-            Statement::WhileStatement { .. } => {
-                return Err(EmitError::NotImplemented("TODO: WhileStatement"));
+            Statement::WhileStatement { test, block, .. } => {
+                WhileEmitter {
+                    test: |emitter| emitter.emit_expression(test),
+                    block: |emitter| emitter.emit_statement(block),
+                }
+                .emit(self)?;
             }
             Statement::WithStatement { .. } => {
                 return Err(EmitError::NotImplemented("TODO: WithStatement"));

@@ -106,6 +106,8 @@ class BasePrincipal : public nsJSPrincipals {
   NS_IMETHOD Equals(nsIPrincipal* other, bool* _retval) final;
   NS_IMETHOD EqualsConsideringDomain(nsIPrincipal* other, bool* _retval) final;
   NS_IMETHOD EqualsURI(nsIURI* aOtherURI, bool* _retval) override;
+  NS_IMETHOD EqualsForPermission(nsIPrincipal* other, bool aExactHost,
+                                 bool* _retval) final;
   NS_IMETHOD Subsumes(nsIPrincipal* other, bool* _retval) final;
   NS_IMETHOD SubsumesConsideringDomain(nsIPrincipal* other,
                                        bool* _retval) final;
@@ -144,6 +146,7 @@ class BasePrincipal : public nsJSPrincipals {
   NS_IMETHOD GetSiteOrigin(nsACString& aOrigin) override;
   NS_IMETHOD IsThirdPartyURI(nsIURI* uri, bool* aRes) override;
   NS_IMETHOD IsThirdPartyPrincipal(nsIPrincipal* uri, bool* aRes) override;
+  NS_IMETHOD IsThirdPartyChannel(nsIChannel* aChannel, bool* aRes) override;
   NS_IMETHOD GetIsOriginPotentiallyTrustworthy(bool* aResult) override;
   NS_IMETHOD IsSameOrigin(nsIURI* aURI, bool aIsPrivateWin,
                           bool* aRes) override;

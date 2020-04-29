@@ -246,12 +246,6 @@ partial interface Navigator {
   readonly attribute NetworkInformation connection;
 };
 
-// nsIDOMNavigatorCamera
-partial interface Navigator {
-  [Throws, Func="Navigator::HasCameraSupport"]
-  readonly attribute CameraManager mozCameras;
-};
-
 // https://dvcs.w3.org/hg/gamepad/raw-file/default/gamepad.html#navigator-interface-extension
 partial interface Navigator {
   [Throws, Pref="dom.gamepad.enabled"]
@@ -292,14 +286,6 @@ partial interface Navigator {
   [Throws, Pref="dom.webmidi.enabled"]
   Promise<MIDIAccess> requestMIDIAccess(optional MIDIOptions options = {});
 };
-
-#ifdef MOZ_AUDIO_CHANNEL_MANAGER
-// nsIMozNavigatorAudioChannelManager
-partial interface Navigator {
-  [Throws]
-  readonly attribute AudioChannelManager mozAudioChannelManager;
-};
-#endif // MOZ_AUDIO_CHANNEL_MANAGER
 
 callback NavigatorUserMediaSuccessCallback = void (MediaStream stream);
 callback NavigatorUserMediaErrorCallback = void (MediaStreamError error);

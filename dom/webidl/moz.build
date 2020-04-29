@@ -13,6 +13,12 @@ with Files("APZTestData.webidl"):
 with Files("AccessibleNode.webidl"):
     BUG_COMPONENT = ("Core", "Disability Access APIs")
 
+with Files("AccessibilityRole.webidl"):
+    BUG_COMPONENT = ("Core", "Disability Access APIs")
+
+with Files("AriaAttributes.webidl"):
+    BUG_COMPONENT = ("Core", "Disability Access APIs")
+
 with Files("Addon*"):
     BUG_COMPONENT = ("Toolkit", "Add-ons Manager")
 
@@ -380,7 +386,6 @@ GENERATED_WEBIDL_FILES = [
 PREPROCESSED_WEBIDL_FILES = [
     'Animation.webidl',
     'B2G.webidl',
-    'Navigator.webidl',
     'Node.webidl',
     'Telephony.webidl',
     'TelephonyCall.webidl',
@@ -392,6 +397,7 @@ WEBIDL_FILES = [
     'AbortSignal.webidl',
     'AbstractRange.webidl',
     'AbstractWorker.webidl',
+    'AccessibilityRole.webidl',
     'AddonManager.webidl',
     'AnalyserNode.webidl',
     'Animatable.webidl',
@@ -402,6 +408,7 @@ WEBIDL_FILES = [
     'AppInfo.webidl',
     'AppNotificationServiceOptions.webidl',
     'APZTestData.webidl',
+    'AriaAttributes.webidl',
     'Attr.webidl',
     'AudioBuffer.webidl',
     'AudioBufferSourceNode.webidl',
@@ -555,7 +562,6 @@ WEBIDL_FILES = [
     'FontFaceSet.webidl',
     'FontFaceSource.webidl',
     'FormData.webidl',
-    'FrameLoader.webidl',
     'Function.webidl',
     'GainNode.webidl',
     'Gamepad.webidl',
@@ -751,6 +757,7 @@ WEBIDL_FILES = [
     'MutationObserver.webidl',
     'NamedNodeMap.webidl',
     'NativeOSFileInternals.webidl',
+    'Navigator.webidl',
     'NetDashboard.webidl',
     'NetErrorInfo.webidl',
     'NetworkInformation.webidl',

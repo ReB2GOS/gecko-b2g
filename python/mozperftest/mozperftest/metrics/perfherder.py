@@ -6,25 +6,24 @@ import os
 import statistics
 
 from mozperftest.layers import Layer
-from mozperftest.metrics.common import CommonMetricsSingleton
-from mozperftest.metrics.utils import write_json, filter_metrics
+from mozperftest.metrics.common import filtered_metrics
+from mozperftest.metrics.utils import write_json
 
 
 class Perfherder(Layer):
+    """Output data in the perfherder format.
+    """
+
     name = "perfherder"
+    activated = False
 
     arguments = {
-        "--perfherder": {
-            "action": "store_true",
-            "default": False,
-            "help": "Output data in the perfherder format.",
-        },
-        "--perfherder-prefix": {
+        "prefix": {
             "type": str,
             "default": "",
             "help": "Prefix the output files with this string.",
         },
-        "--perfherder-metrics": {
+        "metrics": {
             "nargs": "*",
             "default": [],
             "help": "The metrics that should be retrieved from the data.",
@@ -46,25 +45,11 @@ class Perfherder(Layer):
             into a perfherder-data blob.
         :param flavor str: The flavor that is being processed.
         """
+        prefix = self.get_arg("prefix")
+        output = self.get_arg("output")
 
-        if not self.get_arg("perfherder"):
-            return
-
-        # Get the common requirements for metrics (i.e. output path,
-        # results to process)
-        cm = CommonMetricsSingleton(
-            metadata.get_result(),
-            self.warning,
-            output=self.get_arg("output"),
-            prefix=self.get_arg("perfherder-prefix"),
-        )
-        res = cm.get_standardized_data(
-            group_name="firefox", transformer="SingleJsonRetriever"
-        )
-        _, results = res["file-output"], res["data"]
-
-        # Filter out unwanted metrics
-        results = filter_metrics(results, self.get_arg("perfherder-metrics"))
+        # Get filtered metrics
+        results = filtered_metrics(metadata, output, prefix, self.get_arg("metrics"))
         if not results:
             self.warning("No results left after filtering")
             return metadata
@@ -81,16 +66,14 @@ class Perfherder(Layer):
         perfherder_data = self._build_blob(subtests)
 
         file = "perfherder-data.json"
-        if cm.prefix:
-            file = "{}-{}".format(cm.prefix, file)
-        self.info(
-            "Writing perfherder results to {}".format(os.path.join(cm.output, file))
-        )
+        if prefix:
+            file = "{}-{}".format(prefix, file)
+        self.info("Writing perfherder results to {}".format(os.path.join(output, file)))
 
         # XXX "suites" key error occurs when using self.info so a print
         # is being done for now.
         print("PERFHERDER_DATA: " + json.dumps(perfherder_data))
-        metadata.set_output(write_json(perfherder_data, cm.output, file))
+        metadata.set_output(write_json(perfherder_data, output, file))
         return metadata
 
     def _build_blob(

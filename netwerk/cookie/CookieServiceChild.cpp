@@ -99,12 +99,7 @@ void CookieServiceChild::MoveCookies() {
     CookiesList newCookiesList;
     for (uint32_t i = 0; i < cookiesList->Length(); ++i) {
       Cookie* cookie = cookiesList->ElementAt(i);
-      RefPtr<Cookie> newCookie = Cookie::Create(
-          cookie->Name(), cookie->Value(), cookie->Host(), cookie->Path(),
-          cookie->Expiry(), cookie->LastAccessed(), cookie->CreationTime(),
-          cookie->IsSession(), cookie->IsSecure(), cookie->IsHttpOnly(),
-          cookie->OriginAttributesRef(), cookie->SameSite(),
-          cookie->RawSameSite());
+      RefPtr<Cookie> newCookie = cookie->Clone();
       newCookiesList.AppendElement(newCookie);
     }
     cookiesList->SwapElements(newCookiesList);
@@ -140,12 +135,10 @@ void CookieServiceChild::TrackCookieLoad(nsIChannel* aChannel) {
 
   OriginAttributes attrs = loadInfo->GetOriginAttributes();
   StoragePrincipalHelper::PrepareOriginAttributes(aChannel, attrs);
-  URIParams uriParams;
-  SerializeURI(uri, uriParams);
   bool isSafeTopLevelNav = NS_IsSafeTopLevelNav(aChannel);
   bool isSameSiteForeign = NS_IsSameSiteForeign(aChannel, uri);
   SendPrepareCookieList(
-      uriParams, result.contains(ThirdPartyAnalysis::IsForeign),
+      uri, result.contains(ThirdPartyAnalysis::IsForeign),
       result.contains(ThirdPartyAnalysis::IsThirdPartyTrackingResource),
       result.contains(ThirdPartyAnalysis::IsThirdPartySocialTrackingResource),
       result.contains(ThirdPartyAnalysis::IsFirstPartyStorageAccessGranted),
@@ -184,11 +177,7 @@ IPCResult CookieServiceChild::RecvRemoveCookie(const CookieStruct& aCookie,
 
 IPCResult CookieServiceChild::RecvAddCookie(const CookieStruct& aCookie,
                                             const OriginAttributes& aAttrs) {
-  RefPtr<Cookie> cookie = Cookie::Create(
-      aCookie.name(), aCookie.value(), aCookie.host(), aCookie.path(),
-      aCookie.expiry(), aCookie.lastAccessed(), aCookie.creationTime(),
-      aCookie.isSession(), aCookie.isSecure(), aCookie.isHttpOnly(), aAttrs,
-      aCookie.sameSite(), aCookie.rawSameSite());
+  RefPtr<Cookie> cookie = Cookie::Create(aCookie, aAttrs);
   RecordDocumentCookie(cookie, aAttrs);
   return IPC_OK();
 }
@@ -207,12 +196,8 @@ IPCResult CookieServiceChild::RecvRemoveBatchDeletedCookies(
 IPCResult CookieServiceChild::RecvTrackCookiesLoad(
     nsTArray<CookieStruct>&& aCookiesList, const OriginAttributes& aAttrs) {
   for (uint32_t i = 0; i < aCookiesList.Length(); i++) {
-    RefPtr<Cookie> cookie = Cookie::Create(
-        aCookiesList[i].name(), aCookiesList[i].value(), aCookiesList[i].host(),
-        aCookiesList[i].path(), aCookiesList[i].expiry(),
-        aCookiesList[i].lastAccessed(), aCookiesList[i].creationTime(),
-        aCookiesList[i].isSession(), aCookiesList[i].isSecure(), false, aAttrs,
-        aCookiesList[i].sameSite(), aCookiesList[i].rawSameSite());
+    RefPtr<Cookie> cookie = Cookie::Create(aCookiesList[i], aAttrs);
+    cookie->SetIsHttpOnly(false);
     RecordDocumentCookie(cookie, aAttrs);
   }
 
@@ -333,21 +318,14 @@ nsresult CookieServiceChild::SetCookieStringInternal(
 
   nsCString cookieString(aCookieString);
 
-  URIParams hostURIParams;
-  SerializeURI(aHostURI, hostURIParams);
-
-  Maybe<URIParams> channelURIParams;
+  nsCOMPtr<nsIURI> channelURI;
   OriginAttributes attrs;
   if (aChannel) {
-    nsCOMPtr<nsIURI> channelURI;
     aChannel->GetURI(getter_AddRefs(channelURI));
-    SerializeURI(channelURI, channelURIParams);
 
     MOZ_ASSERT(loadInfo);
     attrs = loadInfo->GetOriginAttributes();
     StoragePrincipalHelper::PrepareOriginAttributes(aChannel, attrs);
-  } else {
-    SerializeURI(nullptr, channelURIParams);
   }
 
   Maybe<LoadInfoArgs> optionalLoadInfoArgs;
@@ -421,13 +399,12 @@ nsresult CookieServiceChild::SetCookieStringInternal(
       continue;
     }
 
-    RefPtr<Cookie> cookie = Cookie::Create(
-        cookieData.name(), cookieData.value(), cookieData.host(),
-        cookieData.path(), cookieData.expiry(), currentTimeInUsec,
-        Cookie::GenerateUniqueCreationTime(currentTimeInUsec),
-        cookieData.isSession(), cookieData.isSecure(), cookieData.isHttpOnly(),
-        attrs, cookieData.sameSite(), cookieData.rawSameSite());
+    RefPtr<Cookie> cookie = Cookie::Create(cookieData, attrs);
     MOZ_ASSERT(cookie);
+
+    cookie->SetLastAccessed(currentTimeInUsec);
+    cookie->SetCreationTime(
+        Cookie::GenerateUniqueCreationTime(currentTimeInUsec));
 
     RecordDocumentCookie(cookie, attrs);
     cookiesToSend.AppendElement(cookieData);
@@ -437,10 +414,7 @@ nsresult CookieServiceChild::SetCookieStringInternal(
 
   // Asynchronously call the parent.
   if (CanSend() && !cookiesToSend.IsEmpty()) {
-    URIParams host;
-    SerializeURI(aHostURI, host);
-
-    SendSetCookies(baseDomain, attrs, host, aFromHttp, cookiesToSend);
+    SendSetCookies(baseDomain, attrs, aHostURI, aFromHttp, cookiesToSend);
   }
 
   return NS_OK;

@@ -868,6 +868,12 @@ class UrlbarView {
       favicon.src = result.payload.icon || UrlbarUtils.ICON.DEFAULT;
     }
 
+    if (result.payload.isPinned) {
+      item.toggleAttribute("pinned", true);
+    } else {
+      item.removeAttribute("pinned");
+    }
+
     let title = item._elements.get("title");
     this._addTextContentWithHighlights(
       title,
@@ -1318,7 +1324,7 @@ class UrlbarView {
   }
 
   _enableOrDisableRowWrap() {
-    if (getBoundsWithoutFlushing(this.input.textbox).width <= 500) {
+    if (getBoundsWithoutFlushing(this.input.textbox).width < 650) {
       this._rows.setAttribute("wrap", "true");
     } else {
       this._rows.removeAttribute("wrap");
@@ -1383,7 +1389,7 @@ class UrlbarView {
       if (
         result.type != UrlbarUtils.RESULT_TYPE.SEARCH ||
         (!result.heuristic &&
-          !result.payload.suggestion &&
+          (!result.payload.suggestion || result.payload.isSearchHistory) &&
           (!result.payload.inPrivateWindow || result.payload.isPrivateEngine))
       ) {
         continue;

@@ -57,6 +57,7 @@
 #include "vm/AsyncFunction.h"
 #include "vm/AsyncIteration.h"
 #include "vm/EqualityOperations.h"  // js::SameValue
+#include "vm/FunctionFlags.h"       // js::FunctionFlags
 #include "vm/MatchPairs.h"
 #include "vm/PlainObject.h"  // js::PlainObject
 #include "vm/RegExpObject.h"
@@ -4584,45 +4585,123 @@ void CodeGenerator::visitGuardReceiverPolymorphic(
   masm.bind(&done);
 }
 
-void CodeGenerator::visitToNumeric(LToNumeric* lir) {
-  ValueOperand operand = ToValue(lir, LToNumeric::Input);
-  ValueOperand output = ToOutValue(lir);
-  bool maybeInt32 = lir->mir()->mightBeType(MIRType::Int32);
-  bool maybeDouble = lir->mir()->mightBeType(MIRType::Double);
-  bool maybeNumber = maybeInt32 || maybeDouble;
-  bool maybeBigInt = lir->mir()->mightBeType(MIRType::BigInt);
-  int checks = int(maybeNumber) + int(maybeBigInt);
+void CodeGenerator::visitBooleanToInt64(LBooleanToInt64* lir) {
+  Register input = ToRegister(lir->input());
+  Register64 output = ToOutRegister64(lir);
 
-  using Fn = bool (*)(JSContext*, HandleValue, MutableHandleValue);
-  OutOfLineCode* ool =
-      oolCallVM<Fn, DoToNumeric>(lir, ArgList(operand), StoreValueTo(output));
+  masm.move32To64ZeroExtend(input, output);
+}
+
+void CodeGenerator::emitStringToInt64(LInstruction* lir, Register input,
+                                      Register temp, Register64 output) {
+  masm.reserveStack(sizeof(uint64_t));
+  masm.moveStackPtrTo(temp);
+  pushArg(temp);
+  pushArg(input);
+
+  using Fn = bool (*)(JSContext*, HandleString, uint64_t*, bool*);
+  callVM<Fn, DoStringToInt64>(lir);
+
+  masm.load64(Address(masm.getStackPointer(), 0), output);
+  masm.freeStack(sizeof(uint64_t));
+  bailoutIfFalseBool(ReturnReg, lir->snapshot());
+}
+
+void CodeGenerator::visitStringToInt64(LStringToInt64* lir) {
+  Register input = ToRegister(lir->input());
+  Register temp = ToTempRegisterOrInvalid(lir->temp());
+  Register64 output = ToOutRegister64(lir);
+  MOZ_ASSERT(lir->mir()->input()->type() == MIRType::String);
+
+  emitStringToInt64(lir, input, temp, output);
+}
+
+void CodeGenerator::visitValueToInt64(LValueToInt64* lir) {
+  ValueOperand input = ToValue(lir, LValueToInt64::Input);
+  Register64 output = ToOutRegister64(lir);
+  Register scratch = ToTempRegisterOrInvalid(lir->temp());
+  Register tag = masm.extractTag(input, scratch);
+  Label fail, done;
+
+  bool maybeBigInt = lir->mir()->input()->mightBeType(MIRType::BigInt);
+  bool maybeBool = lir->mir()->input()->mightBeType(MIRType::Boolean);
+  bool maybeString = lir->mir()->input()->mightBeType(MIRType::String);
+  int checks = int(maybeBigInt) + int(maybeBool) + int(maybeString);
 
   if (checks == 0) {
-    masm.jump(ool->entry());
+    // Bail on other types.
+    masm.jump(&fail);
   } else {
-    Label done;
-    using Condition = Assembler::Condition;
-    constexpr Condition Equal = Assembler::Equal;
-    constexpr Condition NotEqual = Assembler::NotEqual;
-
-    if (maybeNumber) {
-      checks--;
-      Condition cond = checks ? Equal : NotEqual;
-      Label* target = checks ? &done : ool->entry();
-      masm.branchTestNumber(cond, operand, target);
-    }
+    // BigInt.
     if (maybeBigInt) {
-      checks--;
-      Condition cond = checks ? Equal : NotEqual;
-      Label* target = checks ? &done : ool->entry();
-      masm.branchTestBigInt(cond, operand, target);
+      Label notBigInt;
+      masm.branchTestBigInt(Assembler::NotEqual, tag, &notBigInt);
+      masm.unboxBigInt(input, scratch);
+      Register bigint = input.scratchReg();
+      masm.movePtr(scratch, bigint);
+      masm.loadBigInt64(bigint, output);
+      masm.jump(&done);
+      masm.bind(&notBigInt);
     }
 
-    MOZ_ASSERT(checks == 0);
-    masm.bind(&done);
-    masm.moveValue(operand, output);
+    // Boolean
+    if (maybeBool) {
+      Label notBoolean;
+      masm.branchTestBoolean(Assembler::NotEqual, tag, &notBoolean);
+      Register unboxed = ToTempUnboxRegister(lir->tempToUnbox());
+      unboxed = masm.extractBoolean(input, unboxed);
+      masm.move32To64ZeroExtend(unboxed, output);
+      masm.jump(&done);
+      masm.bind(&notBoolean);
+    }
+
+    // String
+    if (maybeString) {
+      masm.branchTestString(Assembler::NotEqual, tag, &fail);
+#ifdef JS_NUNBOX32
+      Register unboxed = input.payloadReg();
+#else
+      Register unboxed = ToTempUnboxRegister(lir->tempToUnbox());
+#endif
+      masm.unboxString(input, unboxed);
+      emitStringToInt64(lir, unboxed, scratch, output);
+      masm.jump(&done);
+    }
   }
 
+  bailoutFrom(&fail, lir->snapshot());
+  masm.bind(&done);
+}
+
+void CodeGenerator::visitTruncateBigIntToInt64(LTruncateBigIntToInt64* lir) {
+  Register operand = ToRegister(lir->input());
+  Register64 output = ToOutRegister64(lir);
+  MOZ_ASSERT(lir->mir()->input()->type() == MIRType::BigInt);
+
+  masm.loadBigInt64(operand, output);
+}
+
+void CodeGenerator::visitInt64ToBigInt(LInt64ToBigInt* lir) {
+  MOZ_ASSERT(lir->mir()->input()->type() == MIRType::Int64);
+
+  Register64 input = ToRegister64(lir->getInt64Operand(LInt64ToBigInt::Input));
+  Register temp = ToTempRegisterOrInvalid(lir->temp1());
+  Register bigint = ToTempRegisterOrInvalid(lir->temp2());
+  Register output = ToRegister(lir->getDef(0));
+
+#if JS_BITS_PER_WORD == 32
+  using Fn = BigInt* (*)(JSContext*, uint32_t, uint32_t);
+  OutOfLineCode* ool = oolCallVM<Fn, jit::CreateBigIntFromInt64>(
+      lir, ArgList(input.low, input.high), StoreRegisterTo(output));
+#else
+  using Fn = BigInt* (*)(JSContext*, uint64_t);
+  OutOfLineCode* ool = oolCallVM<Fn, jit::CreateBigIntFromInt64>(
+      lir, ArgList(input), StoreRegisterTo(output));
+#endif
+
+  masm.newGCBigInt(bigint, temp, ool->entry(), true);
+  masm.initializeBigInt64(Scalar::BigInt64, bigint, input);
+  masm.movePtr(bigint, output);
   masm.bind(ool->rejoin());
 }
 
@@ -14012,7 +14091,12 @@ void CodeGenerator::emitIonToWasmCallBase(LIonToWasmCallBase<NumDefs>* lir) {
         argMir = ToMIRType(sig.args()[i]);
         break;
       case wasm::ValType::I64:
+#ifdef ENABLE_WASM_BIGINT
+        argMir = ToMIRType(sig.args()[i]);
+        break;
+#else
         MOZ_CRASH("unexpected argument type when calling from ion to wasm");
+#endif
       case wasm::ValType::Ref:
         switch (sig.args()[i].refTypeKind()) {
           case wasm::RefType::Any:
@@ -14070,6 +14154,14 @@ void CodeGenerator::emitIonToWasmCallBase(LIonToWasmCallBase<NumDefs>* lir) {
         MOZ_ASSERT(lir->mir()->type() == MIRType::Int32);
         MOZ_ASSERT(ToRegister(lir->output()) == ReturnReg);
         break;
+      case wasm::ValType::I64:
+#ifdef ENABLE_WASM_BIGINT
+        MOZ_ASSERT(lir->mir()->type() == MIRType::Int64);
+        MOZ_ASSERT(ToOutRegister64(lir) == ReturnReg64);
+#else
+        MOZ_CRASH("unexpected return type when calling from ion to wasm");
+#endif
+        break;
       case wasm::ValType::F32:
         MOZ_ASSERT(lir->mir()->type() == MIRType::Float32);
         MOZ_ASSERT(ToFloatRegister(lir->output()) == ReturnFloat32Reg);
@@ -14078,8 +14170,6 @@ void CodeGenerator::emitIonToWasmCallBase(LIonToWasmCallBase<NumDefs>* lir) {
         MOZ_ASSERT(lir->mir()->type() == MIRType::Double);
         MOZ_ASSERT(ToFloatRegister(lir->output()) == ReturnDoubleReg);
         break;
-      case wasm::ValType::I64:
-        MOZ_CRASH("unexpected return type when calling from ion to wasm");
       case wasm::ValType::Ref:
         switch (results[0].refTypeKind()) {
           case wasm::RefType::Any:
@@ -14121,6 +14211,9 @@ void CodeGenerator::visitIonToWasmCall(LIonToWasmCall* lir) {
   emitIonToWasmCallBase(lir);
 }
 void CodeGenerator::visitIonToWasmCallV(LIonToWasmCallV* lir) {
+  emitIonToWasmCallBase(lir);
+}
+void CodeGenerator::visitIonToWasmCallI64(LIonToWasmCallI64* lir) {
   emitIonToWasmCallBase(lir);
 }
 

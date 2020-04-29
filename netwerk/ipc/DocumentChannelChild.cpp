@@ -29,8 +29,10 @@ NS_IMPL_RELEASE_INHERITED(DocumentChannelChild, DocumentChannel)
 DocumentChannelChild::DocumentChannelChild(nsDocShellLoadState* aLoadState,
                                            net::LoadInfo* aLoadInfo,
                                            nsLoadFlags aLoadFlags,
-                                           uint32_t aCacheKey)
-    : DocumentChannel(aLoadState, aLoadInfo, aLoadFlags, aCacheKey) {
+                                           uint32_t aCacheKey,
+                                           bool aUriModified, bool aIsXFOError)
+    : DocumentChannel(aLoadState, aLoadInfo, aLoadFlags, aCacheKey,
+                      aUriModified, aIsXFOError) {
   LOG(("DocumentChannelChild ctor [this=%p, uri=%s]", this,
        aLoadState->URI()->GetSpecOrDefault().get()));
 }
@@ -81,11 +83,12 @@ DocumentChannelChild::AsyncOpen(nsIStreamListener* aListener) {
   DocumentChannelCreationArgs args;
 
   args.loadState() = mLoadState->Serialize();
-  args.loadFlags() = mLoadFlags;
   args.cacheKey() = mCacheKey;
   args.channelId() = mChannelId;
   args.asyncOpenTime() = mAsyncOpenTime;
   args.outerWindowId() = GetDocShell()->GetOuterWindowID();
+  args.uriModified() = mUriModified;
+  args.isXFOError() = mIsXFOError;
 
   Maybe<IPCClientInfo> ipcClientInfo;
   if (mInitialClientInfo.isSome()) {
@@ -97,23 +100,13 @@ DocumentChannelChild::AsyncOpen(nsIStreamListener* aListener) {
     args.timing() = Some(mTiming);
   }
 
-  nsCOMPtr<nsIBrowserChild> iBrowserChild;
-  NS_QueryNotificationCallbacks(mCallbacks, mLoadGroup,
-                                NS_GET_TEMPLATE_IID(nsIBrowserChild),
-                                getter_AddRefs(iBrowserChild));
-  BrowserChild* browserChild = static_cast<BrowserChild*>(iBrowserChild.get());
-  if (MissingRequiredBrowserChild(browserChild, "documentchannel")) {
-    return NS_ERROR_ILLEGAL_VALUE;
-  }
-
   args.hasValidTransientUserAction() =
       GetDocShell()
           ->GetBrowsingContext()
           ->HasValidTransientUserGestureActivation();
 
   gNeckoChild->SendPDocumentChannelConstructor(
-      this, browserChild, GetDocShell()->GetBrowsingContext(),
-      IPC::SerializedLoadContext(this), args);
+      this, GetDocShell()->GetBrowsingContext(), args);
 
   mIsPending = true;
   mWasOpened = true;
@@ -128,48 +121,9 @@ IPCResult DocumentChannelChild::RecvFailedAsyncOpen(
   return IPC_OK();
 }
 
-void DocumentChannelChild::ShutdownListeners(nsresult aStatusCode) {
-  LOG(("DocumentChannelChild ShutdownListeners [this=%p, status=%" PRIx32 "]",
-       this, static_cast<uint32_t>(aStatusCode)));
-  mStatus = aStatusCode;
-
-  nsCOMPtr<nsIStreamListener> l = mListener;
-  if (l) {
-    l->OnStartRequest(this);
-  }
-
-  mIsPending = false;
-
-  l = mListener;  // it might have changed!
-  if (l) {
-    l->OnStopRequest(this, aStatusCode);
-  }
-  mListener = nullptr;
-  mCallbacks = nullptr;
-
-  if (mLoadGroup) {
-    mLoadGroup->RemoveRequest(this, nullptr, aStatusCode);
-    mLoadGroup = nullptr;
-  }
-
-  if (CanSend()) {
-    Send__delete__(this);
-  }
-}
-
 IPCResult DocumentChannelChild::RecvDisconnectChildListeners(
     const nsresult& aStatus, const nsresult& aLoadGroupStatus) {
-  MOZ_ASSERT(NS_FAILED(aStatus));
-  mStatus = aLoadGroupStatus;
-  // Make sure we remove from the load group before
-  // setting mStatus, as existing tests expect the
-  // status to be successful when we disconnect.
-  if (mLoadGroup) {
-    mLoadGroup->RemoveRequest(this, nullptr, aStatus);
-    mLoadGroup = nullptr;
-  }
-
-  ShutdownListeners(aStatus);
+  DisconnectChildListeners(aStatus, aLoadGroupStatus);
   return IPC_OK();
 }
 

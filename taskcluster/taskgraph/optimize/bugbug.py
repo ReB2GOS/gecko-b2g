@@ -17,47 +17,50 @@ from taskgraph.util.taskcluster import requests_retry_session
 
 logger = logging.getLogger(__name__)
 
+# Preset confidence thresholds.
+CT_LOW = 0.5
+CT_MEDIUM = 0.7
+CT_HIGH = 0.9
+
 
 class BugbugTimeoutException(Exception):
     pass
 
 
-class platform(object):
-    """Strategies for dealing with platforms."""
+@register_strategy("platform-debug")
+class SkipUnlessDebug(OptimizationStrategy):
+    """Only run debug platforms."""
 
-    @staticmethod
-    def all(task, params):
-        """Don't filter any platforms."""
-        return False
-
-    @staticmethod
-    def debug(task, params):
-        """Only run debug platforms."""
+    def should_remove_task(self, task, params, arg):
         return not (task.attributes.get('build_type') == "debug")
 
 
-@register_strategy("bugbug-all", args=(platform.all, 0.7))
-@register_strategy("bugbug-all-low", args=(platform.all, 0.5))
-@register_strategy("bugbug-all-high", args=(platform.all, 0.9))
-@register_strategy("bugbug-debug", args=(platform.debug, 0.5))
-@register_strategy("bugbug-try", args=(platform.debug, 0.5))
-@register_strategy("bugbug-reduced", args=(platform.all, 0.7, True))
-@register_strategy("bugbug-reduced-high", args=(platform.all, 0.9, True))
+@register_strategy("bugbug", args=(CT_MEDIUM,))
+@register_strategy("bugbug-combined-high", args=(CT_HIGH, False, True))
+@register_strategy("bugbug-low", args=(CT_LOW,))
+@register_strategy("bugbug-high", args=(CT_HIGH,))
+@register_strategy("bugbug-reduced", args=(CT_MEDIUM, True))
+@register_strategy("bugbug-reduced-high", args=(CT_HIGH, True))
 class BugBugPushSchedules(OptimizationStrategy):
     """Query the 'bugbug' service to retrieve relevant tasks and manifests.
 
     Args:
-        filterfn (func): A function to further reduce tasks after the bugbug
-                         algorithm.
+        confidence_threshold (float): The minimum confidence threshold (in
+            range [0, 1]) needed for a task to be scheduled.
+        use_reduced_tasks (bool): Whether or not to use the reduced set of tasks
+            provided by the bugbug service (default: False).
+        combine_weights (bool): If True, sum the confidence thresholds of all
+            groups within a task to find the overall task confidence. Otherwise
+            the maximum confidence threshold is used (default: False).
     """
     BUGBUG_BASE_URL = "https://bugbug.herokuapp.com"
     RETRY_TIMEOUT = 4 * 60  # seconds
     RETRY_INTERVAL = 5      # seconds
 
-    def __init__(self, filterfn, confidence_threshold, use_reduced_tasks=False):
-        self.filterfn = filterfn
+    def __init__(self, confidence_threshold, use_reduced_tasks=False, combine_weights=False):
         self.confidence_threshold = confidence_threshold
         self.use_reduced_tasks = use_reduced_tasks
+        self.combine_weights = combine_weights
 
     @memoized_property
     def session(self):
@@ -95,11 +98,6 @@ class BugBugPushSchedules(OptimizationStrategy):
         rev = params['head_rev']
         data = self.run_query('/push/{branch}/{rev}/schedules'.format(branch=branch, rev=rev))
 
-        groups = set(
-            group
-            for group, confidence in data.get('groups', {}).items()
-            if confidence >= self.confidence_threshold
-        )
         if not self.use_reduced_tasks:
             tasks = set(
                 task
@@ -118,7 +116,21 @@ class BugBugPushSchedules(OptimizationStrategy):
             if task.label not in tasks:
                 return True
 
-        elif not bool(set(task.attributes['test_manifests']) & groups):
-            return True
+            return False
 
-        return self.filterfn(task, params)
+        # If a task contains more than one group, figure out which confidence
+        # threshold to use. If 'self.combine_weights' is set, add up all
+        # confidence thresholds. Otherwise just use the max.
+        task_confidence = 0
+        for group, confidence in data.get("groups", {}).items():
+            if group not in test_manifests:
+                continue
+
+            if self.combine_weights:
+                task_confidence = round(
+                    task_confidence + confidence - task_confidence * confidence, 2
+                )
+            else:
+                task_confidence = max(task_confidence, confidence)
+
+        return task_confidence < self.confidence_threshold

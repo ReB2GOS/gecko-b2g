@@ -1045,25 +1045,16 @@ bool AsyncCompositionManager::ApplyAsyncContentTransformToTree(
                 Compositor* compositor = mLayerManager->GetCompositor();
                 if (CompositorBridgeParent* bridge =
                         compositor->GetCompositorBridgeParent()) {
-                  AndroidDynamicToolbarAnimator* animator =
-                      bridge->GetAndroidDynamicToolbarAnimator();
-
                   LayersId rootLayerTreeId = bridge->RootLayerTreeId();
                   if (mIsFirstPaint || FrameMetricsHaveUpdated(metrics)) {
-                    if (animator) {
-                      animator->UpdateRootFrameMetrics(metrics);
-                    } else if (RefPtr<UiCompositorControllerParent>
-                                   uiController = UiCompositorControllerParent::
-                                       GetFromRootLayerTreeId(
-                                           rootLayerTreeId)) {
+                    if (RefPtr<UiCompositorControllerParent> uiController =
+                            UiCompositorControllerParent::
+                                GetFromRootLayerTreeId(rootLayerTreeId)) {
                       uiController->NotifyUpdateScreenMetrics(metrics);
                     }
                     mLastMetrics = metrics;
                   }
                   if (mIsFirstPaint) {
-                    if (animator) {
-                      animator->FirstPaint();
-                    }
                     if (RefPtr<UiCompositorControllerParent> uiController =
                             UiCompositorControllerParent::
                                 GetFromRootLayerTreeId(rootLayerTreeId)) {
@@ -1079,15 +1070,6 @@ bool AsyncCompositionManager::ApplyAsyncContentTransformToTree(
                       uiController->NotifyLayersUpdated();
                     }
                     mLayersUpdated = false;
-                  }
-                  // If this is not actually the root content then the animator
-                  // is not getting updated in
-                  // AsyncPanZoomController::NotifyLayersUpdated because the
-                  // root content document is not scrollable. So update it here
-                  // so it knows if the root composition size has changed.
-                  if (animator && !metrics.IsRootContent()) {
-                    animator->MaybeUpdateCompositionSizeAndRootFrameMetrics(
-                        metrics);
                   }
                 }
                 fixedLayerMargins = GetFixedLayerMargins();
@@ -1464,23 +1446,18 @@ bool AsyncCompositionManager::TransformShadowTree(
     nextFrame += aVsyncRate;
   }
 
-#if defined(MOZ_WIDGET_ANDROID)
-  Compositor* compositor = mLayerManager->GetCompositor();
-  if (CompositorBridgeParent* bridge =
-          compositor->GetCompositorBridgeParent()) {
-    if (AndroidDynamicToolbarAnimator* animator =
-            bridge->GetAndroidDynamicToolbarAnimator()) {
-      wantNextFrame |= animator->UpdateAnimation(nextFrame);
-    }
-  }
-#endif  // defined(MOZ_WIDGET_ANDROID)
-
   // Reset the previous time stamp if we don't already have any running
   // animations to avoid using the time which is far behind for newly
   // started animations.
   mPreviousFrameTimeStamp = wantNextFrame ? aCurrentFrame : TimeStamp();
 
   if (!(aSkip & CompositorBridgeParentBase::TransformsToSkip::APZ)) {
+    bool apzAnimating = false;
+    if (RefPtr<APZSampler> apz = mCompositorBridge->GetAPZSampler()) {
+      apzAnimating = apz->AdvanceAnimations(nextFrame);
+    }
+    wantNextFrame |= apzAnimating;
+
     // Apply an async content transform to any layer that has
     // an async pan zoom controller.
     bool foundRoot = false;
@@ -1493,12 +1470,6 @@ bool AsyncCompositionManager::TransformShadowTree(
       }
 #endif
     }
-
-    bool apzAnimating = false;
-    if (RefPtr<APZSampler> apz = mCompositorBridge->GetAPZSampler()) {
-      apzAnimating = apz->AdvanceAnimations(nextFrame);
-    }
-    wantNextFrame |= apzAnimating;
   }
 
   HostLayer* rootComposite = root->AsHostLayer();

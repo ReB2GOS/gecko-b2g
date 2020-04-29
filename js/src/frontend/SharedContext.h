@@ -14,8 +14,11 @@
 #include "jstypes.h"
 
 #include "frontend/AbstractScopePtr.h"
+#include "frontend/FunctionSyntaxKind.h"  // FunctionSyntaxKind
 #include "frontend/ParseNode.h"
 #include "frontend/Stencil.h"
+#include "vm/FunctionFlags.h"          // js::FunctionFlags
+#include "vm/GeneratorAndAsyncKind.h"  // js::GeneratorKind, js::FunctionAsyncKind
 #include "vm/JSFunction.h"
 #include "vm/JSScript.h"
 #include "vm/Scope.h"
@@ -116,6 +119,11 @@ class SharedContext {
  public:
   SourceExtent extent;
 
+  // If defined, this is used to allocate a JSScript instead of the
+  // parser determined extent (above). This is used for certain top
+  // level contexts.
+  mozilla::Maybe<SourceExtent> scriptExtent;
+
  protected:
   bool allowNewTarget_ : 1;
   bool allowSuperProperty_ : 1;
@@ -141,7 +149,8 @@ class SharedContext {
 
  public:
   SharedContext(JSContext* cx, Kind kind, CompilationInfo& compilationInfo,
-                Directives directives, SourceExtent extent)
+                Directives directives, SourceExtent extent,
+                ImmutableScriptFlags immutableFlags = {})
       : cx_(cx),
         kind_(kind),
         compilationInfo_(compilationInfo),
@@ -154,7 +163,8 @@ class SharedContext {
         inWith_(false),
         needsThisTDZChecks_(false),
         localStrict(false),
-        hasExplicitUseStrict_(false) {
+        hasExplicitUseStrict_(false),
+        immutableFlags_(immutableFlags) {
     if (kind_ == Kind::FunctionBox) {
       immutableFlags_.setFlag(ImmutableFlags::IsFunction);
     } else if (kind_ == Kind::Module) {
@@ -246,6 +256,9 @@ class SharedContext {
   }
 
   ImmutableScriptFlags immutableFlags() { return immutableFlags_; }
+  void addToImmutableFlags(ImmutableScriptFlags flags) {
+    immutableFlags_ |= flags;
+  }
 
   inline bool allBindingsClosedOver();
 
@@ -262,6 +275,8 @@ class SharedContext {
     localStrict = strict;
     return retVal;
   }
+
+  SourceExtent getScriptExtent() { return scriptExtent.refOr(extent); }
 };
 
 class MOZ_STACK_CLASS GlobalSharedContext : public SharedContext {
@@ -272,8 +287,10 @@ class MOZ_STACK_CLASS GlobalSharedContext : public SharedContext {
 
   GlobalSharedContext(JSContext* cx, ScopeKind scopeKind,
                       CompilationInfo& compilationInfo, Directives directives,
-                      SourceExtent extent)
-      : SharedContext(cx, Kind::Global, compilationInfo, directives, extent),
+                      SourceExtent extent,
+                      ImmutableScriptFlags immutableFlags = {})
+      : SharedContext(cx, Kind::Global, compilationInfo, directives, extent,
+                      immutableFlags),
         scopeKind_(scopeKind),
         bindings(cx) {
     MOZ_ASSERT(scopeKind == ScopeKind::Global ||
@@ -592,6 +609,9 @@ class FunctionBox : public SharedContext {
   }
   void setFunctionHasExtraBodyVarScope() {
     immutableFlags_.setFlag(ImmutableFlags::FunctionHasExtraBodyVarScope);
+  }
+  void setNeedsFunctionEnvironmentObjects() {
+    immutableFlags_.setFlag(ImmutableFlags::NeedsFunctionEnvironmentObjects);
   }
 
   bool hasSimpleParameterList() const {

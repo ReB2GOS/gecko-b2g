@@ -83,7 +83,15 @@
 #include "frontend/Parser.h"
 #include "frontend/SourceNotes.h"  // SrcNote, SrcNoteType, SrcNoteIterator
 #include "gc/PublicIterators.h"
-#include "jit/arm/Simulator-arm.h"
+#ifdef JS_SIMULATOR_ARM
+#  include "jit/arm/Simulator-arm.h"
+#endif
+#ifdef JS_SIMULATOR_MIPS32
+#  include "jit/mips32/Simulator-mips32.h"
+#endif
+#ifdef JS_SIMULATOR_MIPS64
+#  include "jit/mips64/Simulator-mips64.h"
+#endif
 #include "jit/InlinableNatives.h"
 #include "jit/Ion.h"
 #include "jit/JitcodeMap.h"
@@ -10223,6 +10231,10 @@ static JSObject* NewGlobalObject(JSContext* cx, JS::RealmOptions& options,
 
     /* Initialize FakeDOMObject.prototype */
     InitDOMObject(domProto);
+
+    if (!DefineToStringTag(cx, glob, cx->names().global)) {
+      return nullptr;
+    }
 
     JS_FireOnNewGlobalObject(cx, glob);
   }

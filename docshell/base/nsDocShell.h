@@ -305,7 +305,6 @@ class nsDocShell final : public nsDocLoader,
   NS_IMETHOD GetAssociatedWindow(mozIDOMWindowProxy**) override;
   NS_IMETHOD GetTopWindow(mozIDOMWindowProxy**) override;
   NS_IMETHOD GetTopFrameElement(mozilla::dom::Element**) override;
-  NS_IMETHOD GetNestedFrameId(uint64_t*) override;
   NS_IMETHOD GetIsContent(bool*) override;
   NS_IMETHOD GetUsePrivateBrowsing(bool*) override;
   NS_IMETHOD SetUsePrivateBrowsing(bool) override;
@@ -682,9 +681,6 @@ class nsDocShell final : public nsDocLoader,
 
   static nsresult AddHeadersToChannel(nsIInputStream* aHeadersData,
                                       nsIChannel* aChannel);
-
-  nsresult DoChannelLoad(nsIChannel* aChannel, nsIURILoader* aURILoader,
-                         bool aBypassClassifier);
 
   nsresult OpenInitializedChannel(nsIChannel* aChannel,
                                   nsIURILoader* aURILoader,
@@ -1073,6 +1069,10 @@ class nsDocShell final : public nsDocLoader,
   // Called when the Private Browsing state of a nsDocShell changes.
   void NotifyPrivateBrowsingChanged();
 
+  // Internal helpers for BrowsingContext to pass update values to nsIDocShell's
+  // LoadGroup.
+  void SetLoadGroupDefaultLoadFlags(nsLoadFlags aLoadFlags);
+
  private:  // data members
   nsID mHistoryID;
   nsString mTitle;
@@ -1186,8 +1186,6 @@ class nsDocShell final : public nsDocLoader,
 
   eCharsetReloadState mCharsetReloadState;
 
-  mozilla::hal::ScreenOrientation mOrientationLock;
-
   int32_t mParentCharsetSource;
   mozilla::CSSIntSize mFrameMargins;
 
@@ -1207,7 +1205,6 @@ class nsDocShell final : public nsDocLoader,
   BusyFlags mBusyFlags;
   AppType mAppType;
   uint32_t mLoadType;
-  uint32_t mDefaultLoadFlags;
   uint32_t mFailedLoadType;
 
   // This represents the CSS display-mode we are currently using. This is mostly

@@ -335,6 +335,7 @@ class WebConsoleUI {
     await resourceWatcher.watch(
       [
         resourceWatcher.TYPES.CONSOLE_MESSAGES,
+        resourceWatcher.TYPES.ERROR_MESSAGES,
         resourceWatcher.TYPES.PLATFORM_MESSAGES,
       ],
       this._onResourceAvailable
@@ -347,6 +348,14 @@ class WebConsoleUI {
       // resource is the packet sent from `ConsoleActor.getCachedMessages().messages`
       // or via ConsoleActor's `consoleAPICall` event.
       resource.type = "consoleAPICall";
+      this.wrapper.dispatchMessageAdd(resource);
+      return;
+    }
+
+    if (resourceType == resourceWatcher.TYPES.ERROR_MESSAGES) {
+      // resource is the packet sent from `ConsoleActor.getCachedMessages().messages`
+      // or via ConsoleActor's `pageError` event.
+      resource.type = "pageError";
       this.wrapper.dispatchMessageAdd(resource);
       return;
     }
@@ -589,13 +598,14 @@ class WebConsoleUI {
    *        Notification packet received from the server.
    */
   async handleTabNavigated(packet) {
+    // Wait for completion of any async dispatch before notifying that the console
+    // is fully updated after a page reload
+    await this.wrapper.waitAsyncDispatches();
+
     if (!packet.nativeConsoleAPI) {
       this.logWarningAboutReplacedAPI();
     }
 
-    // Wait for completion of any async dispatch before notifying that the console
-    // is fully updated after a page reload
-    await this.wrapper.waitAsyncDispatches();
     this.emit("reloaded");
   }
 

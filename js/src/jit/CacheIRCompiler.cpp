@@ -23,6 +23,7 @@
 #include "proxy/Proxy.h"
 #include "vm/ArrayBufferObject.h"
 #include "vm/BigIntType.h"
+#include "vm/FunctionFlags.h"  // js::FunctionFlags
 #include "vm/GeneratorObject.h"
 
 #include "builtin/Boolean-inl.h"
@@ -3939,6 +3940,22 @@ bool CacheIRCompiler::emitLoadTypedElementResult(ObjOperandId objId,
   return true;
 }
 
+bool CacheIRCompiler::emitLoadTypedArrayElementResult(ObjOperandId objId,
+                                                      Int32OperandId indexId,
+
+                                                      Scalar::Type elementType,
+                                                      bool handleOOB) {
+  return emitLoadTypedElementResult(
+      objId, indexId, TypedThingLayout::TypedArray, elementType, handleOOB);
+}
+
+bool CacheIRCompiler::emitLoadTypedObjectElementResult(
+    ObjOperandId objId, Int32OperandId indexId, TypedThingLayout layout,
+    Scalar::Type elementType) {
+  return emitLoadTypedElementResult(objId, indexId, layout, elementType,
+                                    /* handleOOB = */ false);
+}
+
 bool CacheIRCompiler::emitStoreTypedObjectScalarProperty(
     ObjOperandId objId, uint32_t offsetOffset, TypedThingLayout layout,
     Scalar::Type type, uint32_t rhsId) {
@@ -4135,6 +4152,20 @@ bool CacheIRCompiler::emitLoadInt32Result(Int32OperandId valId) {
 
   if (output.hasValue()) {
     masm.tagValue(JSVAL_TYPE_INT32, val, output.valueReg());
+  } else {
+    masm.mov(val, output.typedReg().gpr());
+  }
+
+  return true;
+}
+
+bool CacheIRCompiler::emitLoadBigIntResult(BigIntOperandId valId) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+  AutoOutputRegister output(*this);
+  Register val = allocator.useRegister(masm, valId);
+
+  if (output.hasValue()) {
+    masm.tagValue(JSVAL_TYPE_BIGINT, val, output.valueReg());
   } else {
     masm.mov(val, output.typedReg().gpr());
   }
@@ -5584,13 +5615,13 @@ bool CacheIRCompiler::emitBooleanToString(Int32OperandId inputId,
 void js::jit::LoadTypedThingData(MacroAssembler& masm, TypedThingLayout layout,
                                  Register obj, Register result) {
   switch (layout) {
-    case Layout_TypedArray:
+    case TypedThingLayout::TypedArray:
       masm.loadPtr(Address(obj, TypedArrayObject::dataOffset()), result);
       break;
-    case Layout_OutlineTypedObject:
+    case TypedThingLayout::OutlineTypedObject:
       masm.loadPtr(Address(obj, OutlineTypedObject::offsetOfData()), result);
       break;
-    case Layout_InlineTypedObject:
+    case TypedThingLayout::InlineTypedObject:
       masm.computeEffectiveAddress(
           Address(obj, InlineTypedObject::offsetOfDataStart()), result);
       break;
@@ -5603,11 +5634,11 @@ void js::jit::LoadTypedThingLength(MacroAssembler& masm,
                                    TypedThingLayout layout, Register obj,
                                    Register result) {
   switch (layout) {
-    case Layout_TypedArray:
+    case TypedThingLayout::TypedArray:
       masm.unboxInt32(Address(obj, TypedArrayObject::lengthOffset()), result);
       break;
-    case Layout_OutlineTypedObject:
-    case Layout_InlineTypedObject:
+    case TypedThingLayout::OutlineTypedObject:
+    case TypedThingLayout::InlineTypedObject:
       masm.loadTypedObjectLength(obj, result);
       break;
     default:

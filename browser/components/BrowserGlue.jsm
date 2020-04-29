@@ -8,8 +8,6 @@ var EXPORTED_SYMBOLS = [
   "DefaultBrowserCheck",
 ];
 
-const XULNS = "http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul";
-
 const { XPCOMUtils } = ChromeUtils.import(
   "resource://gre/modules/XPCOMUtils.jsm"
 );
@@ -92,6 +90,19 @@ let ACTORS = {
       },
     },
     matches: ["about:logins", "about:logins?*"],
+  },
+
+  AboutNewTab: {
+    child: {
+      moduleURI: "resource:///actors/AboutNewTabChild.jsm",
+      events: {
+        DOMContentLoaded: {},
+      },
+    },
+    // The wildcard on about:newtab is for the ?endpoint query parameter
+    // that is used for snippets debugging.
+    matches: ["about:home", "about:welcome", "about:newtab*"],
+    remoteTypes: ["privilegedabout"],
   },
 
   AboutWelcome: {
@@ -411,7 +422,7 @@ let ACTORS = {
       moduleURI: "resource:///modules/translation/TranslationChild.jsm",
       events: {
         pageshow: {},
-        load: { mozSystemGroup: true },
+        load: { mozSystemGroup: true, capture: true },
       },
     },
     enablePreference: "browser.translation.detectLanguage",
@@ -1992,7 +2003,7 @@ BrowserGlue.prototype = {
       let win = BrowserWindowTracker.getTopWindow();
 
       let stack = win.gBrowser.getPanel().querySelector(".browserStack");
-      let mask = win.document.createElementNS(XULNS, "box");
+      let mask = win.document.createXULElement("box");
       mask.setAttribute("id", "content-mask");
       stack.appendChild(mask);
 
@@ -2152,6 +2163,19 @@ BrowserGlue.prototype = {
 
       {
         task: () => {
+          let enableCertErrorUITelemetry = Services.prefs.getBoolPref(
+            "security.certerrors.recordEventTelemetry",
+            true
+          );
+          Services.telemetry.setEventRecordingEnabled(
+            "security.ui.certerror",
+            enableCertErrorUITelemetry
+          );
+        },
+      },
+
+      {
+        task: () => {
           let siteSpecific = Services.prefs.getBoolPref(
             "browser.zoom.siteSpecific",
             false
@@ -2271,36 +2295,6 @@ BrowserGlue.prototype = {
         condition: AppConstants.ENABLE_REMOTE_AGENT,
         task: () => {
           Services.obs.notifyObservers(null, "remote-startup-requested");
-        },
-      },
-
-      // Temporary for Delegated Credentials Study:
-      // https://bugzilla.mozilla.org/show_bug.cgi?id=1628012
-      {
-        condition: !Cu.isInAutomation && AppConstants.NIGHTLY_BUILD,
-        task: () => {
-          let env = Cc["@mozilla.org/process/environment;1"].getService(
-            Ci.nsIEnvironment
-          );
-
-          // Disable under xpcshell-test.
-          if (!env.exists("XPCSHELL_TEST_PROFILE_DIR")) {
-            let { DelegatedCredsExperiment } = ChromeUtils.import(
-              "resource:///modules/DelegatedCredsExperiment.jsm"
-            );
-
-            let currentDate = new Date();
-            let expiryDate = new Date("2020-05-01 0:00:00");
-            if (currentDate < expiryDate) {
-              Services.tm.idleDispatchToMainThread(() => {
-                DelegatedCredsExperiment.runTest();
-              });
-            } else {
-              Services.tm.idleDispatchToMainThread(() => {
-                DelegatedCredsExperiment.uninstall();
-              });
-            }
-          }
         },
       },
 

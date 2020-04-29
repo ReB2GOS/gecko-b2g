@@ -318,6 +318,8 @@ class BrowserParent final : public PBrowserParent,
       const Maybe<mozilla::ContentBlockingNotifier::StorageAccessGrantedReason>&
           aReason);
 
+  mozilla::ipc::IPCResult RecvReportBlockedEmbedderNodeByClassifier();
+
   mozilla::ipc::IPCResult RecvNavigationFinished();
 
   bool GetWebProgressListener(nsIBrowser** aOutBrowser,
@@ -612,7 +614,7 @@ class BrowserParent final : public PBrowserParent,
 
   bool GetGlobalJSObject(JSContext* cx, JSObject** globalp);
 
-  void StartPersistence(uint64_t aOuterWindowID,
+  void StartPersistence(CanonicalBrowsingContext* aContext,
                         nsIWebBrowserPersistDocumentReceiver* aRecv,
                         ErrorResult& aRv);
 

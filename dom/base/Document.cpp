@@ -815,7 +815,7 @@ void ExternalResourceMap::ShowViewers() {
   }
 }
 
-void TransferZoomLevels(Document* aFromDoc, Document* aToDoc) {
+void TransferOverrideDPPX(Document* aFromDoc, Document* aToDoc) {
   MOZ_ASSERT(aFromDoc && aToDoc, "transferring zoom levels from/to null doc");
 
   nsPresContext* fromCtxt = aFromDoc->GetPresContext();
@@ -824,8 +824,6 @@ void TransferZoomLevels(Document* aFromDoc, Document* aToDoc) {
   nsPresContext* toCtxt = aToDoc->GetPresContext();
   if (!toCtxt) return;
 
-  toCtxt->SetFullZoom(fromCtxt->GetFullZoom());
-  toCtxt->SetTextZoom(fromCtxt->TextZoom());
   toCtxt->SetOverrideDPPX(fromCtxt->GetOverrideDPPX());
 }
 
@@ -879,7 +877,10 @@ nsresult ExternalResourceMap::AddExternalResource(nsIURI* aURI,
   newResource->mViewer = aViewer;
   newResource->mLoadGroup = aLoadGroup;
   if (doc) {
-    TransferZoomLevels(aDisplayDocument, doc);
+    if (nsPresContext* pc = doc->GetPresContext()) {
+      pc->RecomputeBrowsingContextDependentData();
+    }
+    TransferOverrideDPPX(aDisplayDocument, doc);
     TransferShowingState(aDisplayDocument, doc);
   }
 
@@ -2217,6 +2218,12 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INTERNAL(Document)
     cb.NoteXPCOMChild(it.Key());
     CycleCollectionNoteChild(cb, it.UserData(), "mL10nProtoElements value");
   }
+
+  for (size_t i = 0; i < tmp->mPendingFrameStaticClones.Length(); ++i) {
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mPendingFrameStaticClones[i].mElement);
+    NS_IMPL_CYCLE_COLLECTION_TRAVERSE(
+        mPendingFrameStaticClones[i].mStaticCloneOf);
+  }
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_CLASS(Document)
@@ -2341,6 +2348,8 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN(Document)
     mql->Disconnect();
     mql = next;
   }
+
+  tmp->mPendingFrameStaticClones.Clear();
 
   tmp->mInUnlinkOrDeletion = false;
 
@@ -3583,6 +3592,14 @@ void Document::SetDocumentURI(nsIURI* aURI) {
   nsPIDOMWindowInner* inner = GetInnerWindow();
   if (inner && inner->GetWindowGlobalChild()) {
     inner->GetWindowGlobalChild()->SetDocumentURI(mDocumentURI);
+  }
+
+  auto* browsingContext = GetBrowsingContext();
+  if (browsingContext) {
+    nsCOMPtr<nsIURI> innerDocURI = NS_GetInnermostURI(mDocumentURI);
+    if (innerDocURI) {
+      browsingContext->SetIsSecure(innerDocURI->SchemeIs("https"));
+    }
   }
 }
 
@@ -10451,7 +10468,7 @@ bool Document::CanSavePresentation(nsIRequest* aNewRequest,
 
   // BFCache is currently not compatible with remote subframes (bug 1609324)
   if (RefPtr<BrowsingContext> browsingContext = GetBrowsingContext()) {
-    for (auto& child : browsingContext->GetChildren()) {
+    for (auto& child : browsingContext->Children()) {
       if (!child->IsInProcess()) {
         aBFCacheCombo |= BFCacheStatus::CONTAINS_REMOTE_SUBFRAMES;
         ret = false;
@@ -11150,7 +11167,7 @@ void Document::NotifyLoading(bool aNewParentIsLoading,
       // readystates of the subdocument.  In the child process it will call
       // NotifyLoading() to notify the innerwindow/TimeoutManager, and then
       // iterate it's children
-      for (auto& child : context->GetChildren()) {
+      for (auto& child : context->Children()) {
         MOZ_LOG(gTimeoutDeferralLog, mozilla::LogLevel::Debug,
                 ("bc: %p SetAncestorLoading(%d)", (void*)child, is_loading));
         child->SetAncestorLoading(is_loading);
@@ -12061,9 +12078,7 @@ nsresult Document::ScheduleFrameRequestCallback(FrameRequestCallback& aCallback,
   }
   int32_t newHandle = ++mFrameRequestCallbackCounter;
 
-  DebugOnly<FrameRequest*> request =
-      mFrameRequestCallbacks.AppendElement(FrameRequest(aCallback, newHandle));
-  NS_ASSERTION(request, "This is supposed to be infallible!");
+  mFrameRequestCallbacks.AppendElement(FrameRequest(aCallback, newHandle));
   UpdateFrameRequestCallbackSchedulingState();
 
   *aHandle = newHandle;
@@ -13869,7 +13884,7 @@ class PointerLockRequest final : public Runnable {
 static const char* GetPointerLockError(Element* aElement, Element* aCurrentLock,
                                        bool aNoFocusCheck = false) {
   // Check if pointer lock pref is enabled
-  if (!Preferences::GetBool("full-screen-api.pointer-lock.enabled")) {
+  if (!StaticPrefs::full_screen_api_pointer_lock_enabled()) {
     return "PointerLockDeniedDisabled";
   }
 
@@ -16287,6 +16302,20 @@ bool Document::HasRecentlyStartedForegroundLoads() {
     idleScheduler->SendPrioritizedOperationDone();
   }
   return false;
+}
+
+nsTArray<Document::PendingFrameStaticClone>
+Document::TakePendingFrameStaticClones() {
+  MOZ_ASSERT(mIsStaticDocument,
+             "Cannot have pending frame static clones in non-static documents");
+  return std::move(mPendingFrameStaticClones);
+}
+
+void Document::AddPendingFrameStaticClone(nsFrameLoaderOwner* aElement,
+                                          nsFrameLoader* aStaticCloneOf) {
+  PendingFrameStaticClone* clone = mPendingFrameStaticClones.AppendElement();
+  clone->mElement = aElement;
+  clone->mStaticCloneOf = aStaticCloneOf;
 }
 
 }  // namespace dom

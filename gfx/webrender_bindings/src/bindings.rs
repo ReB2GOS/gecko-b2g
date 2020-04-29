@@ -34,11 +34,10 @@ use rayon;
 use swgl_bindings::SwCompositor;
 use tracy_rs::register_thread_with_profiler;
 use webrender::{
-    api::units::*, api::*, set_profiler_hooks, AsyncPropertySampler, AsyncScreenshotHandle,
-    Compositor, CompositorCapabilities, CompositorConfig, DebugFlags, Device, FastHashMap,
-    NativeSurfaceId, NativeSurfaceInfo, NativeTileId, PipelineInfo, ProfilerHooks, RecordedFrameHandle, Renderer,
-    RendererOptions, RendererStats, SceneBuilderHooks, ShaderPrecacheFlags, Shaders, ThreadListener, UploadMethod,
-    VertexUsageHint, WrShaders,
+    api::units::*, api::*, set_profiler_hooks, AsyncPropertySampler, AsyncScreenshotHandle, Compositor,
+    CompositorCapabilities, CompositorConfig, DebugFlags, Device, FastHashMap, NativeSurfaceId, NativeSurfaceInfo,
+    NativeTileId, PipelineInfo, ProfilerHooks, RecordedFrameHandle, Renderer, RendererOptions, RendererStats,
+    SceneBuilderHooks, ShaderPrecacheFlags, Shaders, ThreadListener, UploadMethod, VertexUsageHint, WrShaders,
 };
 
 #[cfg(target_os = "macos")]
@@ -1995,7 +1994,7 @@ pub extern "C" fn wr_resource_updates_add_raw_font(
 }
 
 fn generate_capture_path(path: *const c_char) -> Option<PathBuf> {
-    use std::fs::{File, create_dir_all};
+    use std::fs::{create_dir_all, File};
     use std::io::Write;
 
     let cstr = unsafe { CStr::from_ptr(path) };
@@ -2043,7 +2042,7 @@ fn generate_capture_path(path: *const c_char) -> Option<PathBuf> {
         }
         Err(e) => {
             warn!("Unable to create path '{:?}' for capture: {:?}", path, e);
-            return None
+            return None;
         }
     }
 
@@ -2433,14 +2432,12 @@ pub extern "C" fn wr_dp_define_clip_with_parent_clip(
     clip_rect: LayoutRect,
     complex: *const ComplexClipRegion,
     complex_count: usize,
-    mask: *const ImageMask,
 ) -> WrClipId {
     wr_dp_define_clip_impl(
         &mut state.frame_builder,
         parent.to_webrender(state.pipeline_id),
         clip_rect,
         unsafe { make_slice(complex, complex_count) },
-        unsafe { mask.as_ref() }.map(|m| *m),
     )
 }
 
@@ -2451,14 +2448,12 @@ pub extern "C" fn wr_dp_define_clip_with_parent_clip_chain(
     clip_rect: LayoutRect,
     complex: *const ComplexClipRegion,
     complex_count: usize,
-    mask: *const ImageMask,
 ) -> WrClipId {
     wr_dp_define_clip_impl(
         &mut state.frame_builder,
         parent.to_webrender(state.pipeline_id),
         clip_rect,
         unsafe { make_slice(complex, complex_count) },
-        unsafe { mask.as_ref() }.map(|m| *m),
     )
 }
 
@@ -2467,12 +2462,26 @@ fn wr_dp_define_clip_impl(
     parent: SpaceAndClipInfo,
     clip_rect: LayoutRect,
     complex_regions: &[ComplexClipRegion],
-    mask: Option<ImageMask>,
 ) -> WrClipId {
     debug_assert!(unsafe { is_in_main_thread() });
     let clip_id = frame_builder
         .dl_builder
-        .define_clip(&parent, clip_rect, complex_regions.iter().cloned(), mask);
+        .define_clip(&parent, clip_rect, complex_regions.iter().cloned());
+    WrClipId::from_webrender(clip_id)
+}
+
+#[no_mangle]
+pub extern "C" fn wr_dp_define_image_mask_clip_with_parent_clip_chain(
+    state: &mut WrState,
+    parent: &WrSpaceAndClipChain,
+    mask: ImageMask,
+) -> WrClipId {
+    debug_assert!(unsafe { is_in_main_thread() });
+
+    let clip_id = state
+        .frame_builder
+        .dl_builder
+        .define_clip_image_mask(&parent.to_webrender(state.pipeline_id), mask);
     WrClipId::from_webrender(clip_id)
 }
 
@@ -2523,8 +2532,6 @@ pub extern "C" fn wr_dp_define_scroll_layer(
         Some(ExternalScrollId(external_scroll_id, state.pipeline_id)),
         content_rect,
         clip_rect,
-        vec![],
-        None,
         ScrollSensitivity::Script,
         // TODO(gw): We should also update the Gecko-side APIs to provide
         //           this as a vector rather than a point.

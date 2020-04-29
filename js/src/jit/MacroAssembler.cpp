@@ -27,6 +27,7 @@
 #include "jit/Simulator.h"
 #include "js/Conversions.h"
 #include "js/Printf.h"
+#include "vm/FunctionFlags.h"  // js::FunctionFlags
 #include "vm/TraceLogging.h"
 
 #include "gc/Nursery-inl.h"
@@ -2562,7 +2563,7 @@ void MacroAssembler::PopRegsInMask(LiveGeneralRegisterSet set) {
 }
 
 void MacroAssembler::Push(jsid id, Register scratchReg) {
-  if (JSID_IS_GCTHING(id)) {
+  if (id.isGCThing()) {
     // If we're pushing a gcthing, then we can't just push the tagged jsid
     // value since the GC won't have any idea that the push instruction
     // carries a reference to a gcthing.  Need to unpack the pointer,
@@ -2629,6 +2630,16 @@ void MacroAssembler::Push(const Value& val) {
 void MacroAssembler::Push(JSValueType type, Register reg) {
   pushValue(type, reg);
   framePushed_ += sizeof(Value);
+}
+
+void MacroAssembler::Push(const Register64 reg) {
+#if JS_BITS_PER_WORD == 64
+  Push(reg.reg);
+#else
+  MOZ_ASSERT(MOZ_LITTLE_ENDIAN(), "Big-endian not supported.");
+  Push(reg.high);
+  Push(reg.low);
+#endif
 }
 
 void MacroAssembler::PushValue(const Address& addr) {
