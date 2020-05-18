@@ -12,8 +12,9 @@ const { XPCOMUtils } = ChromeUtils.import(
 );
 
 XPCOMUtils.defineLazyModuleGetters(this, {
-  MigrationUtils: "resource:///modules/MigrationUtils.jsm",
   FxAccounts: "resource://gre/modules/FxAccounts.jsm",
+  SpecialMessageActions:
+    "resource://messaging-system/lib/SpecialMessageActions.jsm",
   AboutWelcomeTelemetry:
     "resource://activity-stream/aboutwelcome/lib/AboutWelcomeTelemetry.jsm",
 });
@@ -105,7 +106,7 @@ class AboutWelcomeParent extends JSWindowActorParent {
         reason: this.AboutWelcomeObserver.terminateReason,
         page: "about:welcome",
       },
-      message_id: "ABOUT_WELCOME_SESSION_END",
+      message_id: this.AWMessageId,
       id: "ABOUT_WELCOME",
     });
   }
@@ -122,22 +123,15 @@ class AboutWelcomeParent extends JSWindowActorParent {
     log.debug(`Received content event: ${type}`);
     switch (type) {
       case "AWPage:SET_WELCOME_MESSAGE_SEEN":
+        this.AWMessageId = data;
         try {
           Services.prefs.setBoolPref(DID_SEE_ABOUT_WELCOME_PREF, true);
         } catch (e) {
           log.debug(`Fails to set ${DID_SEE_ABOUT_WELCOME_PREF}.`);
         }
         break;
-      case "AWPage:OPEN_AWESOME_BAR":
-        window.gURLBar.search("");
-        break;
-      case "AWPage:OPEN_PRIVATE_BROWSER_WINDOW":
-        window.OpenBrowserWindow({ private: true });
-        break;
-      case "AWPage:SHOW_MIGRATION_WIZARD":
-        MigrationUtils.showMigrationWizard(window, [
-          MigrationUtils.MIGRATION_ENTRYPOINT_NEWTAB,
-        ]);
+      case "AWPage:SPECIAL_ACTION":
+        SpecialMessageActions.handleAction(data, browser);
         break;
       case "AWPage:FXA_METRICS_FLOW_URI":
         return FxAccounts.config.promiseMetricsFlowURI("aboutwelcome");

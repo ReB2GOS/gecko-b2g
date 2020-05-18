@@ -519,10 +519,16 @@ static void* WasmHandleTrap() {
   MOZ_CRASH("unexpected trap");
 }
 
-static void WasmReportInt64JSCall() {
+static void WasmReportInt64OrV128JSCall() {
   JSContext* cx = TlsContext.get();
   JS_ReportErrorNumberUTF8(cx, GetErrorMessage, nullptr,
-                           JSMSG_WASM_BAD_I64_TYPE);
+                           JSMSG_WASM_BAD_VAL_TYPE,
+#ifdef ENABLE_WASM_SIMD
+                           "i64 or v128"
+#else
+                           "i64"
+#endif
+  );
 }
 
 static int32_t CoerceInPlace_ToInt32(Value* rawVal) {
@@ -623,7 +629,6 @@ static int32_t CoerceInPlace_JitEntry(int funcExportIndex, TlsData* tlsData,
             }
             break;
           case RefType::Func:
-          case RefType::Null:
           case RefType::TypeIndex:
             // Guarded against by temporarilyUnsupportedReftypeForEntry()
             MOZ_CRASH("unexpected input argument in CoerceInPlace_JitEntry");
@@ -643,8 +648,11 @@ static int32_t CoerceInPlace_JitEntry(int funcExportIndex, TlsData* tlsData,
         break;
       }
 #endif
+      case ValType::V128: {
+        // Guarded against by hasV128ArgOrRet()
+        MOZ_CRASH("unexpected input argument in CoerceInPlace_JitEntry");
+      }
       default: {
-        // Guarded against by temporarilyUnsupportedReftypeForEntry()
         MOZ_CRASH("unexpected input argument in CoerceInPlace_JitEntry");
       }
     }
@@ -796,9 +804,9 @@ void* wasm::AddressOf(SymbolicAddress imm, ABIFunctionType* abiType) {
     case SymbolicAddress::HandleTrap:
       *abiType = Args_General0;
       return FuncCast(WasmHandleTrap, *abiType);
-    case SymbolicAddress::ReportInt64JSCall:
+    case SymbolicAddress::ReportInt64OrV128JSCall:
       *abiType = Args_General0;
-      return FuncCast(WasmReportInt64JSCall, *abiType);
+      return FuncCast(WasmReportInt64OrV128JSCall, *abiType);
     case SymbolicAddress::CallImport_Void:
       *abiType = MakeABIFunctionType(
           ArgType_Int32,
@@ -814,6 +822,9 @@ void* wasm::AddressOf(SymbolicAddress imm, ABIFunctionType* abiType) {
           ArgType_Int32,
           {ArgType_General, ArgType_Int32, ArgType_Int32, ArgType_General});
       return FuncCast(Instance::callImport_i64, *abiType);
+    case SymbolicAddress::CallImport_V128:
+      *abiType = Args_General4;
+      return FuncCast(Instance::callImport_v128, *abiType);
     case SymbolicAddress::CallImport_F64:
       *abiType = MakeABIFunctionType(
           ArgType_Int32,
@@ -829,11 +840,6 @@ void* wasm::AddressOf(SymbolicAddress imm, ABIFunctionType* abiType) {
           ArgType_Int32,
           {ArgType_General, ArgType_Int32, ArgType_Int32, ArgType_General});
       return FuncCast(Instance::callImport_anyref, *abiType);
-    case SymbolicAddress::CallImport_NullRef:
-      *abiType = MakeABIFunctionType(
-          ArgType_Int32,
-          {ArgType_General, ArgType_Int32, ArgType_Int32, ArgType_General});
-      return FuncCast(Instance::callImport_nullref, *abiType);
     case SymbolicAddress::CoerceInPlace_ToInt32:
       *abiType = Args_General1;
       return FuncCast(CoerceInPlace_ToInt32, *abiType);
@@ -1137,10 +1143,10 @@ bool wasm::NeedsBuiltinThunk(SymbolicAddress sym) {
     case SymbolicAddress::CallImport_Void:  // GenerateImportInterpExit
     case SymbolicAddress::CallImport_I32:
     case SymbolicAddress::CallImport_I64:
+    case SymbolicAddress::CallImport_V128:
     case SymbolicAddress::CallImport_F64:
     case SymbolicAddress::CallImport_FuncRef:
     case SymbolicAddress::CallImport_AnyRef:
-    case SymbolicAddress::CallImport_NullRef:
     case SymbolicAddress::CoerceInPlace_ToInt32:  // GenerateImportJitExit
     case SymbolicAddress::CoerceInPlace_ToNumber:
 #if defined(ENABLE_WASM_BIGINT)
@@ -1203,7 +1209,7 @@ bool wasm::NeedsBuiltinThunk(SymbolicAddress sym) {
     case SymbolicAddress::WaitI64:
     case SymbolicAddress::Wake:
     case SymbolicAddress::CoerceInPlace_JitEntry:
-    case SymbolicAddress::ReportInt64JSCall:
+    case SymbolicAddress::ReportInt64OrV128JSCall:
     case SymbolicAddress::MemCopy:
     case SymbolicAddress::MemCopyShared:
     case SymbolicAddress::DataDrop:

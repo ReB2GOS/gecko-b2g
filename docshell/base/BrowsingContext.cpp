@@ -30,6 +30,7 @@
 #include "mozilla/dom/SyncedContextInlines.h"
 #include "mozilla/net/DocumentLoadListener.h"
 #include "mozilla/Assertions.h"
+#include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/ClearOnShutdown.h"
 #include "mozilla/Components.h"
 #include "mozilla/HashTable.h"
@@ -114,6 +115,13 @@ BrowsingContext* BrowsingContext::Top() {
     bc = bc->GetParent();
   }
   return bc;
+}
+
+WindowContext* BrowsingContext::GetTopWindowContext() {
+  if (mParentWindow) {
+    return mParentWindow->TopWindowContext();
+  }
+  return mCurrentWindowContext;
 }
 
 /* static */
@@ -229,11 +237,8 @@ already_AddRefed<BrowsingContext> BrowsingContext::CreateDetached(
         aParent->WindowID());
   }
 
-  context->mFields.SetWithoutSyncing<IDX_EmbedderPolicy>(
-      nsILoadInfo::EMBEDDER_POLICY_NULL);
   context->mFields.SetWithoutSyncing<IDX_OpenerPolicy>(
       nsILoadInfo::OPENER_POLICY_UNSAFE_NONE);
-  context->mFields.SetWithoutSyncing<IDX_WatchedByDevtools>(false);
 
   if (aOpener && aOpener->SameOriginWithTop()) {
     // We inherit the opener policy if there is a creator and if the creator's
@@ -255,10 +260,6 @@ already_AddRefed<BrowsingContext> BrowsingContext::CreateDetached(
     context->mUseRemoteTabs = inherit->mUseRemoteTabs;
     context->mUseRemoteSubframes = inherit->mUseRemoteSubframes;
     context->mOriginAttributes = inherit->mOriginAttributes;
-
-    // CORPP 3.1.3 https://mikewest.github.io/corpp/#integration-html
-    context->mFields.SetWithoutSyncing<IDX_EmbedderPolicy>(
-        inherit->GetEmbedderPolicy());
   }
 
   // if our parent has a parent that's loading, we need it too
@@ -299,6 +300,10 @@ already_AddRefed<BrowsingContext> BrowsingContext::CreateDetached(
   context->mFields.SetWithoutSyncing<IDX_OrientationLock>(
       mozilla::hal::eScreenOrientation_None);
 
+  const bool useGlobalHistory =
+      inherit ? inherit->GetUseGlobalHistory() : false;
+  context->mFields.SetWithoutSyncing<IDX_UseGlobalHistory>(useGlobalHistory);
+
   return context.forget();
 }
 
@@ -309,11 +314,6 @@ already_AddRefed<BrowsingContext> BrowsingContext::CreateIndependent(
   bc->mWindowless = bc->IsContent();
   bc->EnsureAttached();
   return bc.forget();
-}
-
-void BrowsingContext::SetWindowless() {
-  MOZ_DIAGNOSTIC_ASSERT(!mEverAttached);
-  mWindowless = true;
 }
 
 void BrowsingContext::EnsureAttached() {
@@ -469,6 +469,10 @@ void BrowsingContext::SetEmbedderElement(Element* aEmbedder) {
                            messageManagerGroup);
       }
       txn.SetMessageManagerGroup(messageManagerGroup);
+
+      bool useGlobalHistory = !aEmbedder->HasAttr(
+          kNameSpaceID_None, nsGkAtoms::disableglobalhistory);
+      txn.SetUseGlobalHistory(useGlobalHistory);
     }
     txn.Commit(this);
   }
@@ -499,6 +503,8 @@ void BrowsingContext::Attach(bool aFromIPC, ContentParent* aOriginProcess) {
 
   MOZ_DIAGNOSTIC_ASSERT(mGroup);
   MOZ_DIAGNOSTIC_ASSERT(!mIsDiscarded);
+
+  AssertCoherentLoadContext();
 
   // Add ourselves either to our parent or BrowsingContextGroup's child list.
   if (mParentWindow) {
@@ -1309,6 +1315,38 @@ nsresult BrowsingContext::SetOriginAttributes(const OriginAttributes& aAttrs) {
   return NS_OK;
 }
 
+void BrowsingContext::AssertCoherentLoadContext() {
+#ifdef MOZ_DIAGNOSTIC_ASSERT_ENABLED
+  // LoadContext should generally match our opener or parent.
+  if (RefPtr<BrowsingContext> opener = GetOpener()) {
+    MOZ_DIAGNOSTIC_ASSERT(opener->mType == mType);
+    MOZ_DIAGNOSTIC_ASSERT(opener->mGroup == mGroup);
+    MOZ_DIAGNOSTIC_ASSERT(opener->mUseRemoteTabs == mUseRemoteTabs);
+    MOZ_DIAGNOSTIC_ASSERT(opener->mUseRemoteSubframes == mUseRemoteSubframes);
+    MOZ_DIAGNOSTIC_ASSERT(opener->mPrivateBrowsingId == mPrivateBrowsingId);
+    MOZ_DIAGNOSTIC_ASSERT(
+        opener->mOriginAttributes.EqualsIgnoringFPD(mOriginAttributes));
+  }
+  if (RefPtr<BrowsingContext> parent = GetParent()) {
+    MOZ_DIAGNOSTIC_ASSERT(parent->mType == mType);
+    MOZ_DIAGNOSTIC_ASSERT(parent->mGroup == mGroup);
+    MOZ_DIAGNOSTIC_ASSERT(parent->mUseRemoteTabs == mUseRemoteTabs);
+    MOZ_DIAGNOSTIC_ASSERT(parent->mUseRemoteSubframes == mUseRemoteSubframes);
+    MOZ_DIAGNOSTIC_ASSERT(parent->mPrivateBrowsingId == mPrivateBrowsingId);
+    MOZ_DIAGNOSTIC_ASSERT(
+        parent->mOriginAttributes.EqualsIgnoringFPD(mOriginAttributes));
+  }
+
+  // UseRemoteSubframes and UseRemoteTabs must match.
+  MOZ_DIAGNOSTIC_ASSERT(
+      !mUseRemoteSubframes || mUseRemoteTabs,
+      "Cannot set useRemoteSubframes without also setting useRemoteTabs");
+
+  // Double-check OriginAttributes/Private Browsing
+  AssertOriginAttributesMatchPrivateBrowsing();
+#endif
+}
+
 void BrowsingContext::AssertOriginAttributesMatchPrivateBrowsing() {
   // Chrome browsing contexts must not have a private browsing OriginAttribute
   // Content browsing contexts must maintain the equality:
@@ -1876,10 +1914,27 @@ bool BrowsingContext::CanSet(FieldIndex<IDX_AllowPlugins>,
   return CheckOnlyOwningProcessCanSet(aSource);
 }
 
-bool BrowsingContext::CanSet(FieldIndex<IDX_WatchedByDevtools>,
-                             const bool& aWatchedByDevtools,
+// We map `watchedByDevTools` WebIDL attribute to `watchedByDevToolsInternal`
+// BC field. And we map it to the top level BrowsingContext.
+bool BrowsingContext::WatchedByDevTools() {
+  return Top()->GetWatchedByDevToolsInternal();
+}
+
+// Enforce that the watchedByDevTools BC field can only be set on the top level
+// Browsing Context.
+bool BrowsingContext::CanSet(FieldIndex<IDX_WatchedByDevToolsInternal>,
+                             const bool& aWatchedByDevTools,
                              ContentParent* aSource) {
-  return CheckOnlyOwningProcessCanSet(aSource);
+  return IsTop();
+}
+void BrowsingContext::SetWatchedByDevTools(bool aWatchedByDevTools,
+                                           ErrorResult& aRv) {
+  if (!IsTop()) {
+    aRv.ThrowInvalidModificationError(
+        "watchedByDevTools can only be set on top BrowsingContext");
+    return;
+  }
+  SetWatchedByDevToolsInternal(aWatchedByDevTools);
 }
 
 bool BrowsingContext::CanSet(FieldIndex<IDX_DefaultLoadFlags>,
@@ -1903,6 +1958,14 @@ void BrowsingContext::DidSet(FieldIndex<IDX_DefaultLoadFlags>) {
       }
     });
   }
+}
+
+bool BrowsingContext::CanSet(FieldIndex<IDX_UseGlobalHistory>,
+                             const bool& aUseGlobalHistory,
+                             ContentParent* aSource) {
+  // Should only be set in the parent process.
+  //  return XRE_IsParentProcess() && !aSource;
+  return true;
 }
 
 bool BrowsingContext::CanSet(FieldIndex<IDX_UserAgentOverride>,
@@ -2069,29 +2132,29 @@ void BrowsingContext::DidSet(FieldIndex<IDX_AncestorLoading>) {
 }
 
 void BrowsingContext::DidSet(FieldIndex<IDX_TextZoom>, float aOldValue) {
-  if (!IsInProcess() || GetTextZoom() == aOldValue) {
+  if (GetTextZoom() == aOldValue) {
     return;
   }
 
-  RefPtr<Document> doc;
-  if (auto* win = GetDOMWindow()) {
-    doc = win->GetExtantDoc();
-  }
+  if (IsInProcess()) {
+    if (nsIDocShell* shell = GetDocShell()) {
+      if (nsPresContext* pc = shell->GetPresContext()) {
+        pc->RecomputeBrowsingContextDependentData();
+      }
+    }
 
-  if (nsIDocShell* shell = GetDocShell()) {
-    if (nsPresContext* pc = shell->GetPresContext()) {
-      pc->RecomputeBrowsingContextDependentData();
+    for (BrowsingContext* child : Children()) {
+      child->SetTextZoom(GetTextZoom());
     }
   }
 
-  for (BrowsingContext* child : Children()) {
-    child->SetTextZoom(GetTextZoom());
-  }
-
-  if (doc) {
-    nsContentUtils::DispatchChromeEvent(doc, ToSupports(doc),
-                                        NS_LITERAL_STRING("TextZoomChange"),
-                                        CanBubble::eYes, Cancelable::eYes);
+  if (IsTop() && XRE_IsParentProcess()) {
+    if (Element* element = GetEmbedderElement()) {
+      auto dispatcher = MakeRefPtr<AsyncEventDispatcher>(
+          element, NS_LITERAL_STRING("TextZoomChange"), CanBubble::eYes,
+          ChromeOnlyDispatch::eYes);
+      dispatcher->RunDOMEventWhenSafe();
+    }
   }
 }
 
@@ -2099,35 +2162,29 @@ void BrowsingContext::DidSet(FieldIndex<IDX_TextZoom>, float aOldValue) {
 // on the Top() browsing context, but there are a lot of tests that rely on
 // zooming a subframe so...
 void BrowsingContext::DidSet(FieldIndex<IDX_FullZoom>, float aOldValue) {
-  if (!IsInProcess() || GetFullZoom() == aOldValue) {
+  if (GetFullZoom() == aOldValue) {
     return;
   }
 
-  RefPtr<Document> doc;
-  if (auto* win = GetDOMWindow()) {
-    doc = win->GetExtantDoc();
-  }
+  if (IsInProcess()) {
+    if (nsIDocShell* shell = GetDocShell()) {
+      if (nsPresContext* pc = shell->GetPresContext()) {
+        pc->RecomputeBrowsingContextDependentData();
+      }
+    }
 
-  if (doc) {
-    nsContentUtils::DispatchChromeEvent(doc, ToSupports(doc),
-                                        NS_LITERAL_STRING("PreFullZoomChange"),
-                                        CanBubble::eYes, Cancelable::eYes);
-  }
-
-  if (nsIDocShell* shell = GetDocShell()) {
-    if (nsPresContext* pc = shell->GetPresContext()) {
-      pc->RecomputeBrowsingContextDependentData();
+    for (BrowsingContext* child : Children()) {
+      child->SetFullZoom(GetFullZoom());
     }
   }
 
-  for (BrowsingContext* child : Children()) {
-    child->SetFullZoom(GetFullZoom());
-  }
-
-  if (doc) {
-    nsContentUtils::DispatchChromeEvent(doc, ToSupports(doc),
-                                        NS_LITERAL_STRING("FullZoomChange"),
-                                        CanBubble::eYes, Cancelable::eYes);
+  if (IsTop() && XRE_IsParentProcess()) {
+    if (Element* element = GetEmbedderElement()) {
+      auto dispatcher = MakeRefPtr<AsyncEventDispatcher>(
+          element, NS_LITERAL_STRING("FullZoomChange"), CanBubble::eYes,
+          ChromeOnlyDispatch::eYes);
+      dispatcher->RunDOMEventWhenSafe();
+    }
   }
 }
 

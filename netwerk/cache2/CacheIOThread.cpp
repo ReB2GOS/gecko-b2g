@@ -308,6 +308,8 @@ nsresult CacheIOThread::DispatchInternal(
   }
 #endif
 
+  LogRunnable::LogDispatch(runnable.get());
+
   if (NS_WARN_IF(!runnable)) return NS_ERROR_NULL_POINTER;
 
   mMonitor.AssertCurrentThreadOwns();
@@ -485,7 +487,6 @@ void CacheIOThread::ThreadFunc() {
       }
 
       AUTO_PROFILER_LABEL("CacheIOThread::ThreadFunc::Wait", IDLE);
-      AUTO_PROFILER_THREAD_SLEEP;
       lock.Wait();
 
     } while (true);
@@ -532,6 +533,8 @@ void CacheIOThread::LoopOneLevel(uint32_t aLevel) {
       // this flag.
       mRerunCurrentEvent = false;
 
+      LogRunnable::Run log(events[index].get());
+
       events[index]->Run();
 
       MOZ_ASSERT(mBlockingIOWatcher);
@@ -540,6 +543,7 @@ void CacheIOThread::LoopOneLevel(uint32_t aLevel) {
       if (mRerunCurrentEvent) {
         // The event handler yields to higher priority events and wants to
         // rerun.
+        log.WillRunAgain();
         returnEvents = true;
         break;
       }

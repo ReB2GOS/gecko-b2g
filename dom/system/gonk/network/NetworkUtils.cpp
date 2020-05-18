@@ -271,7 +271,6 @@ class NetdInitRunnable : public mozilla::Runnable {
 
       // Register netlink unsolicited event listener.
       gNetdUnsolService = new NetdUnsolService(NetworkUtils::NotifyNetdEvent);
-      mozilla::ClearOnShutdown(&gNetdUnsolService);
       Status status = gNetd->registerUnsolicitedEventListener(
         android::interface_cast<android::net::INetdUnsolicitedEventListener>(
         gNetdUnsolService));
@@ -279,6 +278,7 @@ class NetdInitRunnable : public mozilla::Runnable {
     } else {
       gNetd = nullptr;
       gDnsResolver = nullptr;
+      gNetdUnsolService = nullptr;
       if (IsNetdRunning()) {
         Property::Set("ctl.stop", "netd");
       }
@@ -304,7 +304,7 @@ class NetworkCommandDispatcher : public mozilla::Runnable {
     MOZ_ASSERT(!NS_IsMainThread());
 
     if (gNetworkUtils) {
-      gNetworkUtils->ExecuteCommand(mParams);
+      gNetworkUtils->ExecuteCommand(std::move(mParams));
     }
     return NS_OK;
   }
@@ -314,7 +314,7 @@ class NetworkCommandDispatcher : public mozilla::Runnable {
 };
 
 void NetworkUtils::DispatchCommand(const NetworkParams& aParams) {
-  nsCOMPtr<nsIRunnable> runnable = new NetworkCommandDispatcher(aParams);
+  nsCOMPtr<nsIRunnable> runnable = new NetworkCommandDispatcher(std::move(aParams));
   if (gNetworkUtilsThread) {
     gNetworkUtilsThread->Dispatch(runnable, nsIEventTarget::DISPATCH_NORMAL);
   }
@@ -1431,7 +1431,7 @@ void NetworkUtils::updateUpStreamSuccess(CommandChain* aChain,
 
 NetworkUtils::NetworkUtils(MessageCallback aCallback)
     : mMessageCallback(aCallback) {
-  mNetUtils = new NetUtils();
+  mNetUtils.reset(new NetUtils());
 
   nsresult rv =
       NS_NewNamedThread("NetworkUtils", getter_AddRefs(gNetworkUtilsThread));
@@ -2402,7 +2402,7 @@ CommandResult NetworkUtils::enableUsbRndis(NetworkParams& aOptions) {
     // We're turning rndis off, revert back to the persist setting.
     // adb will already be correct there, so we don't need to do any
     // further adjustments.
-    configFuncs = persistFuncs;
+    configFuncs = persistFuncs.Clone();
   }
 
   char newConfig[Property::VALUE_MAX_LENGTH] = "";

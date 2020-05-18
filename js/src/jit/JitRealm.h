@@ -19,7 +19,7 @@
 #include "jit/BaselineJIT.h"
 #include "jit/CompileInfo.h"
 #include "jit/ICStubSpace.h"
-#include "jit/IonCode.h"
+#include "jit/JitCode.h"
 #include "jit/JitFrames.h"
 #include "jit/shared/Assembler-shared.h"
 #include "js/GCHashTable.h"
@@ -200,11 +200,6 @@ class JitRuntime {
   // Code for trampolines and VMFunction wrappers.
   WriteOnceData<JitCode*> trampolineCode_{nullptr};
 
-  // Map VMFunction addresses to the offset of the wrapper in
-  // trampolineCode_.
-  using VMWrapperMap = HashMap<const VMFunction*, uint32_t, VMFunction>;
-  WriteOnceData<VMWrapperMap*> functionWrappers_{nullptr};
-
   // Maps VMFunctionId to the offset of the wrapper code in trampolineCode_.
   using VMWrapperOffsets = Vector<uint32_t, 0, SystemAllocPolicy>;
   VMWrapperOffsets functionWrapperOffsets_;
@@ -219,9 +214,15 @@ class JitRuntime {
   UnprotectedData<JitcodeGlobalTable*> jitcodeGlobalTable_{nullptr};
 
 #ifdef DEBUG
-  // The number of possible bailing places encounters before forcefully bailing
-  // in that place. Zero means inactive.
-  MainThreadData<uint32_t> ionBailAfter_{false};
+  // The number of possible bailing places encountered before forcefully bailing
+  // in that place if the counter reaches zero. Note that zero also means
+  // inactive.
+  MainThreadData<uint32_t> ionBailAfterCounter_{0};
+
+  // Whether the bailAfter mechanism is enabled. Used to avoid generating the
+  // Ion code instrumentation for ionBailAfterCounter_ if the testing function
+  // isn't used.
+  MainThreadData<bool> ionBailAfterEnabled_{false};
 #endif
 
   // Number of Ion compilations which were finished off thread and are
@@ -322,8 +323,6 @@ class JitRuntime {
   uint8_t* allocateIonOsrTempData(size_t size);
   void freeIonOsrTempData();
 
-  TrampolinePtr getVMWrapper(const VMFunction& f) const;
-
   TrampolinePtr getVMWrapper(VMFunctionId funId) const {
     MOZ_ASSERT(trampolineCode_);
     return trampolineCode(functionWrapperOffsets_[size_t(funId)]);
@@ -419,11 +418,13 @@ class JitRuntime {
   }
 
 #ifdef DEBUG
-  void* addressOfIonBailAfter() { return &ionBailAfter_; }
+  void* addressOfIonBailAfterCounter() { return &ionBailAfterCounter_; }
 
   // Set after how many bailing places we should forcefully bail.
   // Zero disables this feature.
-  void setIonBailAfter(uint32_t after) { ionBailAfter_ = after; }
+  void setIonBailAfterCounter(uint32_t after) { ionBailAfterCounter_ = after; }
+  bool ionBailAfterEnabled() const { return ionBailAfterEnabled_; }
+  void setIonBailAfterEnabled(bool enabled) { ionBailAfterEnabled_ = enabled; }
 #endif
 
   size_t numFinishedOffThreadTasks() const {

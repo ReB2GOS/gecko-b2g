@@ -6,19 +6,24 @@
 
 #include "mozilla/dom/CanonicalBrowsingContext.h"
 
+#include "mozilla/EventForwards.h"
+#include "mozilla/AsyncEventDispatcher.h"
 #include "mozilla/dom/BrowserParent.h"
+#include "mozilla/dom/BrowsingContextBinding.h"
 #include "mozilla/dom/BrowsingContextGroup.h"
+#include "mozilla/dom/ContentParent.h"
+#include "mozilla/dom/EventTarget.h"
 #include "mozilla/dom/WindowGlobalParent.h"
 #include "mozilla/dom/ContentProcessManager.h"
 #include "mozilla/dom/MediaController.h"
 #include "mozilla/dom/MediaControlService.h"
-#include "mozilla/dom/PlaybackController.h"
+#include "mozilla/dom/ContentPlaybackController.h"
 #include "mozilla/ipc/ProtocolUtils.h"
-#include "mozilla/NullPrincipal.h"
 #include "mozilla/net/DocumentLoadListener.h"
-#include "nsNetUtil.h"
-
+#include "mozilla/NullPrincipal.h"
 #include "nsGlobalWindowOuter.h"
+#include "nsIWebBrowserChrome.h"
+#include "nsNetUtil.h"
 
 using namespace mozilla::ipc;
 
@@ -126,6 +131,16 @@ WindowGlobalParent* CanonicalBrowsingContext::GetCurrentWindowGlobal() const {
   return static_cast<WindowGlobalParent*>(GetCurrentWindowContext());
 }
 
+WindowGlobalParent* CanonicalBrowsingContext::GetParentWindowContext() {
+  return static_cast<WindowGlobalParent*>(
+      BrowsingContext::GetParentWindowContext());
+}
+
+WindowGlobalParent* CanonicalBrowsingContext::GetTopWindowContext() {
+  return static_cast<WindowGlobalParent*>(
+      BrowsingContext::GetTopWindowContext());
+}
+
 already_AddRefed<nsIWidget>
 CanonicalBrowsingContext::GetParentProcessWidgetContaining() {
   // If our document is loaded in-process, such as chrome documents, get the
@@ -158,10 +173,14 @@ CanonicalBrowsingContext::GetEmbedderWindowGlobal() const {
   return WindowGlobalParent::GetByInnerWindowId(windowId);
 }
 
-already_AddRefed<WindowGlobalParent>
-CanonicalBrowsingContext::GetParentWindowGlobal() const {
+already_AddRefed<CanonicalBrowsingContext>
+CanonicalBrowsingContext::GetParentCrossChromeBoundary() {
   if (GetParent()) {
-    return GetEmbedderWindowGlobal();
+    return do_AddRef(Cast(GetParent()));
+  }
+  if (GetEmbedderElement()) {
+    return do_AddRef(
+        Cast(GetEmbedderElement()->OwnerDoc()->GetBrowsingContext()));
   }
   return nullptr;
 }
@@ -185,6 +204,19 @@ nsISHistory* CanonicalBrowsingContext::GetSessionHistory() {
 JSObject* CanonicalBrowsingContext::WrapObject(
     JSContext* aCx, JS::Handle<JSObject*> aGivenProto) {
   return CanonicalBrowsingContext_Binding::Wrap(aCx, this, aGivenProto);
+}
+
+void CanonicalBrowsingContext::DispatchWheelZoomChange(bool aIncrease) {
+  Element* element = Top()->GetEmbedderElement();
+  if (!element) {
+    return;
+  }
+
+  auto event = aIncrease ? NS_LITERAL_STRING("DoZoomEnlargeBy10")
+                         : NS_LITERAL_STRING("DoZoomReduceBy10");
+  auto dispatcher = MakeRefPtr<AsyncEventDispatcher>(
+      element, event, CanBubble::eYes, ChromeOnlyDispatch::eYes);
+  dispatcher->PostDOMEvent();
 }
 
 void CanonicalBrowsingContext::CanonicalDiscard() {
@@ -248,7 +280,7 @@ uint32_t CanonicalBrowsingContext::CountSiteOrigins(
 
 void CanonicalBrowsingContext::UpdateMediaControlKeysEvent(
     MediaControlKeysEvent aEvent) {
-  MediaActionHandler::HandleMediaControlKeysEvent(this, aEvent);
+  ContentMediaActionHandler::HandleMediaControlKeysEvent(this, aEvent);
   Group()->EachParent([&](ContentParent* aParent) {
     Unused << aParent->SendUpdateMediaControlKeysEvent(this, aEvent);
   });
@@ -257,18 +289,9 @@ void CanonicalBrowsingContext::UpdateMediaControlKeysEvent(
 void CanonicalBrowsingContext::LoadURI(const nsAString& aURI,
                                        const LoadURIOptions& aOptions,
                                        ErrorResult& aError) {
-  nsCOMPtr<nsISupports> consumer = GetDocShell();
-  if (!consumer) {
-    consumer = GetEmbedderElement();
-  }
-  if (!consumer) {
-    aError.Throw(NS_ERROR_UNEXPECTED);
-    return;
-  }
-
   RefPtr<nsDocShellLoadState> loadState;
   nsresult rv = nsDocShellLoadState::CreateFromLoadURIOptions(
-      consumer, aURI, aOptions, getter_AddRefs(loadState));
+      this, aURI, aOptions, getter_AddRefs(loadState));
 
   if (rv == NS_ERROR_MALFORMED_URI) {
     DisplayLoadError(aURI);
@@ -371,18 +394,10 @@ void CanonicalBrowsingContext::PendingRemotenessChange::Complete(
                                         callback, callback);
   }
 
-  // FIXME: We should get the correct principal for the to-be-created window so
-  // we can avoid creating unnecessary extra windows in the new process.
-  OriginAttributes attrs = embedderBrowser->OriginAttributesRef();
-  RefPtr<nsIPrincipal> principal = embedderBrowser->GetContentPrincipal();
-  if (principal) {
-    attrs.SetFirstPartyDomain(
-        true, principal->OriginAttributesRef().mFirstPartyDomain);
-  }
-
   nsCOMPtr<nsIPrincipal> initialPrincipal =
-      NullPrincipal::CreateWithInheritedAttributes(attrs,
-                                                   /* isFirstParty */ false);
+      NullPrincipal::CreateWithInheritedAttributes(
+          target->OriginAttributesRef(),
+          /* isFirstParty */ false);
   WindowGlobalInit windowInit =
       WindowGlobalActor::AboutBlankInitializer(target, initialPrincipal);
 
@@ -541,7 +556,7 @@ bool CanonicalBrowsingContext::AttemptLoadURIInParent(
   // process notifications, which happens after the load is initiated in this
   // case. Devtools clears all prior requests when it detects a new navigation,
   // so it drops the main document load that happened here.
-  if (GetWatchedByDevtools()) {
+  if (WatchedByDevTools()) {
     return false;
   }
 

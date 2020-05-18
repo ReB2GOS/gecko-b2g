@@ -5,6 +5,7 @@
 #include "RTCRtpReceiver.h"
 #include "logging.h"
 #include "mozilla/dom/MediaStreamTrack.h"
+#include "mozilla/dom/Promise.h"
 #include "MediaPipeline.h"
 #include "nsPIDOMWindow.h"
 #include "PrincipalHandle.h"
@@ -13,15 +14,18 @@
 #include "mozilla/NullPrincipal.h"
 #include "MediaTrackGraph.h"
 #include "RemoteTrackSource.h"
+#include "RtpRtcpConfig.h"
 #include "nsString.h"
 #include "mozilla/dom/AudioStreamTrack.h"
 #include "mozilla/dom/VideoStreamTrack.h"
 #include "MediaTransportHandler.h"
 #include "signaling/src/jsep/JsepTransceiver.h"
+#include "mozilla/dom/RTCRtpReceiverBinding.h"
 #include "mozilla/dom/RTCRtpSourcesBinding.h"
 #include "RTCStatsReport.h"
 #include "mozilla/Preferences.h"
 #include "TransceiverImpl.h"
+#include "AudioConduit.h"
 
 namespace mozilla {
 
@@ -279,7 +283,7 @@ nsTArray<RefPtr<RTCStatsPromise>> RTCRtpReceiver::GetStatsInternal() {
 void RTCRtpReceiver::GetContributingSources(
     nsTArray<RTCRtpContributingSource>& aSources) {
   // Duplicate code...
-  if (mPipeline && mPipeline->Conduit() && !mPipeline->IsVideo()) {
+  if (mPipeline && mPipeline->Conduit()) {
     RefPtr<AudioSessionConduit> conduit(
         static_cast<AudioSessionConduit*>(mPipeline->Conduit()));
     nsTArray<dom::RTCRtpSourceEntry> sources;
@@ -295,7 +299,7 @@ void RTCRtpReceiver::GetContributingSources(
 void RTCRtpReceiver::GetSynchronizationSources(
     nsTArray<dom::RTCRtpSynchronizationSource>& aSources) {
   // Duplicate code...
-  if (mPipeline && mPipeline->Conduit() && !mPipeline->IsVideo()) {
+  if (mPipeline && mPipeline->Conduit()) {
     RefPtr<AudioSessionConduit> conduit(
         static_cast<AudioSessionConduit*>(mPipeline->Conduit()));
     nsTArray<dom::RTCRtpSourceEntry> sources;
@@ -328,17 +332,28 @@ void RTCRtpReceiver::UpdateTransport() {
 
   UniquePtr<MediaPipelineFilter> filter;
 
-  if (mJsepTransceiver->HasBundleLevel() &&
-      mJsepTransceiver->mRecvTrack.GetNegotiatedDetails()) {
-    filter = MakeUnique<MediaPipelineFilter>();
+  auto const& details = mJsepTransceiver->mRecvTrack.GetNegotiatedDetails();
+  if (mJsepTransceiver->HasBundleLevel() && details) {
+    std::vector<webrtc::RtpExtension> extmaps;
+    details->ForEachRTPHeaderExtension(
+        [&extmaps](const SdpExtmapAttributeList::Extmap& extmap) {
+          extmaps.emplace_back(extmap.extensionname, extmap.entry);
+        });
+    filter = MakeUnique<MediaPipelineFilter>(extmaps);
 
     // Add remote SSRCs so we can distinguish which RTP packets actually
     // belong to this pipeline (also RTCP sender reports).
-    for (unsigned int ssrc : mJsepTransceiver->mRecvTrack.GetSsrcs()) {
+    for (uint32_t ssrc : mJsepTransceiver->mRecvTrack.GetSsrcs()) {
       filter->AddRemoteSSRC(ssrc);
     }
-
-    // TODO(bug 1105005): Tell the filter about the mid for this track
+    for (uint32_t ssrc : mJsepTransceiver->mRecvTrack.GetRtxSsrcs()) {
+      filter->AddRemoteSSRC(ssrc);
+    }
+    auto mid = Maybe<std::string>();
+    if (GetMid() != "") {
+      mid = Some(GetMid());
+    }
+    filter->SetRemoteMediaStreamId(mid);
 
     // Add unique payload types as a last-ditch fallback
     auto uniquePts = mJsepTransceiver->mRecvTrack.GetNegotiatedDetails()
@@ -372,7 +387,11 @@ nsresult RTCRtpReceiver::UpdateVideoConduit() {
             ("%s[%s]: %s Setting remote SSRC %u", mPCHandle.c_str(),
              GetMid().c_str(), __FUNCTION__,
              mJsepTransceiver->mRecvTrack.GetSsrcs().front()));
-    conduit->SetRemoteSSRC(mJsepTransceiver->mRecvTrack.GetSsrcs().front());
+    uint32_t rtxSsrc = mJsepTransceiver->mRecvTrack.GetRtxSsrcs().empty()
+                           ? 0
+                           : mJsepTransceiver->mRecvTrack.GetRtxSsrcs().front();
+    conduit->SetRemoteSSRC(mJsepTransceiver->mRecvTrack.GetSsrcs().front(),
+                           rtxSsrc);
   }
 
   // TODO (bug 1423041) once we pay attention to receiving MID's in RTP packets
@@ -406,7 +425,8 @@ nsresult RTCRtpReceiver::UpdateVideoConduit() {
       return rv;
     }
 
-    auto error = conduit->ConfigureRecvMediaCodecs(configs);
+    auto error =
+        conduit->ConfigureRecvMediaCodecs(configs, details.GetRtpRtcpConfig());
 
     if (error) {
       MOZ_LOG(gReceiverLog, LogLevel::Error,
@@ -429,7 +449,11 @@ nsresult RTCRtpReceiver::UpdateAudioConduit() {
             ("%s[%s]: %s Setting remote SSRC %u", mPCHandle.c_str(),
              GetMid().c_str(), __FUNCTION__,
              mJsepTransceiver->mRecvTrack.GetSsrcs().front()));
-    conduit->SetRemoteSSRC(mJsepTransceiver->mRecvTrack.GetSsrcs().front());
+    uint32_t rtxSsrc = mJsepTransceiver->mRecvTrack.GetRtxSsrcs().empty()
+                           ? 0
+                           : mJsepTransceiver->mRecvTrack.GetRtxSsrcs().front();
+    conduit->SetRemoteSSRC(mJsepTransceiver->mRecvTrack.GetSsrcs().front(),
+                           rtxSsrc);
   }
 
   if (mJsepTransceiver->mRecvTrack.GetNegotiatedDetails() &&

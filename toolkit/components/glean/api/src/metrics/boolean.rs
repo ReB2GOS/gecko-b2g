@@ -2,13 +2,13 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-use glean_core::CommonMetricData;
+use super::CommonMetricData;
 
 /// A boolean metric.
 ///
 /// Records a simple true or false value.
 #[derive(Clone, Debug)]
-pub struct BooleanMetric(glean_core::metrics::BooleanMetric);
+pub struct BooleanMetric(pub(crate) glean_core::metrics::BooleanMetric);
 
 impl BooleanMetric {
     /// Create a new boolean metric.

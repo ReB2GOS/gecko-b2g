@@ -11,6 +11,7 @@
 #include "nsPIDOMWindow.h"
 #include "nsWrapperCache.h"
 #include "mozilla/dom/AlarmManager.h"
+#include "mozilla/dom/FlashlightManager.h"
 #include "mozilla/dom/TetheringManagerBinding.h"
 
 #ifdef MOZ_B2G_RIL
@@ -41,6 +42,9 @@
 
 #include "mozilla/dom/DownloadManagerBinding.h"
 
+#include "mozilla/dom/WakeLock.h"
+#include "mozilla/dom/power/PowerManagerService.h"
+
 namespace mozilla {
 namespace dom {
 
@@ -58,6 +62,7 @@ class B2G final : public nsISupports, public nsWrapperCache {
                                JS::Handle<JSObject*> aGivenProto) override;
 
   AlarmManager* GetAlarmManager(ErrorResult& aRv);
+  already_AddRefed<Promise> GetFlashlightManager(ErrorResult& aRv);
   TetheringManager* GetTetheringManager(ErrorResult& aRv);
 
 #ifdef MOZ_B2G_RIL
@@ -91,12 +96,19 @@ class B2G final : public nsISupports, public nsWrapperCache {
   system::AudioChannelManager* GetAudioChannelManager(ErrorResult& aRv);
 #endif  // MOZ_AUDIO_CHANNEL_MANAGER
 
+  static
+  bool HasWakeLockSupport(JSContext* /* unused*/, JSObject* /*unused */);
+
+  already_AddRefed<WakeLock>
+  RequestWakeLock(const nsAString &aTopic, ErrorResult& aRv);
+
   // Shutting down.
   void Shutdown();
 
  private:
   ~B2G();
   RefPtr<AlarmManager> mAlarmManager;
+  RefPtr<FlashlightManager> mFlashlightManager;
   RefPtr<TetheringManager> mTetheringManager;
 #ifdef MOZ_B2G_RIL
   RefPtr<CellBroadcast> mCellBroadcast;

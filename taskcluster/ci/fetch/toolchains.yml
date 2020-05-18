@@ -230,9 +230,9 @@ grcov-osx-x86_64:
     description: grcov binary release
     fetch:
         type: static-url
-        url: https://github.com/mozilla/grcov/releases/download/v0.5.3/grcov-osx-x86_64.tar.bz2
-        sha256: 93db5da4118951d459200a352eb1e3610296a3ee5c51839ab8400a9d968ffb5f
-        size: 1251321
+        url: https://github.com/mozilla/grcov/releases/download/v0.5.14/grcov-osx-x86_64.tar.bz2
+        sha256: 17692a7ee09fbd49cac1194500c9c9e2bc76a23cd702f88026955f25fe7548a8
+        size: 1213868
 
 zlib-1.2.11:
     description: zlib 1.2.11 source code
@@ -322,14 +322,7 @@ llvm-for-dsymutil:
     fetch:
         type: git
         repo: https://github.com/llvm/llvm-project
-        revision: 3b7811f6441be13c9f613f81ef93297d231b4f8e
-
-tup:
-    description: tup source code
-    fetch:
-        type: git
-        repo: https://github.com/gittup/tup
-        revision: 4371a41ba4ece660bf060b598b9eee4c2eb347d8
+        revision: d32170dbd5b0d54436537b6b75beaf44324e0c28
 
 rust-size:
     description: rust-size source code
@@ -349,16 +342,16 @@ grcov:
     description: grcov source code
     fetch:
         type: git
-        repo: https://github.com/marco-c/grcov
-        revision: cc1b62ceb8007af08940d535cd396ed0f95ef769
+        repo: https://github.com/mozilla/grcov
+        revision: 51300e533abc21231881259290da7692c279c0d6
 
 sccache:
     description: sccache source code
     fetch:
         type: git
         repo: https://github.com/mozilla/sccache
-        # 0.2.13 release + fix for clang-cl on Linux
-        revision: 2aadef2c5a07a59658c0cc3da4a90b153293f543
+        # 0.2.13 release + various changes
+        revision: 27bf3e61c4a82541f794275884a3fb1a3b1fc4f3
 
 fxc2:
     description: fxc2 source code
@@ -470,19 +463,28 @@ dump-syms:
     fetch:
         type: git
         repo: https://github.com/mozilla/dump_syms/
-        # 0.0.4 + fix for Windows cross builds
-        revision: c75b1fb14f07650d9490b788710af2367c7e00d0
+        # 0.0.5
+        revision: 2603fb01a18e4e11d95b95fc08d9dacad9076f43
 
 fix-stacks:
     description: fix-stacks source code
     fetch:
         type: git
         repo: https://github.com/mozilla/fix-stacks/
-        revision: 22bd8d55956d5403e1e2d2c14fd07d8ab74b5807
+        revision: b8b127d27cdcd64a5e66a7fb0a06c6c818445a61
 
 winchecksec:
     description: winchecksec source code
     fetch:
         type: git
         repo: https://github.com/trailofbits/winchecksec/
-        revision: 8143f621359616f16eaa265e22d10a7962536634
+        revision: 93ffe67dbfc757bf6f440d80b8acf88e652ed60a
+
+codeql-2.0.3:
+    description: CodeQL query tools
+    fetch:
+        type: static-url
+        url: https://github.com/github/codeql-cli-binaries/releases/download/v2.0.3/codeql.zip
+        sha256: 094ff1ffc7211e8222c148e375fdd53b58bd4c0fe20875d9d7abf2a5e6c341a5
+        size: 473738719
+        artifact-name: codeql.zip

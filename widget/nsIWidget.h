@@ -131,6 +131,7 @@ typedef void* nsNativeWidget;
 // IME context.  Note that the result is only valid in the process.  So,
 // XP code should use nsIWidget::GetNativeIMEContext() instead of using this.
 #define NS_RAW_NATIVE_IME_CONTEXT 14
+#define NS_NATIVE_WINDOW_WEBRTC_DEVICE_ID 15
 #ifdef XP_MACOSX
 #  define NS_NATIVE_PLUGIN_PORT_QD 100
 #  define NS_NATIVE_PLUGIN_PORT_CG 101
@@ -1030,7 +1031,7 @@ class nsIWidget : public nsISupports {
     uintptr_t mWindowID;  // e10s specific, the unique plugin port id
     bool mVisible;        // e10s specific, widget visibility
     LayoutDeviceIntRect mBounds;
-    nsTArray<LayoutDeviceIntRect> mClipRegion;
+    CopyableTArray<LayoutDeviceIntRect> mClipRegion;
   };
 
   /**
@@ -1146,14 +1147,6 @@ class nsIWidget : public nsISupports {
    * Ignored on child widgets and on non-Mac platforms.
    */
   virtual void SetShowsToolbarButton(bool aShow) = 0;
-
-  /*
-   * On Mac OS X Lion, this method shows or hides the full screen button in
-   * the titlebar that handles native full screen mode.
-   *
-   * Ignored on child widgets, non-Mac platforms, & pre-Lion Mac.
-   */
-  virtual void SetShowsFullScreenButton(bool aShow) = 0;
 
   enum WindowAnimationType {
     eGenericWindowAnimation,
@@ -2039,6 +2032,11 @@ class nsIWidget : public nsISupports {
   virtual CompositorBridgeChild* GetRemoteRenderer() { return nullptr; }
 
   /**
+   * Clear WebRender resources
+   */
+  virtual void ClearCachedWebrenderResources() {}
+
+  /**
    * If this widget has its own vsync source, return it, otherwise return
    * nullptr. An example of such local source would be Wayland frame callbacks.
    */
@@ -2155,13 +2153,13 @@ class nsIWidget : public nsISupports {
 
   static already_AddRefed<nsIBidiKeyboard> CreateBidiKeyboard();
 
- protected:
   /**
    * Like GetDefaultScale, but taking into account only the system settings
    * and ignoring Gecko preferences.
    */
   virtual double GetDefaultScaleInternal() { return 1.0; }
 
+ protected:
   // keep the list of children.  We also keep track of our siblings.
   // The ownership model is as follows: parent holds a strong ref to
   // the first element of the list, and each element holds a strong

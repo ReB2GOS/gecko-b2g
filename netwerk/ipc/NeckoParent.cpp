@@ -110,7 +110,8 @@ static already_AddRefed<nsIPrincipal> GetRequestingPrincipal(
 
   const PrincipalInfo& principalInfo = optionalPrincipalInfo.ref();
 
-  return PrincipalInfoToPrincipal(principalInfo);
+  auto principalOrErr = PrincipalInfoToPrincipal(principalInfo);
+  return principalOrErr.isOk() ? principalOrErr.unwrap().forget() : nullptr;
 }
 
 static already_AddRefed<nsIPrincipal> GetRequestingPrincipal(
@@ -133,92 +134,21 @@ static already_AddRefed<nsIPrincipal> GetRequestingPrincipal(
   return GetRequestingPrincipal(args.loadInfo());
 }
 
-// Bug 1289001 - If GetValidatedOriginAttributes returns an error string, that
-// usually leads to a content crash with very little info about the cause.
-// We prefer to crash on the parent, so we get the reason in the crash report.
-static MOZ_COLD void CrashWithReason(const char* reason) {
-#ifndef RELEASE_OR_BETA
-  MOZ_CRASH_UNSAFE(reason);
-#endif
-}
-
 const char* NeckoParent::GetValidatedOriginAttributes(
     const SerializedLoadContext& aSerialized, PContentParent* aContent,
     nsIPrincipal* aRequestingPrincipal, OriginAttributes& aAttrs) {
-  if (!UsingNeckoIPCSecurity()) {
-    if (!aSerialized.IsNotNull()) {
-      // If serialized is null, we cannot validate anything. We have to assume
-      // that this requests comes from a SystemPrincipal.
-      aAttrs = OriginAttributes(false);
-    } else {
-      aAttrs = aSerialized.mOriginAttributes;
-    }
-    return nullptr;
-  }
-
   if (!aSerialized.IsNotNull()) {
-    CrashWithReason(
-        "GetValidatedOriginAttributes | SerializedLoadContext from child is "
-        "null");
-    return "SerializedLoadContext from child is null";
-  }
-
-  nsAutoCString serializedSuffix;
-  aSerialized.mOriginAttributes.CreateAnonymizedSuffix(serializedSuffix);
-
-  nsAutoCString debugString;
-  const auto& browsers = aContent->ManagedPBrowserParent();
-  for (auto iter = browsers.ConstIter(); !iter.Done(); iter.Next()) {
-    auto* browserParent = BrowserParent::GetFrom(iter.Get()->GetKey());
-
-    if (!ChromeUtils::IsOriginAttributesEqual(
-            aSerialized.mOriginAttributes,
-            browserParent->OriginAttributesRef())) {
-      debugString.AppendLiteral("(");
-      debugString.Append(serializedSuffix);
-      debugString.AppendLiteral(",");
-
-      nsAutoCString tabSuffix;
-      browserParent->OriginAttributesRef().CreateAnonymizedSuffix(tabSuffix);
-      debugString.Append(tabSuffix);
-
-      debugString.AppendLiteral(")");
-      continue;
-    }
-
+    // If serialized is null, we cannot validate anything. We have to assume
+    // that this requests comes from a SystemPrincipal.
+    aAttrs = OriginAttributes(false);
+  } else {
     aAttrs = aSerialized.mOriginAttributes;
-    return nullptr;
   }
-
-  // This may be a ServiceWorker: when a push notification is received, FF wakes
-  // up the corrisponding service worker so that it can manage the PushEvent. At
-  // that time we probably don't have any valid tabcontext, but still, we want
-  // to support http channel requests coming from that ServiceWorker.
-  if (aRequestingPrincipal) {
-    RefPtr<ServiceWorkerManager> swm = ServiceWorkerManager::GetInstance();
-    if (swm &&
-        swm->MayHaveActiveServiceWorkerInstance(
-            static_cast<ContentParent*>(aContent), aRequestingPrincipal)) {
-      aAttrs = aSerialized.mOriginAttributes;
-      return nullptr;
-    }
-  }
-
-  nsAutoCString errorString;
-  errorString.AppendLiteral(
-      "GetValidatedOriginAttributes | App does not have permission -");
-  errorString.Append(debugString);
-
-  // Leak the buffer on the heap to make sure that it lives long enough, as
-  // MOZ_CRASH_ANNOTATE expects the pointer passed to it to live to the end of
-  // the program.
-  char* error = strdup(errorString.BeginReading());
-  CrashWithReason(error);
-  return "App does not have permission";
+  return nullptr;
 }
 
 const char* NeckoParent::CreateChannelLoadContext(
-    const PBrowserOrId& aBrowser, PContentParent* aContent,
+    PBrowserParent* aBrowser, PContentParent* aContent,
     const SerializedLoadContext& aSerialized,
     nsIPrincipal* aRequestingPrincipal, nsCOMPtr<nsILoadContext>& aResult) {
   OriginAttributes attrs;
@@ -233,24 +163,13 @@ const char* NeckoParent::CreateChannelLoadContext(
   if (aSerialized.IsNotNull()) {
     attrs.SyncAttributesWithPrivateBrowsing(
         aSerialized.mOriginAttributes.mPrivateBrowsingId > 0);
-    switch (aBrowser.type()) {
-      case PBrowserOrId::TPBrowserParent: {
-        RefPtr<BrowserParent> browserParent =
-            BrowserParent::GetFrom(aBrowser.get_PBrowserParent());
-        dom::Element* topFrameElement = nullptr;
-        if (browserParent) {
-          topFrameElement = browserParent->GetOwnerElement();
-        }
-        aResult = new LoadContext(aSerialized, topFrameElement, attrs);
-        break;
-      }
-      case PBrowserOrId::TTabId: {
-        aResult = new LoadContext(aSerialized, nullptr, attrs);
-        break;
-      }
-      default:
-        MOZ_CRASH();
+
+    RefPtr<BrowserParent> browserParent = BrowserParent::GetFrom(aBrowser);
+    dom::Element* topFrameElement = nullptr;
+    if (browserParent) {
+      topFrameElement = browserParent->GetOwnerElement();
     }
+    aResult = new LoadContext(aSerialized, topFrameElement, attrs);
   }
 
   return nullptr;
@@ -262,7 +181,7 @@ void NeckoParent::ActorDestroy(ActorDestroyReason aWhy) {
 }
 
 already_AddRefed<PHttpChannelParent> NeckoParent::AllocPHttpChannelParent(
-    const PBrowserOrId& aBrowser, const SerializedLoadContext& aSerialized,
+    PBrowserParent* aBrowser, const SerializedLoadContext& aSerialized,
     const HttpChannelCreationArgs& aOpenArgs) {
   nsCOMPtr<nsIPrincipal> requestingPrincipal =
       GetRequestingPrincipal(aOpenArgs);
@@ -279,13 +198,13 @@ already_AddRefed<PHttpChannelParent> NeckoParent::AllocPHttpChannelParent(
   }
   PBOverrideStatus overrideStatus =
       PBOverrideStatusFromLoadContext(aSerialized);
-  RefPtr<HttpChannelParent> p =
-      new HttpChannelParent(aBrowser, loadContext, overrideStatus);
+  RefPtr<HttpChannelParent> p = new HttpChannelParent(
+      BrowserParent::GetFrom(aBrowser), loadContext, overrideStatus);
   return p.forget();
 }
 
 mozilla::ipc::IPCResult NeckoParent::RecvPHttpChannelConstructor(
-    PHttpChannelParent* aActor, const PBrowserOrId& aBrowser,
+    PHttpChannelParent* aActor, PBrowserParent* aBrowser,
     const SerializedLoadContext& aSerialized,
     const HttpChannelCreationArgs& aOpenArgs) {
   HttpChannelParent* p = static_cast<HttpChannelParent*>(aActor);
@@ -358,7 +277,7 @@ bool NeckoParent::DeallocPAltDataOutputStreamParent(
 }
 
 PFTPChannelParent* NeckoParent::AllocPFTPChannelParent(
-    const PBrowserOrId& aBrowser, const SerializedLoadContext& aSerialized,
+    PBrowserParent* aBrowser, const SerializedLoadContext& aSerialized,
     const FTPChannelCreationArgs& aOpenArgs) {
   nsCOMPtr<nsIPrincipal> requestingPrincipal =
       GetRequestingPrincipal(aOpenArgs);
@@ -375,8 +294,8 @@ PFTPChannelParent* NeckoParent::AllocPFTPChannelParent(
   }
   PBOverrideStatus overrideStatus =
       PBOverrideStatusFromLoadContext(aSerialized);
-  FTPChannelParent* p =
-      new FTPChannelParent(aBrowser, loadContext, overrideStatus);
+  FTPChannelParent* p = new FTPChannelParent(BrowserParent::GetFrom(aBrowser),
+                                             loadContext, overrideStatus);
   p->AddRef();
   return p;
 }
@@ -388,7 +307,7 @@ bool NeckoParent::DeallocPFTPChannelParent(PFTPChannelParent* channel) {
 }
 
 mozilla::ipc::IPCResult NeckoParent::RecvPFTPChannelConstructor(
-    PFTPChannelParent* aActor, const PBrowserOrId& aBrowser,
+    PFTPChannelParent* aActor, PBrowserParent* aBrowser,
     const SerializedLoadContext& aSerialized,
     const FTPChannelCreationArgs& aOpenArgs) {
   FTPChannelParent* p = static_cast<FTPChannelParent*>(aActor);
@@ -433,7 +352,7 @@ bool NeckoParent::DeallocPCookieServiceParent(PCookieServiceParent* cs) {
 }
 
 PWebSocketParent* NeckoParent::AllocPWebSocketParent(
-    const PBrowserOrId& browser, const SerializedLoadContext& serialized,
+    PBrowserParent* browser, const SerializedLoadContext& serialized,
     const uint32_t& aSerial) {
   nsCOMPtr<nsILoadContext> loadContext;
   const char* error = CreateChannelLoadContext(browser, Manager(), serialized,
@@ -446,8 +365,7 @@ PWebSocketParent* NeckoParent::AllocPWebSocketParent(
     return nullptr;
   }
 
-  RefPtr<BrowserParent> browserParent =
-      BrowserParent::GetFrom(browser.get_PBrowserParent());
+  RefPtr<BrowserParent> browserParent = BrowserParent::GetFrom(browser);
   PBOverrideStatus overrideStatus = PBOverrideStatusFromLoadContext(serialized);
   WebSocketChannelParent* p = new WebSocketChannelParent(
       browserParent, loadContext, overrideStatus, aSerial);

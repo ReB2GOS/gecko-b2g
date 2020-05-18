@@ -265,6 +265,7 @@ const NEVER_MENUITEM = 0;
 
 const CHANGE_BUTTON = "button";
 const DONT_CHANGE_BUTTON = "secondaryButton";
+const REMOVE_LOGIN_MENUITEM = 0;
 
 /**
  * Checks if we have a password capture popup notification
@@ -750,16 +751,69 @@ async function changeContentInputValue(browser, selector, str) {
   }) {
     const EventUtils = ContentTaskUtils.getEventUtils(content);
     let input = content.document.querySelector(selector);
+
     input.focus();
-    input.select();
-    await EventUtils.synthesizeKey("KEY_Backspace", {}, content);
-    let changedPromise = ContentTaskUtils.waitForEvent(input, "change");
-    if (str) {
+    if (!str) {
+      input.select();
+      await EventUtils.synthesizeKey("KEY_Backspace", {}, content);
+    } else if (input.value.startsWith(str)) {
+      info(
+        `New string is substring of value: ${str.length}, ${input.value.length}`
+      );
+      input.setSelectionRange(str.length, input.value.length);
+      await EventUtils.synthesizeKey("KEY_Backspace", {}, content);
+    } else if (str.startsWith(input.value)) {
+      info(
+        `New string appends to value: ${input.value}, ${str.substring(
+          input.value.length
+        )}`
+      );
+      input.setSelectionRange(input.value.length, input.value.length);
+      await EventUtils.sendString(str.substring(input.value.length), content);
+    } else {
+      input.select();
       await EventUtils.sendString(str, content);
     }
+
+    let changedPromise = ContentTaskUtils.waitForEvent(input, "change");
     input.blur();
     await changedPromise;
+
+    is(str, input.value, `Expected value '${str}' is set on input`);
   });
   info("Input value changed");
   await TestUtils.waitForTick();
+}
+
+async function verifyConfirmationHint(
+  browser,
+  forceClose,
+  anchorID = "password-notification-icon"
+) {
+  let hintElem = browser.ownerGlobal.ConfirmationHint._panel;
+  await BrowserTestUtils.waitForPopupEvent(hintElem, "shown");
+  try {
+    is(hintElem.state, "open", "hint popup is open");
+    ok(
+      BrowserTestUtils.is_visible(hintElem.anchorNode),
+      "hint anchorNode is visible"
+    );
+    is(
+      hintElem.anchorNode.id,
+      anchorID,
+      "Hint should be anchored on the expected notification icon"
+    );
+    info("verifyConfirmationHint, hint is shown and has its anchorNode");
+    if (forceClose) {
+      await closePopup(hintElem);
+    } else {
+      info("verifyConfirmationHint, assertion ok, wait for poopuphidden");
+      await BrowserTestUtils.waitForPopupEvent(hintElem, "hidden");
+      info("verifyConfirmationHint, hintElem popup is hidden");
+    }
+  } catch (ex) {
+    ok(false, "Confirmation hint not shown: " + ex.message);
+  } finally {
+    info("verifyConfirmationHint promise finalized");
+  }
 }

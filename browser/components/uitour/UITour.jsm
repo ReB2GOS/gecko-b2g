@@ -46,8 +46,8 @@ ChromeUtils.defineModuleGetter(
 );
 ChromeUtils.defineModuleGetter(
   this,
-  "ReaderParent",
-  "resource:///modules/ReaderParent.jsm"
+  "AboutReaderParent",
+  "resource:///actors/AboutReaderParent.jsm"
 );
 ChromeUtils.defineModuleGetter(
   this,
@@ -169,7 +169,7 @@ var UITour = {
         query: aDocument => {
           // The pocket's urlbar page action button is pre-defined in the DOM.
           // It would be hidden if toggled off from the urlbar.
-          let node = aDocument.getElementById("pocket-button-box");
+          let node = aDocument.getElementById("pocket-button");
           if (node && !node.hidden) {
             return node;
           }
@@ -662,14 +662,14 @@ var UITour = {
       }
 
       case "forceShowReaderIcon": {
-        ReaderParent.forceShowReaderIcon(browser);
+        AboutReaderParent.forceShowReaderIcon(browser);
         break;
       }
 
       case "toggleReaderMode": {
         let targetPromise = this.getTarget(window, "readerMode-urlBar");
         targetPromise.then(target => {
-          ReaderParent.toggleReaderMode({ target: target.node });
+          AboutReaderParent.toggleReaderMode({ target: target.node });
         });
         break;
       }

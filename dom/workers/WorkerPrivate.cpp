@@ -42,6 +42,7 @@
 #include "mozilla/dom/WorkerBinding.h"
 #include "mozilla/dom/JSExecutionManager.h"
 #include "mozilla/StorageAccess.h"
+#include "mozilla/StoragePrincipalHelper.h"
 #include "mozilla/ThreadEventQueue.h"
 #include "mozilla/ThrottledEventQueue.h"
 #include "mozilla/TimelineConsumers.h"
@@ -514,7 +515,7 @@ class ReportErrorToConsoleRunnable final : public WorkerRunnable {
                                const nsTArray<nsString>& aParams)
       : WorkerRunnable(aWorkerPrivate, ParentThreadUnchangedBusyCount),
         mMessage(aMessage),
-        mParams(aParams) {}
+        mParams(aParams.Clone()) {}
 
   virtual void PostDispatch(WorkerPrivate* aWorkerPrivate,
                             bool aDispatchResult) override {
@@ -655,7 +656,7 @@ class UpdateLanguagesRunnable final : public WorkerRunnable {
  public:
   UpdateLanguagesRunnable(WorkerPrivate* aWorkerPrivate,
                           const nsTArray<nsString>& aLanguages)
-      : WorkerRunnable(aWorkerPrivate), mLanguages(aLanguages) {}
+      : WorkerRunnable(aWorkerPrivate), mLanguages(aLanguages.Clone()) {}
 
   virtual bool WorkerRun(JSContext* aCx,
                          WorkerPrivate* aWorkerPrivate) override {
@@ -666,12 +667,13 @@ class UpdateLanguagesRunnable final : public WorkerRunnable {
 
 class UpdateJSWorkerMemoryParameterRunnable final
     : public WorkerControlRunnable {
-  uint32_t mValue;
+  Maybe<uint32_t> mValue;
   JSGCParamKey mKey;
 
  public:
   UpdateJSWorkerMemoryParameterRunnable(WorkerPrivate* aWorkerPrivate,
-                                        JSGCParamKey aKey, uint32_t aValue)
+                                        JSGCParamKey aKey,
+                                        Maybe<uint32_t> aValue)
       : WorkerControlRunnable(aWorkerPrivate, WorkerThreadUnchangedBusyCount),
         mValue(aValue),
         mKey(aKey) {}
@@ -1838,17 +1840,17 @@ void WorkerPrivate::UpdateLanguages(const nsTArray<nsString>& aLanguages) {
 }
 
 void WorkerPrivate::UpdateJSWorkerMemoryParameter(JSGCParamKey aKey,
-                                                  uint32_t aValue) {
+                                                  Maybe<uint32_t> aValue) {
   AssertIsOnParentThread();
 
-  bool found = false;
+  bool changed = false;
 
   {
     MutexAutoLock lock(mMutex);
-    found = mJSSettings.ApplyGCSetting(aKey, aValue);
+    changed = mJSSettings.ApplyGCSetting(aKey, aValue);
   }
 
-  if (found) {
+  if (changed) {
     RefPtr<UpdateJSWorkerMemoryParameterRunnable> runnable =
         new UpdateJSWorkerMemoryParameterRunnable(this, aKey, aValue);
     if (!runnable->Dispatch()) {
@@ -2233,12 +2235,7 @@ WorkerPrivate::WorkerPrivate(
       // in a fresh global object when shared memory objects aren't allowed
       // (because COOP/COEP support isn't enabled, or because COOP/COEP don't
       // act to isolate this worker to a separate process).
-      //
-      // Normal pages haven't yet been made to respect COOP/COEP in this regard
-      // yet -- they just always add the property.  This should be changed to
-      // |IsSharedMemoryAllowed()| when bug 1624266 fixes this for normal pages.
-      bool defineSharedArrayBufferConstructor = true;
-
+      const bool defineSharedArrayBufferConstructor = IsSharedMemoryAllowed();
       chromeCreationOptions.setDefineSharedArrayBufferConstructor(
           defineSharedArrayBufferConstructor);
       contentCreationOptions.setDefineSharedArrayBufferConstructor(
@@ -2428,7 +2425,7 @@ already_AddRefed<WorkerPrivate> WorkerPrivate::Constructor(
   MOZ_DIAGNOSTIC_ASSERT(worker->PrincipalIsValid());
 
   UniquePtr<SerializedStackHolder> stack;
-  if (worker->IsWatchedByDevtools()) {
+  if (worker->IsWatchedByDevTools()) {
     stack = GetCurrentStackForNetMonitor(aCx);
   }
 
@@ -2538,7 +2535,7 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
     loadInfo.mServiceWorkersTestingInWindow =
         aParent->ServiceWorkersTestingInWindow();
     loadInfo.mParentController = aParent->GlobalScope()->GetController();
-    loadInfo.mWatchedByDevtools = aParent->IsWatchedByDevtools();
+    loadInfo.mWatchedByDevTools = aParent->IsWatchedByDevTools();
   } else {
     AssertIsOnMainThread();
 
@@ -2659,10 +2656,9 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
 
       loadInfo.mXHRParamsAllowed = perm == nsIPermissionManager::ALLOW_ACTION;
 
-      nsIDocShell* docShell = globalWindow->GetDocShell();
-      if (docShell) {
-        loadInfo.mWatchedByDevtools = docShell->GetWatchedByDevtools();
-      }
+      BrowsingContext* browsingContext = globalWindow->GetBrowsingContext();
+      loadInfo.mWatchedByDevTools =
+          browsingContext ? browsingContext->WatchedByDevTools() : false;
 
       loadInfo.mReferrerInfo =
           ReferrerInfo::CreateForFetch(loadInfo.mLoadingPrincipal, document);
@@ -2670,8 +2666,8 @@ nsresult WorkerPrivate::GetLoadInfo(JSContext* aCx, nsPIDOMWindowInner* aWindow,
       loadInfo.mWindowID = globalWindow->WindowID();
       loadInfo.mStorageAccess = StorageAllowedForWindow(globalWindow);
       loadInfo.mCookieJarSettings = document->CookieJarSettings();
-      loadInfo.mOriginAttributes =
-          nsContentUtils::GetOriginAttributes(document);
+      StoragePrincipalHelper::GetRegularPrincipalOriginAttributes(
+          document, loadInfo.mOriginAttributes);
       loadInfo.mParentController = globalWindow->GetController();
       loadInfo.mSecureContext = loadInfo.mWindow->IsSecureContext()
                                     ? WorkerLoadInfo::eSecureContext
@@ -2800,6 +2796,26 @@ void WorkerPrivate::OverrideLoadInfoLoadGroup(WorkerLoadInfo& aLoadInfo,
   aLoadInfo.mLoadGroup = std::move(loadGroup);
 
   MOZ_ASSERT(NS_LoadGroupMatchesPrincipal(aLoadInfo.mLoadGroup, aPrincipal));
+}
+
+void WorkerPrivate::RunLoopNeverRan() {
+  {
+    MutexAutoLock lock(mMutex);
+
+    mStatus = Dead;
+  }
+
+  // After mStatus is set to Dead there can be no more
+  // WorkerControlRunnables so no need to lock here.
+  if (!mControlQueue.IsEmpty()) {
+    WorkerControlRunnable* runnable = nullptr;
+    while (mControlQueue.Pop(runnable)) {
+      runnable->Cancel();
+      runnable->Release();
+    }
+  }
+
+  ScheduleDeletion(WorkerPrivate::WorkerRan);
 }
 
 void WorkerPrivate::DoRunLoop(JSContext* aCx) {
@@ -2982,10 +2998,38 @@ void WorkerPrivate::DoRunLoop(JSContext* aCx) {
   MOZ_CRASH("Shouldn't get here!");
 }
 
+namespace {
+/**
+ * If there is a current CycleCollectedJSContext, return its recursion depth,
+ * otherwise return 1.
+ *
+ * In the edge case where a worker is starting up so late that PBackground is
+ * already shutting down, the cycle collected context will never be created,
+ * but we will need to drain the event loop in ClearMainEventQueue.  This will
+ * result in a normal NS_ProcessPendingEvents invocation which will call
+ * WorkerPrivate::OnProcessNextEvent and WorkerPrivate::AfterProcessNextEvent
+ * which want to handle the need to process control runnables and perform a
+ * sanity check assertion, respectively.
+ *
+ * We claim a depth of 1 when there's no CCJS because this most corresponds to
+ * reality, but this doesn't meant that other code might want to drain various
+ * runnable queues as part of this cleanup.
+ */
+uint32_t GetEffectiveEventLoopRecursionDepth() {
+  auto ccjs = CycleCollectedJSContext::Get();
+  if (ccjs) {
+    return ccjs->RecursionDepth();
+  }
+
+  return 1;
+}
+
+}  // namespace
+
 void WorkerPrivate::OnProcessNextEvent() {
   AssertIsOnWorkerThread();
 
-  uint32_t recursionDepth = CycleCollectedJSContext::Get()->RecursionDepth();
+  uint32_t recursionDepth = GetEffectiveEventLoopRecursionDepth();
   MOZ_ASSERT(recursionDepth);
 
   // Normally we process control runnables in DoRunLoop or RunCurrentSyncLoop.
@@ -3001,7 +3045,7 @@ void WorkerPrivate::OnProcessNextEvent() {
 
 void WorkerPrivate::AfterProcessNextEvent() {
   AssertIsOnWorkerThread();
-  MOZ_ASSERT(CycleCollectedJSContext::Get()->RecursionDepth());
+  MOZ_ASSERT(GetEffectiveEventLoopRecursionDepth());
 }
 
 nsIEventTarget* WorkerPrivate::MainThreadEventTargetForMessaging() {
@@ -3447,8 +3491,6 @@ void WorkerPrivate::WaitForWorkerEvents() {
 
   AssertIsOnWorkerThread();
   mMutex.AssertCurrentThreadOwns();
-
-  AUTO_PROFILER_THREAD_SLEEP;
 
   // Wait for a worker event.
   mCondVar.Wait();
@@ -4759,17 +4801,14 @@ void WorkerPrivate::UpdateLanguagesInternal(
   globalScope->DispatchEvent(*event);
 }
 
-void WorkerPrivate::UpdateJSWorkerMemoryParameterInternal(JSContext* aCx,
-                                                          JSGCParamKey aKey,
-                                                          uint32_t aValue) {
+void WorkerPrivate::UpdateJSWorkerMemoryParameterInternal(
+    JSContext* aCx, JSGCParamKey aKey, Maybe<uint32_t> aValue) {
   MOZ_ACCESS_THREAD_BOUND(mWorkerThreadAccessible, data);
 
-  // XXX aValue might be 0 here (telling us to unset a previous value for child
-  // workers). Calling JS_SetGCParameter with a value of 0 isn't actually
-  // supported though. We really need some way to revert to a default value
-  // here.
   if (aValue) {
-    JS_SetGCParameter(aCx, aKey, aValue);
+    JS_SetGCParameter(aCx, aKey, *aValue);
+  } else {
+    JS_ResetGCParameter(aCx, aKey);
   }
 
   for (uint32_t index = 0; index < data->mChildWorkers.Length(); index++) {
@@ -5272,8 +5311,8 @@ WorkerPrivate::GetOwnerEmbedderPolicy() const {
     return GetParent()->GetEmbedderPolicy();
   }
 
-  if (GetWindow() && GetWindow()->GetBrowsingContext()) {
-    return Some(GetWindow()->GetBrowsingContext()->GetEmbedderPolicy());
+  if (GetWindow() && GetWindow()->GetWindowContext()) {
+    return Some(GetWindow()->GetWindowContext()->GetEmbedderPolicy());
   }
 
   return Nothing();

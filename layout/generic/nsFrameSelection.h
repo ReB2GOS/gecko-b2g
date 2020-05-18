@@ -11,6 +11,7 @@
 #include "mozilla/Attributes.h"
 #include "mozilla/EventForwards.h"
 #include "mozilla/dom/Selection.h"
+#include "mozilla/Result.h"
 #include "mozilla/TextRange.h"
 #include "mozilla/UniquePtr.h"
 #include "nsIFrame.h"
@@ -71,7 +72,7 @@ struct MOZ_STACK_CLASS nsPeekOffsetStruct {
 
   nsPeekOffsetStruct(
       nsSelectionAmount aAmount, nsDirection aDirection, int32_t aStartOffset,
-      nsPoint aDesiredPos, bool aJumpLines, bool aScrollViewStop,
+      nsPoint aDesiredCaretPos, bool aJumpLines, bool aScrollViewStop,
       bool aIsKeyboardSelect, bool aVisual, bool aExtend,
       ForceEditableRegion = ForceEditableRegion::No,
       mozilla::EWordMovementType aWordMovementType = mozilla::eDefaultBehavior,
@@ -110,7 +111,7 @@ struct MOZ_STACK_CLASS nsPeekOffsetStruct {
   // depending on line's writing mode)
   //
   // Used with: eSelectLine.
-  const nsPoint mDesiredPos;
+  const nsPoint mDesiredCaretPos;
 
   // An enum that determines whether to prefer the start or end of a word or to
   // use the default beahvior, which is a combination of direction and the
@@ -473,11 +474,7 @@ class nsFrameSelection final {
   void SetHint(CaretAssociateHint aHintRight) { mCaret.mHint = aHintRight; }
   CaretAssociateHint GetHint() const { return mCaret.mHint; }
 
-  /**
-   * SetCaretBidiLevel sets the caret bidi level.
-   * @param aLevel the caret bidi level
-   */
-  void SetCaretBidiLevel(nsBidiLevel aLevel);
+  void SetCaretBidiLevelAndMaybeSchedulePaint(nsBidiLevel aLevel);
 
   /**
    * GetCaretBidiLevel gets the caret bidi level.
@@ -514,20 +511,6 @@ class nsFrameSelection final {
                                                      bool aExtend);
 
   /**
-   * CharacterExtendForDelete extends the selection forward (logically) to
-   * the next character cell, so that the selected cell can be deleted.
-   */
-  // TODO: replace with `MOZ_CAN_RUN_SCRIPT`.
-  MOZ_CAN_RUN_SCRIPT_BOUNDARY nsresult CharacterExtendForDelete();
-
-  /**
-   * CharacterExtendForBackspace extends the selection backward (logically) to
-   * the previous character cell, so that the selected cell can be deleted.
-   */
-  // TODO: replace with `MOZ_CAN_RUN_SCRIPT`.
-  MOZ_CAN_RUN_SCRIPT_BOUNDARY nsresult CharacterExtendForBackspace();
-
-  /**
    * WordMove will generally be called from the nsiselectioncontroller
    * implementations. the effect being the selection will move one word left or
    * right.
@@ -536,14 +519,6 @@ class nsFrameSelection final {
    */
   // TODO: replace with `MOZ_CAN_RUN_SCRIPT`.
   MOZ_CAN_RUN_SCRIPT_BOUNDARY nsresult WordMove(bool aForward, bool aExtend);
-
-  /**
-   * WordExtendForDelete extends the selection backward or forward (logically)
-   * to the next word boundary, so that the selected word can be deleted.
-   * @param aForward select forward in document.
-   */
-  // TODO: replace with `MOZ_CAN_RUN_SCRIPT`.
-  MOZ_CAN_RUN_SCRIPT_BOUNDARY nsresult WordExtendForDelete(bool aForward);
 
   /**
    * LineMove will generally be called from the nsiselectioncontroller
@@ -565,6 +540,74 @@ class nsFrameSelection final {
   // TODO: replace with `MOZ_CAN_RUN_SCRIPT`.
   MOZ_CAN_RUN_SCRIPT_BOUNDARY nsresult IntraLineMove(bool aForward,
                                                      bool aExtend);
+
+  /**
+   * CreateRangeExtendedToNextGraphemeClusterBoundary() returns range which is
+   * extended from normal selection range to start of next grapheme cluster
+   * boundary.
+   */
+  template <typename RangeType>
+  MOZ_CAN_RUN_SCRIPT mozilla::Result<RefPtr<RangeType>, nsresult>
+  CreateRangeExtendedToNextGraphemeClusterBoundary() {
+    return CreateRangeExtendedToSomewhere<RangeType>(eDirNext, eSelectCluster,
+                                                     eLogical);
+  }
+
+  /**
+   * CreateRangeExtendedToPreviousCharacterBoundary() returns range which is
+   * extended from normal selection range to start of previous character
+   * boundary.
+   */
+  template <typename RangeType>
+  MOZ_CAN_RUN_SCRIPT mozilla::Result<RefPtr<RangeType>, nsresult>
+  CreateRangeExtendedToPreviousCharacterBoundary() {
+    return CreateRangeExtendedToSomewhere<RangeType>(
+        eDirPrevious, eSelectCharacter, eLogical);
+  }
+
+  /**
+   * CreateRangeExtendedToNextWordBoundary() returns range which is
+   * extended from normal selection range to start of next word boundary.
+   */
+  template <typename RangeType>
+  MOZ_CAN_RUN_SCRIPT mozilla::Result<RefPtr<RangeType>, nsresult>
+  CreateRangeExtendedToNextWordBoundary() {
+    return CreateRangeExtendedToSomewhere<RangeType>(eDirNext, eSelectWord,
+                                                     eLogical);
+  }
+
+  /**
+   * CreateRangeExtendedToPreviousWordBoundary() returns range which is
+   * extended from normal selection range to start of previous word boundary.
+   */
+  template <typename RangeType>
+  MOZ_CAN_RUN_SCRIPT mozilla::Result<RefPtr<RangeType>, nsresult>
+  CreateRangeExtendedToPreviousWordBoundary() {
+    return CreateRangeExtendedToSomewhere<RangeType>(eDirPrevious, eSelectWord,
+                                                     eLogical);
+  }
+
+  /**
+   * CreateRangeExtendedToPreviousHardLineBreak() returns range which is
+   * extended from normal selection range to previous hard line break.
+   */
+  template <typename RangeType>
+  MOZ_CAN_RUN_SCRIPT mozilla::Result<RefPtr<RangeType>, nsresult>
+  CreateRangeExtendedToPreviousHardLineBreak() {
+    return CreateRangeExtendedToSomewhere<RangeType>(
+        eDirPrevious, eSelectBeginLine, eLogical);
+  }
+
+  /**
+   * CreateRangeExtendedToNextHardLineBreak() returns range which is extended
+   * from normal selection range to next hard line break.
+   */
+  template <typename RangeType>
+  MOZ_CAN_RUN_SCRIPT mozilla::Result<RefPtr<RangeType>, nsresult>
+  CreateRangeExtendedToNextHardLineBreak() {
+    return CreateRangeExtendedToSomewhere<RangeType>(eDirNext, eSelectEndLine,
+                                                     eLogical);
+  }
 
   /**
    * Select All will generally be called from the nsiselectioncontroller
@@ -770,12 +813,51 @@ class nsFrameSelection final {
                                         nsSelectionAmount aAmount,
                                         CaretMovementStyle aMovementStyle);
 
-  nsresult FetchDesiredPos(
-      nsPoint& aDesiredPos);  // the position requested by the Key Handling for
-                              // up down
-  void InvalidateDesiredPos();  // do not listen to mDesiredPos.mValue you must
-                                // get another.
-  void SetDesiredPos(nsPoint aPos);  // set the mDesiredPos.mValue
+  /**
+   * PeekOffsetForCaretMove() only peek offset for caret move.  I.e., won't
+   * change selection ranges nor bidi information.
+   */
+  mozilla::Result<nsPeekOffsetStruct, nsresult> PeekOffsetForCaretMove(
+      nsDirection aDirection, bool aContinueSelection,
+      const nsSelectionAmount aAmount, CaretMovementStyle aMovementStyle,
+      const nsPoint& aDesiredCaretPos) const;
+
+  /**
+   * CreateRangeExtendedToSomewhere() is common method to implement
+   * CreateRangeExtendedTo*().  This method creates a range extended from
+   * normal selection range.
+   */
+  template <typename RangeType>
+  MOZ_CAN_RUN_SCRIPT mozilla::Result<RefPtr<RangeType>, nsresult>
+  CreateRangeExtendedToSomewhere(nsDirection aDirection,
+                                 const nsSelectionAmount aAmount,
+                                 CaretMovementStyle aMovementStyle);
+
+  /**
+   * IsIntraLineCaretMove() is a helper method for PeekOffsetForCaretMove()
+   * and CreateRangeExtendedToSomwhereFromNormalSelection().  This returns
+   * whether aAmount is intra line move or is crossing hard line break.
+   * This returns error if aMount is not supported by the methods.
+   */
+  static mozilla::Result<bool, nsresult> IsIntraLineCaretMove(
+      nsSelectionAmount aAmount) {
+    switch (aAmount) {
+      case eSelectCharacter:
+      case eSelectCluster:
+      case eSelectWord:
+      case eSelectWordNoSpace:
+      case eSelectBeginLine:
+      case eSelectEndLine:
+        return true;
+      case eSelectLine:
+        return false;
+      default:
+        return mozilla::Err(NS_ERROR_FAILURE);
+    }
+  }
+
+  void InvalidateDesiredCaretPos();  // do not listen to mDesiredCaretPos.mValue
+                                     // you must get another.
 
   bool IsBatching() const { return mBatching.mCounter > 0; }
 
@@ -854,8 +936,9 @@ class nsFrameSelection final {
      * @return true iff the point (aContent, aOffset) is inside and not at the
      * boundaries of mRange.
      */
-    bool AdjustNormalSelection(const nsIContent* aContent, int32_t aOffset,
-                               mozilla::dom::Selection& aNormalSelection) const;
+    MOZ_CAN_RUN_SCRIPT bool AdjustNormalSelection(
+        const nsIContent* aContent, int32_t aOffset,
+        mozilla::dom::Selection& aNormalSelection) const;
 
     /**
      * @param aScrollViewStop see `nsPeekOffsetStruct::mScrollViewStop`.
@@ -902,19 +985,38 @@ class nsFrameSelection final {
     CaretAssociateHint mHint = mozilla::CARET_ASSOCIATE_BEFORE;
     nsBidiLevel mBidiLevel = BIDI_LEVEL_UNDEFINED;
     int8_t mMovementStyle = 0;
+
+    bool IsVisualMovement(bool aContinueSelection,
+                          CaretMovementStyle aMovementStyle) const {
+      return aMovementStyle == eVisual ||
+             (aMovementStyle == eUsePrefStyle &&
+              (mMovementStyle == 1 ||
+               (mMovementStyle == 2 && !aContinueSelection)));
+    }
   };
 
   Caret mCaret;
 
   nsBidiLevel mKbdBidiLevel = NSBIDI_LTR;
 
-  // TODO: could presumably be transformed to a `mozilla::Maybe`.
-  struct DesiredPos {
-    nsPoint mValue;
+  class DesiredCaretPos {
+   public:
+    // the position requested by the Key Handling for up down
+    nsresult FetchPos(nsPoint& aDesiredCaretPos,
+                      const mozilla::PresShell& aPresShell,
+                      mozilla::dom::Selection& aNormalSelection) const;
+
+    void Set(const nsPoint& aPos);
+
+    void Invalidate();
+
     bool mIsSet = false;
+
+   private:
+    nsPoint mValue;
   };
 
-  DesiredPos mDesiredPos;
+  DesiredCaretPos mDesiredCaretPos;
 
   struct DelayedMouseEvent {
     bool mIsValid = false;

@@ -197,16 +197,6 @@ void CodeGenerator::visitMinMaxF(LMinMaxF* ins) {
   }
 }
 
-void CodeGenerator::visitAbsD(LAbsD* ins) {
-  ARMFPRegister input(ToFloatRegister(ins->input()), 64);
-  masm.Fabs(input, input);
-}
-
-void CodeGenerator::visitAbsF(LAbsF* ins) {
-  ARMFPRegister input(ToFloatRegister(ins->input()), 32);
-  masm.Fabs(input, input);
-}
-
 void CodeGenerator::visitSqrtD(LSqrtD* ins) {
   ARMFPRegister input(ToFloatRegister(ins->input()), 64);
   ARMFPRegister output(ToFloatRegister(ins->output()), 64);
@@ -1045,9 +1035,7 @@ MoveOperand CodeGeneratorARM64::toMoveOperand(const LAllocation a) const {
   }
   MoveOperand::Kind kind =
       a.isStackArea() ? MoveOperand::EFFECTIVE_ADDRESS : MoveOperand::MEMORY;
-
-  return MoveOperand(AsRegister(masm.getStackPointer()), ToStackOffset(a),
-                     kind);
+  return MoveOperand(ToAddress(a), kind);
 }
 
 class js::jit::OutOfLineTableSwitch
@@ -1812,13 +1800,9 @@ void CodeGeneratorARM64::generateInvalidateEpilogue() {
   // is).
   invalidateEpilogueData_ = masm.pushWithPatch(ImmWord(uintptr_t(-1)));
 
+  // Jump to the invalidator which will replace the current frame.
   TrampolinePtr thunk = gen->jitRuntime()->getInvalidationThunk();
-  masm.call(thunk);
-
-  // We should never reach this point in JIT code -- the invalidation thunk
-  // should pop the invalidated JS frame and return directly to its caller.
-  masm.assumeUnreachable(
-      "Should have returned directly to its caller instead of here.");
+  masm.jump(thunk);
 }
 
 template <class U>

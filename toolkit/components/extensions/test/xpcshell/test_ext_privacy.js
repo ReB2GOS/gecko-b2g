@@ -335,6 +335,9 @@ add_task(async function test_privacy_other_prefs() {
     case cookieSvc.BEHAVIOR_REJECT_TRACKER:
       defaultBehavior = "reject_trackers";
       break;
+    case cookieSvc.BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN:
+      defaultBehavior = "reject_trackers_and_partition_foreign";
+      break;
     default:
       ok(
         false,
@@ -591,6 +594,19 @@ add_task(async function test_privacy_other_prefs() {
     },
     { behavior: "reject_trackers", nonPersistentCookies: false }
   );
+  await testSetting(
+    "websites.cookieConfig",
+    { behavior: "reject_trackers_and_partition_foreign" },
+    {
+      "network.cookie.cookieBehavior":
+        cookieSvc.BEHAVIOR_REJECT_TRACKER_AND_PARTITION_FOREIGN,
+      "network.cookie.lifetimePolicy": cookieSvc.ACCEPT_NORMALLY,
+    },
+    {
+      behavior: "reject_trackers_and_partition_foreign",
+      nonPersistentCookies: false,
+    }
+  );
 
   await testSetting(
     "network.tlsVersionRestriction",
@@ -784,11 +800,11 @@ add_task(async function test_privacy_other_prefs() {
     "network.tlsVersionRestriction",
     {},
     {
-      "security.tls.version.min": 3,
+      "security.tls.version.min": tlsMinPref,
       "security.tls.version.max": 4,
     },
     {
-      minimum: "TLSv1.2",
+      minimum: tlsMinVer,
       maximum: "TLSv1.3",
     }
   );

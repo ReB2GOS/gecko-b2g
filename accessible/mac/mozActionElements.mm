@@ -43,6 +43,8 @@ enum CheckboxValue {
                         NSAccessibilityFocusedAttribute,  // required
                         NSAccessibilityTitleAttribute,    // required
                         NSAccessibilityChildrenAttribute, NSAccessibilityDescriptionAttribute,
+                        NSAccessibilityRequiredAttribute, NSAccessibilityHasPopupAttribute,
+                        NSAccessibilityPopupValueAttribute,
 #if DEBUG
                         @"AXMozDescription",
 #endif
@@ -56,8 +58,56 @@ enum CheckboxValue {
 - (id)accessibilityAttributeValue:(NSString*)attribute {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
 
-  if ([attribute isEqualToString:NSAccessibilityChildrenAttribute]) {
-    if ([self hasPopup]) return [self children];
+  if ([attribute isEqualToString:NSAccessibilityHasPopupAttribute]) {
+    return [NSNumber numberWithBool:[self hasPopup]];
+  }
+
+  if ([attribute isEqualToString:NSAccessibilityPopupValueAttribute]) {
+    if ([self hasPopup]) {
+      return utils::GetAccAttr(self, "haspopup");
+    } else {
+      return nil;
+    }
+  }
+
+  return [super accessibilityAttributeValue:attribute];
+
+  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
+}
+
+- (BOOL)hasPopup {
+  return ([self stateWithMask:states::HASPOPUP] != 0);
+}
+
+@end
+
+@implementation mozPopupButtonAccessible
+- (NSString*)title {
+  // Popup buttons don't have titles.
+  return @"";
+}
+
+- (NSArray*)accessibilityAttributeNames {
+  static NSMutableArray* supportedAttributes = nil;
+  if (!supportedAttributes) {
+    supportedAttributes = [[super accessibilityAttributeNames] mutableCopy];
+    // We need to remove AXHasPopup from a AXPopupButton for it to be reported
+    // as a popup button. Otherwise VO reports it as a button that has a popup
+    // which is not consistent with Safari.
+    [supportedAttributes removeObject:NSAccessibilityHasPopupAttribute];
+    [supportedAttributes addObject:NSAccessibilityValueAttribute];
+  }
+
+  return supportedAttributes;
+}
+
+- (id)accessibilityAttributeValue:(NSString*)attribute {
+  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
+
+  if ([attribute isEqualToString:NSAccessibilityHasPopupAttribute]) {
+    // We need to null on AXHasPopup for it to be reported as a popup button.
+    // Otherwise VO reports it as a button that has a popup which is not
+    // consistent with Safari.
     return nil;
   }
 
@@ -66,18 +116,41 @@ enum CheckboxValue {
   NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
 }
 
-- (BOOL)accessibilityIsIgnored {
-  return ![self getGeckoAccessible] && ![self getProxyAccessible];
+- (NSArray*)children {
+  if ([self stateWithMask:states::EXPANDED] == 0) {
+    // If the popup button is collapsed don't return its children.
+    return @[];
+  }
+
+  return [super children];
 }
 
-- (BOOL)hasPopup {
-  if (AccessibleWrap* accWrap = [self getGeckoAccessible])
-    return accWrap->NativeState() & states::HASPOPUP;
+- (void)stateChanged:(uint64_t)state isEnabled:(BOOL)enabled {
 
-  if (ProxyAccessible* proxy = [self getProxyAccessible])
-    return proxy->NativeState() & states::HASPOPUP;
+  [super stateChanged:state isEnabled:enabled];
 
-  return false;
+  if (state == states::EXPANDED) {
+    // If the EXPANDED state is updated, fire AXMenu events on the
+    // popups child which is the actual menu.
+    if (mozAccessible* popup = (mozAccessible*)[self childAt:0]) {
+      [popup postNotification:(enabled ? @"AXMenuOpened" : @"AXMenuClosed")];
+    }
+  }
+}
+
+- (BOOL)ignoreWithParent:(mozAccessible*)parent {
+  if (AccessibleWrap* accWrap = [self getGeckoAccessible]) {
+    if (accWrap->IsContent() && accWrap->GetContent()->IsXULElement(nsGkAtoms::menulist)) {
+      // The way select elements work is that content has a COMBOBOX accessible, when it is clicked
+      // it expands a COMBOBOX in our top-level main XUL window. The latter COMBOBOX is a stand-in
+      // for the content one while it is expanded.
+      // XXX: VO focus behaves weirdly if we expose the dummy XUL COMBOBOX in the tree.
+      // We are only interested in its menu child.
+      return YES;
+    }
+  }
+
+  return [super ignoreWithParent:parent];
 }
 
 @end
@@ -162,7 +235,7 @@ enum CheckboxValue {
 
 @end
 
-@implementation mozSliderAccessible
+@implementation mozIncrementableAccessible
 
 - (NSArray*)accessibilityActionNames {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
@@ -207,12 +280,20 @@ enum CheckboxValue {
 
   if (AccessibleWrap* accWrap = [self getGeckoAccessible]) {
     double newVal = accWrap->CurValue() + (accWrap->Step() * factor);
-    if (newVal >= accWrap->MinValue() && newVal <= accWrap->MaxValue()) {
+    double min = accWrap->MinValue();
+    double max = accWrap->MaxValue();
+    if ((IsNaN(min) || newVal >= min) && (IsNaN(max) || newVal <= max)) {
       accWrap->SetCurValue(newVal);
     }
   } else if (ProxyAccessible* proxy = [self getProxyAccessible]) {
     double newVal = proxy->CurValue() + (proxy->Step() * factor);
-    if (newVal >= proxy->MinValue() && newVal <= proxy->MaxValue()) {
+    double min = proxy->MinValue();
+    double max = proxy->MaxValue();
+    // Because min and max are not required attributes, we first check
+    // if the value is undefined. If this check fails,
+    // the value is defined, and we we verify our new value falls
+    // within the bound (inclusive).
+    if ((IsNaN(min) || newVal >= min) && (IsNaN(max) || newVal <= max)) {
       proxy->SetCurValue(newVal);
     }
   }
@@ -222,6 +303,7 @@ enum CheckboxValue {
 
 - (void)handleAccessibleEvent:(uint32_t)eventType {
   switch (eventType) {
+    case nsIAccessibleEvent::EVENT_TEXT_VALUE_CHANGE:
     case nsIAccessibleEvent::EVENT_VALUE_CHANGE:
       [self postNotification:NSAccessibilityValueChangedNotification];
       break;

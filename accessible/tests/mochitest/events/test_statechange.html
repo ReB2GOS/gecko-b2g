@@ -54,6 +54,12 @@
       await p;
     }
 
+    async function changeRequiredState(aID, aIsRequired) {
+      let p = waitForEvent(...stateChange(STATE_REQUIRED, false, aIsRequired, aID));
+      getNode(aID).required = aIsRequired;
+      await p;
+    }
+
     async function stateChangeOnFileInput(aID, aAttr, aValue,
                                     aState, aIsExtraState, aIsEnabled) {
       let fileControlNode = getNode(aID);
@@ -131,6 +137,40 @@
       await p;
     }
 
+    async function testHasPopup() {
+      let p = waitForEvent(...stateChange(STATE_HASPOPUP, false, true, "popupButton"));
+      getNode("popupButton").setAttribute("aria-haspopup", "true");
+      await p;
+
+      p = waitForEvent(...stateChange(STATE_HASPOPUP, false, true, "popupButton"));
+      getNode("popupButton").setAttribute("aria-haspopup", "tree");
+      await p;
+
+      p = waitForEvent(...stateChange(STATE_HASPOPUP, false, true, "popupButton"));
+      getNode("popupButton").setAttribute("aria-haspopup", "menu");
+      await p;
+
+      p = waitForEvent(...stateChange(STATE_HASPOPUP, false, true, "popupButton"));
+      getNode("popupButton").setAttribute("aria-haspopup", "listbox");
+      await p;
+
+      p = waitForEvent(...stateChange(STATE_HASPOPUP, false, true, "popupButton"));
+      getNode("popupButton").setAttribute("aria-haspopup", "grid");
+      await p;
+
+      p = waitForEvent(...stateChange(STATE_HASPOPUP, false, false, "popupButton"));
+      getNode("popupButton").setAttribute("aria-haspopup", "false");
+      await p;
+
+      p = waitForEvent(...stateChange(STATE_HASPOPUP, false, true, "popupButton"));
+      getNode("popupButton").setAttribute("aria-haspopup", "dialog");
+      await p;
+
+      p = waitForEvent(...stateChange(STATE_HASPOPUP, false, false, "popupButton"));
+      getNode("popupButton").removeAttribute("aria-haspopup");
+      await p;
+    }
+
     async function doTests() {
       // Test opening details objects
       await openNode("detailsOpen", "summaryOpen", true);
@@ -155,6 +195,9 @@
       await changeCheckInput("radio", true);
       await changeCheckInput("radio", false);
 
+      // required state change
+      await changeRequiredState("checkbox", true);
+
       // file input inherited state changes
       await stateChangeOnFileInput("file", "aria-busy", "true",
                                    STATE_BUSY, false, true);
@@ -174,6 +217,8 @@
                                EXT_STATE_ENABLED, true, true);
 
       await testLinked();
+
+      await testHasPopup();
 
       SimpleTest.finish();
     }
@@ -266,5 +311,7 @@
   <a id="link3">I am a non-link link</a>
 
   <div id="eventdump"></div>
+
+  <button id="popupButton">action</button>
 </body>
 </html>

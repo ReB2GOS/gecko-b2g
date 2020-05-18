@@ -22,7 +22,6 @@ XPIDL_SOURCES += [
     'nsIImageLoadingContent.idl',
     'nsIMessageManager.idl',
     'nsIObjectLoadingContent.idl',
-    'nsIRemoteWindowContext.idl',
     'nsIScriptableContentIterator.idl',
     'nsIScriptChannel.idl',
     'nsISelectionController.idl',
@@ -62,6 +61,7 @@ EXPORTS += [
     'nsDOMAttributeMap.h',
     'nsDOMCID.h',
     'nsDOMJSUtils.h',
+    'nsDOMMutationObserver.h',
     'nsDOMNavigationTiming.h',
     'nsDOMString.h',
     'nsDOMTokenList.h',
@@ -489,6 +489,7 @@ EXTRA_JS_MODULES += [
     'ContentAreaDropListener.jsm',
     'DOMRequestHelper.jsm',
     'IndexedDBHelper.jsm',
+    'LocationHelper.jsm',
     'ProcessSelector.jsm',
     'SlowScriptDebug.jsm',
 ]

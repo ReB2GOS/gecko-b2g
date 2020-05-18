@@ -248,7 +248,7 @@ MethodStatus BaselineCompiler::compile() {
 
   UniquePtr<BaselineScript> baselineScript(
       BaselineScript::New(
-          script, warmUpCheckPrologueOffset_.offset(),
+          cx, warmUpCheckPrologueOffset_.offset(),
           profilerEnterFrameToggleOffset_.offset(),
           profilerExitFrameToggleOffset_.offset(),
           handler.retAddrEntries().length(), handler.osrEntries().length(),
@@ -2224,24 +2224,6 @@ bool BaselineCodeGen<Handler>::emit_CheckIsObj() {
   }
 
   masm.bind(&ok);
-  return true;
-}
-
-template <typename Handler>
-bool BaselineCodeGen<Handler>::emit_CheckIsCallable() {
-  frame.syncStack(0);
-  masm.loadValue(frame.addressOfStackValue(-1), R0);
-
-  prepareVMCall();
-
-  pushUint8BytecodeOperandArg(R1.scratchReg());
-  pushArg(R0);
-
-  using Fn = bool (*)(JSContext*, HandleValue, CheckIsCallableKind);
-  if (!callVM<Fn, CheckIsCallable>()) {
-    return false;
-  }
-
   return true;
 }
 
@@ -6335,7 +6317,7 @@ bool BaselineCodeGen<Handler>::emit_InitHomeObject() {
 
   Label skipBarrier;
   masm.branchPtrInNurseryChunk(Assembler::Equal, func, temp, &skipBarrier);
-  masm.branchValueIsNurseryObject(Assembler::NotEqual, R0, temp, &skipBarrier);
+  masm.branchValueIsNurseryCell(Assembler::NotEqual, R0, temp, &skipBarrier);
   masm.call(&postBarrierSlot_);
   masm.bind(&skipBarrier);
 

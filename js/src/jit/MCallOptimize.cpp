@@ -9,6 +9,7 @@
 #include "jsmath.h"
 
 #include "builtin/AtomicsObject.h"
+#include "builtin/DataViewObject.h"
 #ifdef JS_HAS_INTL_API
 #  include "builtin/intl/Collator.h"
 #  include "builtin/intl/DateTimeFormat.h"
@@ -142,6 +143,7 @@ static bool CanInlineCrossRealm(InlinableNative native) {
     case InlinableNative::IntrinsicToInteger:
     case InlinableNative::IntrinsicToString:
     case InlinableNative::IntrinsicIsConstructing:
+    case InlinableNative::IntrinsicIsSuspendedGenerator:
     case InlinableNative::IntrinsicSubstringKernel:
     case InlinableNative::IntrinsicGuardToArrayIterator:
     case InlinableNative::IntrinsicGuardToMapIterator:
@@ -191,6 +193,26 @@ static bool CanInlineCrossRealm(InlinableNative native) {
     case InlinableNative::AtomicsOr:
     case InlinableNative::AtomicsXor:
     case InlinableNative::AtomicsIsLockFree:
+    case InlinableNative::DataViewGetInt8:
+    case InlinableNative::DataViewGetUint8:
+    case InlinableNative::DataViewGetInt16:
+    case InlinableNative::DataViewGetUint16:
+    case InlinableNative::DataViewGetInt32:
+    case InlinableNative::DataViewGetUint32:
+    case InlinableNative::DataViewGetFloat32:
+    case InlinableNative::DataViewGetFloat64:
+    case InlinableNative::DataViewGetBigInt64:
+    case InlinableNative::DataViewGetBigUint64:
+    case InlinableNative::DataViewSetInt8:
+    case InlinableNative::DataViewSetUint8:
+    case InlinableNative::DataViewSetInt16:
+    case InlinableNative::DataViewSetUint16:
+    case InlinableNative::DataViewSetInt32:
+    case InlinableNative::DataViewSetUint32:
+    case InlinableNative::DataViewSetFloat32:
+    case InlinableNative::DataViewSetFloat64:
+    case InlinableNative::DataViewSetBigInt64:
+    case InlinableNative::DataViewSetBigUint64:
     case InlinableNative::ReflectGetPrototypeOf:
     case InlinableNative::String:
     case InlinableNative::StringCharCodeAt:
@@ -299,6 +321,48 @@ IonBuilder::InliningResult IonBuilder::inlineNativeCall(CallInfo& callInfo,
     // Boolean natives.
     case InlinableNative::Boolean:
       return inlineBoolean(callInfo);
+
+    // DataView natives.
+    case InlinableNative::DataViewGetInt8:
+      return inlineDataViewGet(callInfo, Scalar::Int8);
+    case InlinableNative::DataViewGetUint8:
+      return inlineDataViewGet(callInfo, Scalar::Uint8);
+    case InlinableNative::DataViewGetInt16:
+      return inlineDataViewGet(callInfo, Scalar::Int16);
+    case InlinableNative::DataViewGetUint16:
+      return inlineDataViewGet(callInfo, Scalar::Uint16);
+    case InlinableNative::DataViewGetInt32:
+      return inlineDataViewGet(callInfo, Scalar::Int32);
+    case InlinableNative::DataViewGetUint32:
+      return inlineDataViewGet(callInfo, Scalar::Uint32);
+    case InlinableNative::DataViewGetFloat32:
+      return inlineDataViewGet(callInfo, Scalar::Float32);
+    case InlinableNative::DataViewGetFloat64:
+      return inlineDataViewGet(callInfo, Scalar::Float64);
+    case InlinableNative::DataViewGetBigInt64:
+      return inlineDataViewGet(callInfo, Scalar::BigInt64);
+    case InlinableNative::DataViewGetBigUint64:
+      return inlineDataViewGet(callInfo, Scalar::BigUint64);
+    case InlinableNative::DataViewSetInt8:
+      return inlineDataViewSet(callInfo, Scalar::Int8);
+    case InlinableNative::DataViewSetUint8:
+      return inlineDataViewSet(callInfo, Scalar::Uint8);
+    case InlinableNative::DataViewSetInt16:
+      return inlineDataViewSet(callInfo, Scalar::Int16);
+    case InlinableNative::DataViewSetUint16:
+      return inlineDataViewSet(callInfo, Scalar::Uint16);
+    case InlinableNative::DataViewSetInt32:
+      return inlineDataViewSet(callInfo, Scalar::Int32);
+    case InlinableNative::DataViewSetUint32:
+      return inlineDataViewSet(callInfo, Scalar::Uint32);
+    case InlinableNative::DataViewSetFloat32:
+      return inlineDataViewSet(callInfo, Scalar::Float32);
+    case InlinableNative::DataViewSetFloat64:
+      return inlineDataViewSet(callInfo, Scalar::Float64);
+    case InlinableNative::DataViewSetBigInt64:
+      return inlineDataViewSet(callInfo, Scalar::BigInt64);
+    case InlinableNative::DataViewSetBigUint64:
+      return inlineDataViewSet(callInfo, Scalar::BigUint64);
 
 #ifdef JS_HAS_INTL_API
     // Intl natives.
@@ -556,6 +620,10 @@ IonBuilder::InliningResult IonBuilder::inlineNativeCall(CallInfo& callInfo,
     case InlinableNative::IntrinsicTypedArrayElementShift:
       return inlineTypedArrayElementShift(callInfo);
 
+    case InlinableNative::IntrinsicIsSuspendedGenerator:
+      // Not supported in Ion.
+      return InliningStatus_NotInlined;
+
     case InlinableNative::Limit:
       break;
   }
@@ -602,6 +670,32 @@ IonBuilder::InliningResult IonBuilder::inlineNativeGetter(CallInfo& callInfo,
     }
 
     MInstruction* byteOffset = addTypedArrayByteOffset(thisArg);
+    current->push(byteOffset);
+    return InliningStatus_Inlined;
+  }
+
+  // Try to optimize DataView byteLengths.
+  if (DataViewObject::isOriginalByteLengthGetter(native)) {
+    const JSClass* clasp = thisTypes->getKnownClass(constraints());
+    if (clasp != &DataViewObject::class_) {
+      return InliningStatus_NotInlined;
+    }
+
+    auto* length = MArrayBufferViewLength::New(alloc(), thisArg);
+    current->add(length);
+    current->push(length);
+    return InliningStatus_Inlined;
+  }
+
+  // Try to optimize DataView byteOffsets.
+  if (DataViewObject::isOriginalByteOffsetGetter(native)) {
+    const JSClass* clasp = thisTypes->getKnownClass(constraints());
+    if (clasp != &DataViewObject::class_) {
+      return InliningStatus_NotInlined;
+    }
+
+    auto* byteOffset = MArrayBufferViewByteOffset::New(alloc(), thisArg);
+    current->add(byteOffset);
     current->push(byteOffset);
     return InliningStatus_Inlined;
   }
@@ -2120,11 +2214,9 @@ IonBuilder::InliningResult IonBuilder::inlineStrFromCharCode(
 
   MDefinition* codeUnit = callInfo.getArg(0);
   if (codeUnit->type() != MIRType::Int32) {
-    // MTruncateToInt32 will always bail for objects, symbols and BigInts, so
-    // don't try to inline String.fromCharCode() for these value types.
-    if (codeUnit->mightBeType(MIRType::Object) ||
-        codeUnit->mightBeType(MIRType::Symbol) ||
-        codeUnit->mightBeType(MIRType::BigInt)) {
+    // Don't try inline String.fromCharCode() for types which may lead to a
+    // bailout in MTruncateToInt32.
+    if (MTruncateToInt32::mightHaveSideEffects(codeUnit)) {
       return InliningStatus_NotInlined;
     }
 
@@ -3519,17 +3611,11 @@ IonBuilder::InliningResult IonBuilder::inlineToInteger(CallInfo& callInfo) {
 
   // Only optimize cases where |input| contains only number, null, undefined, or
   // boolean.
-  if (input->mightBeType(MIRType::Object) ||
-      input->mightBeType(MIRType::String) ||
-      input->mightBeType(MIRType::Symbol) ||
-      input->mightBeType(MIRType::BigInt) || input->mightBeMagicType()) {
+  if (!input->definitelyType({MIRType::Int32, MIRType::Double, MIRType::Float32,
+                              MIRType::Null, MIRType::Undefined,
+                              MIRType::Boolean})) {
     return InliningStatus_NotInlined;
   }
-
-  MOZ_ASSERT(input->type() == MIRType::Value ||
-             input->type() == MIRType::Null ||
-             input->type() == MIRType::Undefined ||
-             input->type() == MIRType::Boolean || IsNumberType(input->type()));
 
   // Only optimize cases where the output is int32 or double.
   MIRType returnType = getInlineReturnType();
@@ -3665,16 +3751,12 @@ IonBuilder::InliningResult IonBuilder::inlineAtomicsCompareExchange(
   // avoid bad bailouts with MTruncateToInt32, see
   // https://bugzilla.mozilla.org/show_bug.cgi?id=1141986#c20.
   MDefinition* oldval = callInfo.getArg(2);
-  if (oldval->mightBeType(MIRType::Object) ||
-      oldval->mightBeType(MIRType::Symbol) ||
-      oldval->mightBeType(MIRType::BigInt)) {
+  if (MTruncateToInt32::mightHaveSideEffects(oldval)) {
     return InliningStatus_NotInlined;
   }
 
   MDefinition* newval = callInfo.getArg(3);
-  if (newval->mightBeType(MIRType::Object) ||
-      newval->mightBeType(MIRType::Symbol) ||
-      newval->mightBeType(MIRType::BigInt)) {
+  if (MTruncateToInt32::mightHaveSideEffects(newval)) {
     return InliningStatus_NotInlined;
   }
 
@@ -3712,9 +3794,7 @@ IonBuilder::InliningResult IonBuilder::inlineAtomicsExchange(
   }
 
   MDefinition* value = callInfo.getArg(2);
-  if (value->mightBeType(MIRType::Object) ||
-      value->mightBeType(MIRType::Symbol) ||
-      value->mightBeType(MIRType::BigInt)) {
+  if (MTruncateToInt32::mightHaveSideEffects(value)) {
     return InliningStatus_NotInlined;
   }
 
@@ -3795,9 +3875,7 @@ IonBuilder::InliningResult IonBuilder::inlineAtomicsStore(CallInfo& callInfo) {
     return InliningStatus_NotInlined;
   }
 
-  if (value->mightBeType(MIRType::Object) ||
-      value->mightBeType(MIRType::Symbol) ||
-      value->mightBeType(MIRType::BigInt)) {
+  if (MTruncateToInt32::mightHaveSideEffects(value)) {
     return InliningStatus_NotInlined;
   }
 
@@ -3823,9 +3901,8 @@ IonBuilder::InliningResult IonBuilder::inlineAtomicsStore(CallInfo& callInfo) {
     toWrite = MTruncateToInt32::New(alloc(), toWrite);
     current->add(toWrite->toInstruction());
   }
-  MStoreUnboxedScalar* store = MStoreUnboxedScalar::New(
-      alloc(), elements, index, toWrite, arrayType,
-      MStoreUnboxedScalar::TruncateInput, DoesRequireMemoryBarrier);
+  auto* store = MStoreUnboxedScalar::New(alloc(), elements, index, toWrite,
+                                         arrayType, DoesRequireMemoryBarrier);
   current->add(store);
   current->push(value);  // Either Int32 or not used; in either case correct
 
@@ -3840,9 +3917,7 @@ IonBuilder::InliningResult IonBuilder::inlineAtomicsBinop(
   }
 
   MDefinition* value = callInfo.getArg(2);
-  if (value->mightBeType(MIRType::Object) ||
-      value->mightBeType(MIRType::Symbol) ||
-      value->mightBeType(MIRType::BigInt)) {
+  if (MTruncateToInt32::mightHaveSideEffects(value)) {
     return InliningStatus_NotInlined;
   }
 
@@ -3995,6 +4070,133 @@ IonBuilder::InliningResult IonBuilder::inlineIsConstructing(
   return InliningStatus_Inlined;
 }
 
+IonBuilder::InliningResult IonBuilder::inlineDataViewGet(CallInfo& callInfo,
+                                                         Scalar::Type type) {
+  if (callInfo.argc() < 1 || callInfo.constructing()) {
+    return InliningStatus_NotInlined;
+  }
+
+  MDefinition* obj = callInfo.thisArg();
+  TemporaryTypeSet* thisTypes = obj->resultTypeSet();
+  const JSClass* clasp =
+      thisTypes ? thisTypes->getKnownClass(constraints()) : nullptr;
+  if (clasp != &DataViewObject::class_) {
+    return InliningStatus_NotInlined;
+  }
+
+  MDefinition* index = callInfo.getArg(0);
+  if (!IsNumberType(index->type())) {
+    return InliningStatus_NotInlined;
+  }
+
+  MDefinition* littleEndian;
+  if (Scalar::byteSize(type) > 1) {
+    if (callInfo.argc() > 1) {
+      littleEndian = convertToBoolean(callInfo.getArg(1));
+    } else {
+      littleEndian = constant(BooleanValue(false));
+    }
+  }
+
+  callInfo.setImplicitlyUsedUnchecked();
+
+  // Calling |dataView.getUint32()| will result in a double for values that
+  // don't fit in an int32. We have to bailout if this happens and the
+  // instruction is not known to return a double.
+  bool allowDouble = getInlineReturnTypeSet()->hasType(TypeSet::DoubleType());
+  MIRType knownType = MIRTypeForArrayBufferViewRead(type, allowDouble);
+
+  MInstruction* indexInt32 = MToIntegerInt32::New(alloc(), index);
+  current->add(indexInt32);
+  index = indexInt32;
+
+  // Get bounds-check, then get elements, and add all instructions.
+  MInstruction* elements;
+  addDataViewData(obj, type, &index, &elements);
+
+  // Load the element.
+  MInstruction* load;
+  if (Scalar::byteSize(type) == 1) {
+    load = MLoadUnboxedScalar::New(alloc(), elements, index, type);
+  } else {
+    load =
+        MLoadDataViewElement::New(alloc(), elements, index, littleEndian, type);
+  }
+  current->add(load);
+  current->push(load);
+
+  // Note: we can ignore the type barrier here, we know the type must be valid
+  // and unbarriered.
+  load->setResultType(knownType);
+
+  return InliningStatus_Inlined;
+}
+
+IonBuilder::InliningResult IonBuilder::inlineDataViewSet(CallInfo& callInfo,
+                                                         Scalar::Type type) {
+  if (callInfo.argc() < 2 || callInfo.constructing()) {
+    return InliningStatus_NotInlined;
+  }
+
+  MDefinition* obj = callInfo.thisArg();
+  TemporaryTypeSet* thisTypes = obj->resultTypeSet();
+  const JSClass* clasp =
+      thisTypes ? thisTypes->getKnownClass(constraints()) : nullptr;
+  if (clasp != &DataViewObject::class_) {
+    return InliningStatus_NotInlined;
+  }
+
+  MDefinition* index = callInfo.getArg(0);
+  if (!IsNumberType(index->type())) {
+    return InliningStatus_NotInlined;
+  }
+
+  MDefinition* value = callInfo.getArg(1);
+  if (!Scalar::isBigIntType(type)) {
+    if (!IsNumberType(value->type())) {
+      return InliningStatus_NotInlined;
+    }
+  } else {
+    if (value->type() != MIRType::BigInt) {
+      return InliningStatus_NotInlined;
+    }
+  }
+
+  MDefinition* littleEndian;
+  if (Scalar::byteSize(type) > 1) {
+    if (callInfo.argc() > 2) {
+      littleEndian = convertToBoolean(callInfo.getArg(2));
+    } else {
+      littleEndian = constant(BooleanValue(false));
+    }
+  }
+
+  callInfo.setImplicitlyUsedUnchecked();
+
+  MInstruction* indexInt32 = MToIntegerInt32::New(alloc(), index);
+  current->add(indexInt32);
+  index = indexInt32;
+
+  // Get bounds-check, then get elements, and add all instructions.
+  MInstruction* elements;
+  addDataViewData(obj, type, &index, &elements);
+
+  // Store the element.
+  MInstruction* store;
+  if (Scalar::byteSize(type) == 1) {
+    store = MStoreUnboxedScalar::New(alloc(), elements, index, value, type);
+  } else {
+    store = MStoreDataViewElement::New(alloc(), elements, index, value,
+                                       littleEndian, type);
+  }
+  current->add(store);
+
+  pushConstant(UndefinedValue());
+
+  MOZ_TRY(resumeAfter(store));
+  return InliningStatus_Inlined;
+}
+
 IonBuilder::InliningResult IonBuilder::inlineWasmCall(CallInfo& callInfo,
                                                       JSFunction* target) {
   MOZ_ASSERT(target->isWasmWithJitEntry());
@@ -4103,6 +4305,8 @@ IonBuilder::InliningResult IonBuilder::inlineWasmCall(CallInfo& callInfo,
       case wasm::ValType::F64:
         conversion = MToDouble::New(alloc(), arg);
         break;
+      case wasm::ValType::V128:
+        MOZ_CRASH("impossible per above check");
       case wasm::ValType::Ref:
         switch (sig.args()[i].refTypeKind()) {
           case wasm::RefType::Any:
@@ -4146,6 +4350,10 @@ IonBuilder::InliningResult IonBuilder::inlineWasmCall(CallInfo& callInfo,
       case wasm::ValType::I64:
         // Ion expects a BigInt from I64 types.
         postConversion = MInt64ToBigInt::New(alloc(), call);
+
+        // Make non-movable so we can attach a resume point.
+        postConversion->setNotMovable();
+
         current->add(postConversion);
         break;
       default:

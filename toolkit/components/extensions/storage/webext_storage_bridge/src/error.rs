@@ -4,19 +4,26 @@
 
 use std::{error, fmt, result, str::Utf8Error, string::FromUtf16Error};
 
+use golden_gate::Error as GoldenGateError;
 use nserror::{
-    nsresult, NS_ERROR_ALREADY_INITIALIZED, NS_ERROR_FAILURE, NS_ERROR_INVALID_ARG,
-    NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NOT_INITIALIZED, NS_ERROR_UNEXPECTED,
+    nsresult, NS_ERROR_ALREADY_INITIALIZED, NS_ERROR_DOM_QUOTA_EXCEEDED_ERR, NS_ERROR_FAILURE,
+    NS_ERROR_INVALID_ARG, NS_ERROR_NOT_IMPLEMENTED, NS_ERROR_NOT_INITIALIZED, NS_ERROR_UNEXPECTED,
 };
 use serde_json::error::Error as JsonError;
 use webext_storage::error::Error as WebextStorageError;
+use webext_storage::error::ErrorKind as WebextStorageErrorKind;
 
+/// A specialized `Result` type for extension storage operations.
 pub type Result<T> = result::Result<T, Error>;
 
+/// The error type for extension storage operations. Errors can be converted
+/// into `nsresult` codes, and include more detailed messages that can be passed
+/// to callbacks.
 #[derive(Debug)]
 pub enum Error {
     Nsresult(nsresult),
     WebextStorage(WebextStorageError),
+    GoldenGate(GoldenGateError),
     MalformedString(Box<dyn error::Error + Send + Sync + 'static>),
     AlreadyConfigured,
     NotConfigured,
@@ -47,6 +54,12 @@ impl From<WebextStorageError> for Error {
     }
 }
 
+impl From<GoldenGateError> for Error {
+    fn from(error: GoldenGateError) -> Error {
+        Error::GoldenGate(error)
+    }
+}
+
 impl From<Utf8Error> for Error {
     fn from(error: Utf8Error) -> Error {
         Error::MalformedString(error.into())
@@ -69,7 +82,11 @@ impl From<Error> for nsresult {
     fn from(error: Error) -> nsresult {
         match error {
             Error::Nsresult(result) => result,
-            Error::WebextStorage(_) => NS_ERROR_FAILURE,
+            Error::WebextStorage(e) => match e.kind() {
+                WebextStorageErrorKind::QuotaError(_) => NS_ERROR_DOM_QUOTA_EXCEEDED_ERR,
+                _ => NS_ERROR_FAILURE,
+            },
+            Error::GoldenGate(error) => error.into(),
             Error::MalformedString(_) => NS_ERROR_INVALID_ARG,
             Error::AlreadyConfigured => NS_ERROR_ALREADY_INITIALIZED,
             Error::NotConfigured => NS_ERROR_NOT_INITIALIZED,
@@ -86,6 +103,7 @@ impl fmt::Display for Error {
         match self {
             Error::Nsresult(result) => write!(f, "Operation failed with {}", result),
             Error::WebextStorage(error) => error.fmt(f),
+            Error::GoldenGate(error) => error.fmt(f),
             Error::MalformedString(error) => error.fmt(f),
             Error::AlreadyConfigured => write!(f, "The storage area is already configured"),
             Error::NotConfigured => write!(

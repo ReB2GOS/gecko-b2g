@@ -143,6 +143,12 @@
 #define IS_NOT_NIGHTLY_BUILD  true
 #endif
 
+#if defined(NIGHTLY_BUILD) || defined(MOZ_DEV_EDITION)
+#define IS_NIGHTLY_OR_DEV_EDITION true
+#else
+#define IS_NIGHTLY_OR_DEV_EDITION false
+#endif
+
 #ifdef MOZILLA_OFFICIAL
 #define IS_NOT_MOZILLA_OFFICIAL false
 #else
@@ -220,6 +226,11 @@
 - name: apz.allow_zooming
   type: RelaxedAtomicBool
   value: @IS_ANDROID@
+  mirror: always
+
+- name: apz.allow_zooming_out
+  type: RelaxedAtomicBool
+  value: false
   mirror: always
 
 - name: apz.android.chrome_fling_physics.enabled
@@ -568,6 +579,11 @@
 
 - name: apz.windows.force_disable_direct_manipulation
   type: RelaxedAtomicBool
+  value: @IS_NOT_NIGHTLY_BUILD@
+  mirror: always
+
+- name: apz.windows.use_direct_manipulation
+  type: RelaxedAtomicBool
   value: false
   mirror: always
 
@@ -673,7 +689,11 @@
 
 - name: browser.cache.offline.storage.enable
   type: bool
+#ifdef EARLY_BETA_OR_EARLIER
   value: false
+#else
+  value: true
+#endif
   mirror: always
 
 - name: browser.cache.disk.enable
@@ -990,16 +1010,17 @@
   value: true
   mirror: always
 
+# If set, use DocumentChannel with parent process' sDocShell
 - name: browser.tabs.documentchannel.ppdc
   type: bool
-  value: false
+  value: true
   mirror: always
 
 # If set, use DocumentChannel to directly initiate loads from
 # parent-process BrowsingContexts
 - name: browser.tabs.documentchannel.parent-initiated
   type: bool
-  value: false 
+  value: true
   mirror: always
 
 - name: browser.tabs.remote.desktopbehavior
@@ -1402,7 +1423,7 @@
 # main thread.
 - name: dom.animations.mainthread-synchronization-with-geometric-animations
   type: bool
-  value: true
+  value: @IS_NOT_NIGHTLY_BUILD@
   mirror: always
 
 # Is support for AudioWorklet enabled?
@@ -1684,6 +1705,12 @@
   value: false
   mirror: always
 
+# Enable flashlight manager
+- name: dom.flashlight.enabled
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
 # Enable formData event
 - name: dom.formdata.event.enabled
   type: bool
@@ -1946,10 +1973,14 @@
   value: true
   mirror: always
 
-# Is support for HTMLInputElement.inputMode enabled?
+# Is support for HTMLElement.inputMode enabled?
 - name: dom.forms.inputmode
   type: bool
+#if defined(ANDROID)
+  value: true
+#else
   value: @IS_NOT_RELEASE_OR_BETA@
+#endif
   mirror: always
 
 # B2G_RIL
@@ -2143,12 +2174,6 @@
   value: true
   mirror: always
 
-# Is support for mozBrowser frames enabled?
-- name: dom.mozBrowserFramesEnabled
-  type: bool
-  value: false
-  mirror: always
-
 # B2G specific InputMethod API
 #if defined(MOZ_WIDGET_GONK)
 #define PREF_VALUE true
@@ -2332,6 +2357,13 @@
   value: false
   mirror: always
 
+# Preference that is primarily used for testing of problematic file paths.
+# It can also be used for switching between different storage directories, but
+# such feature is not officially supported.
+- name: dom.quotaManager.storageName
+  type: String
+  value: "storage"
+  mirror: never
 
 # Should we try to load origin information from the cache?
 # See bug 1563023 for more details.
@@ -2557,6 +2589,20 @@
   value: false
   mirror: always
 
+# If true and HTTPS-only mode is enabled, requests
+# to local IP addresses are also upgraded
+- name: dom.security.https_only_mode.upgrade_local
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
+# If true and HTTPS-only mode is enabled, requests
+# to .onion hosts are also upgraded
+- name: dom.security.https_only_mode.upgrade_onion
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
 # WARNING: Don't ever update that pref manually! It is only used
 # for telemetry purposes and allows to reason about retention of
 # the pref dom.security.https_only_mode from above.
@@ -2584,7 +2630,7 @@
 
 - name: dom.arena_allocator.enabled
   type: bool
-  value: true
+  value: @IS_EARLY_BETA_OR_EARLIER@
   mirror: once
 
 - name: dom.serviceWorkers.enabled
@@ -4315,7 +4361,7 @@
 
 - name: gfx.webrender.enable-item-cache
   type: bool
-  value: @IS_NIGHTLY_BUILD@
+  value: true
   mirror: once
 
 - name: gfx.webrender.use-optimized-shaders
@@ -4384,9 +4430,8 @@
 #endif
   mirror: always
 
-  # Force disables allowing sacrificing subpixel anti-aliasing for less
-  # powerful configurations.
-- name: gfx.webrender.quality.force-disable-sacrificing-subpixel-aa
+  # Force subpixel anti-aliasing as much as possible, despite performance cost.
+- name: gfx.webrender.quality.force-subpixel-aa-where-possible
   type: bool
   value: false
   mirror: always
@@ -4677,6 +4722,12 @@
   value: true
   mirror: always
 
+# Whether we attempt to decode AVIF images or not.
+- name: image.avif.enabled
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
 #---------------------------------------------------------------------------
 # Prefs starting with "intl."
 #---------------------------------------------------------------------------
@@ -4760,7 +4811,7 @@
 # Use better error message when accessing property of null or undefined.
 - name: javascript.options.property_error_message_fix
   type: RelaxedAtomicBool
-  value: @IS_NOT_RELEASE_OR_BETA@
+  value: @IS_NIGHTLY_OR_DEV_EDITION@
   mirror: always
 
 #ifdef NIGHTLY_BUILD
@@ -5482,14 +5533,10 @@
 
 # One of several prefs affecting the maximum area to pre-render when animating
 # a large element on the compositor.
-- name: layout.animation.prerender.viewport-ratio-limit-x
-  type: AtomicFloat
-  value: 1.125f
-  mirror: always
-
-# One of several prefs affecting the maximum area to pre-render when animating
-# a large element on the compositor.
-- name: layout.animation.prerender.viewport-ratio-limit-y
+# This value is applied to both x and y axes and a perfect square contructed
+# by the greater axis value which will be capped by the absolute limits is used
+# for the partial pre-render area.
+- name: layout.animation.prerender.viewport-ratio-limit
   type: AtomicFloat
   value: 1.125f
   mirror: always
@@ -5679,6 +5726,15 @@
   value: true
   mirror: always
   rust: true
+
+# Visibility level of font families available to CSS font-matching:
+#   1 - only base system fonts
+#   2 - also fonts from optional language packs
+#   3 - also user-installed fonts
+- name: layout.css.font-visibility.level
+  type: RelaxedAtomicInt32
+  value: 3
+  mirror: always
 
 # Is support for GeometryUtils.getBoxQuads enabled?
 - name: layout.css.getBoxQuads.enabled
@@ -6113,9 +6169,12 @@
   value: true
   mirror: once
 
+# On Android, don't synth mouse move events after scrolling, as they cause
+# unexpected user-visible behaviour. Can remove this after bug 1633450 is
+# satisfactorily resolved.
 - name: layout.reflow.synthMouseMove
   type: bool
-  value: true
+  value: @IS_NOT_ANDROID@
   mirror: always
 
 # This pref is to be set by test code only.
@@ -6395,13 +6454,17 @@
 #---------------------------------------------------------------------------
 
 
-# If "media.autoplay.default" is not ALLOWED, and this pref is true,
-# then audible media would only be allowed to autoplay after website has
-# been activated by specific user gestures, but non-audible
-# media won't be restricted.
-- name: media.autoplay.enabled.user-gestures-needed
-  type: bool
-  value: false
+# This pref defines what the blocking policy would be used in blocking autoplay.
+# 0 : use sticky activation (default)
+# https://html.spec.whatwg.org/multipage/interaction.html#sticky-activation
+# 1 : use transient activation (the transient activation duration can be
+#     adjusted by the pref `dom.user_activation.transient.timeout`)
+# https://html.spec.whatwg.org/multipage/interaction.html#transient-activation
+# 2 : user input depth (allow autoplay when the play is trigged by user input
+#     which is determined by the user input depth)
+- name: media.autoplay.blocking_policy
+  type: uint32_t
+  value: 0
   mirror: always
 
 # File-backed MediaCache size.
@@ -6423,6 +6486,8 @@
   mirror: always
 #if defined(XP_LINUX) && !defined(MOZ_WIDGET_ANDROID)
   value: true
+#elif defined(XP_WIN) && defined(_X86_)
+  value: @IS_NIGHTLY_BUILD@
 #elif defined(XP_WIN) && !defined(_ARM64_)
   value: true
 #else
@@ -7527,6 +7592,11 @@
   value: false
   mirror: always
 
+- name: network.data.max-uri-length-mobile
+  type: RelaxedAtomicUint32
+  value: 2 * 1024 * 1024
+  mirror: always
+
 # false=real referer, true=spoof referer (use target URI as referer).
 - name: network.http.referer.spoofSource
   type: bool
@@ -7722,9 +7792,8 @@
   value: false
   mirror: always
 
-# Whether to use the new experimental preload code based on the speculative loader
-# inside the html5 parser.
-- name: network.preload-experimental
+# Enables <link rel="preload"> tag and `Link:` respose header handling.
+- name: network.preload
   type: RelaxedAtomicBool
   value: false
   mirror: always
@@ -7747,10 +7816,22 @@
 #endif
 #endif
 
+# Whether we can send OnDataAvailable to content process directly.
+- name: network.send_ODA_to_content_directly
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
 # Telemetry of traffic categories. Whether or not to enable HttpTrafficAnalyzer.
 - name: network.traffic_analyzer.enabled
   type: RelaxedAtomicBool
   value: true
+  mirror: always
+
+# Whether DNS resolution is limited to literals and cached entries.
+- name: network.dns.disabled
+  type: RelaxedAtomicBool
+  value: false
   mirror: always
 
 - name: network.dns.disablePrefetchFromHTTPS
@@ -8208,6 +8289,13 @@
   value: true
   mirror: always
 
+# Whether canvas extraction should result in random data. If false, canvas
+# extraction results in all-white, opaque pixel data.
+- name: privacy.resistFingerprinting.randomDataOnCanvasExtract
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
 # The log level for browser console messages logged in RFPHelper.jsm. Change to
 # 'All' and restart to see the messages.
 - name: privacy.resistFingerprinting.jsmloglevel
@@ -8645,11 +8733,11 @@
 #ifdef MOZ_CODE_COVERAGE
   value: 0
 #else
-#  ifdef NIGHTLY_BUILD
+  #ifdef NIGHTLY_BUILD
   value: 3
-#  else
+  #else
   value: 1
-#  endif
+  #endif
 #endif
   mirror: always
 
@@ -8658,7 +8746,7 @@
 - name: toolkit.shutdown.fastShutdownStage
   type: int32_t
 #if defined(NIGHTLY_BUILD) && !defined(DEBUG) && !defined(MOZ_CODE_COVERAGE) && !defined(MOZ_VALGRIND) && !defined(MOZ_PROFILE_GENERATE)
-  value: 2
+  value: 1
 #else
   value: 0
 #endif
@@ -9034,6 +9122,12 @@
 - name: webgl.perf.spew-frame-allocs
   type: RelaxedAtomicBool
   value: true
+  mirror: always
+
+# value is 0 for PCQ, 1 for Ipdl
+- name: webgl.prototype.ipc-pcq
+  type: uint32_t
+  value: 0
   mirror: always
 
 #---------------------------------------------------------------------------

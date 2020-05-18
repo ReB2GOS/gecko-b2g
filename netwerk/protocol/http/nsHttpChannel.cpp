@@ -15,6 +15,7 @@
 #include "mozilla/Sprintf.h"
 #include "mozilla/dom/nsCSPContext.h"
 #include "mozilla/dom/nsCSPService.h"
+#include "mozilla/StoragePrincipalHelper.h"
 
 #include "nsHttp.h"
 #include "nsHttpChannel.h"
@@ -395,6 +396,7 @@ nsHttpChannel::nsHttpChannel()
       mIsIsolated(0),
       mTopWindowOriginComputed(0),
       mHasCrossOriginOpenerPolicyMismatch(0),
+      mDataAlreadySent(0),
       mPushedStreamId(0),
       mLocalBlocklist(false),
       mOnTailUnblock(nullptr),
@@ -594,7 +596,8 @@ nsresult nsHttpChannel::OnBeforeConnect() {
         this, getter_AddRefs(resultPrincipal));
   }
   OriginAttributes originAttributes;
-  if (!NS_GetOriginAttributes(this, originAttributes)) {
+  if (!StoragePrincipalHelper::GetOriginAttributes(
+          this, originAttributes, StoragePrincipalHelper::eRegularPrincipal)) {
     return NS_ERROR_FAILURE;
   }
 
@@ -1347,7 +1350,16 @@ nsresult nsHttpChannel::SetupTransaction() {
     MOZ_ASSERT(gIOService->SocketProcessReady(),
                "Socket process should be ready.");
 
-    RefPtr<HttpTransactionParent> transParent = new HttpTransactionParent();
+    nsCOMPtr<nsIParentChannel> parentChannel;
+    NS_QueryNotificationCallbacks(this, parentChannel);
+    RefPtr<DocumentLoadListener> documentChannelParent =
+        do_QueryObject(parentChannel);
+    // See HttpTransactionChild::CanSendODAToContentProcessDirectly() and
+    // nsHttpChannel::CallOnStartRequest() for the reason why we need to know if
+    // this is a document load. We only send ODA directly to child process for
+    // non document loads.
+    RefPtr<HttpTransactionParent> transParent =
+        new HttpTransactionParent(!!documentChannelParent);
     LOG1(("nsHttpChannel %p created HttpTransactionParent %p\n", this,
           transParent.get()));
 
@@ -1921,6 +1933,10 @@ nsresult nsHttpChannel::CallOnStartRequest() {
     }
   }
 
+  // Note that the code below should be synced with the code in
+  // HttpTransactionChild::CanSendODAToContentProcessDirectly(). We MUST make
+  // sure HttpTransactionChild::CanSendODAToContentProcessDirectly() returns
+  // false when a stream converter is applied.
   bool unknownDecoderStarted = false;
   if (mResponseHead && !mResponseHead->HasContentType()) {
     MOZ_ASSERT(mConnectionInfo, "Should have connection info here");
@@ -2134,57 +2150,8 @@ static void GetSTSConsoleErrorTag(uint32_t failureResult,
   }
 }
 
-static void GetPKPConsoleErrorTag(uint32_t failureResult,
-                                  nsAString& consoleErrorTag) {
-  switch (failureResult) {
-    case nsISiteSecurityService::ERROR_UNTRUSTWORTHY_CONNECTION:
-      consoleErrorTag = NS_LITERAL_STRING("PKPUntrustworthyConnection");
-      break;
-    case nsISiteSecurityService::ERROR_COULD_NOT_PARSE_HEADER:
-      consoleErrorTag = NS_LITERAL_STRING("PKPCouldNotParseHeader");
-      break;
-    case nsISiteSecurityService::ERROR_NO_MAX_AGE:
-      consoleErrorTag = NS_LITERAL_STRING("PKPNoMaxAge");
-      break;
-    case nsISiteSecurityService::ERROR_MULTIPLE_MAX_AGES:
-      consoleErrorTag = NS_LITERAL_STRING("PKPMultipleMaxAges");
-      break;
-    case nsISiteSecurityService::ERROR_INVALID_MAX_AGE:
-      consoleErrorTag = NS_LITERAL_STRING("PKPInvalidMaxAge");
-      break;
-    case nsISiteSecurityService::ERROR_MULTIPLE_INCLUDE_SUBDOMAINS:
-      consoleErrorTag = NS_LITERAL_STRING("PKPMultipleIncludeSubdomains");
-      break;
-    case nsISiteSecurityService::ERROR_INVALID_INCLUDE_SUBDOMAINS:
-      consoleErrorTag = NS_LITERAL_STRING("PKPInvalidIncludeSubdomains");
-      break;
-    case nsISiteSecurityService::ERROR_INVALID_PIN:
-      consoleErrorTag = NS_LITERAL_STRING("PKPInvalidPin");
-      break;
-    case nsISiteSecurityService::ERROR_MULTIPLE_REPORT_URIS:
-      consoleErrorTag = NS_LITERAL_STRING("PKPMultipleReportURIs");
-      break;
-    case nsISiteSecurityService::ERROR_PINSET_DOES_NOT_MATCH_CHAIN:
-      consoleErrorTag = NS_LITERAL_STRING("PKPPinsetDoesNotMatch");
-      break;
-    case nsISiteSecurityService::ERROR_NO_BACKUP_PIN:
-      consoleErrorTag = NS_LITERAL_STRING("PKPNoBackupPin");
-      break;
-    case nsISiteSecurityService::ERROR_COULD_NOT_SAVE_STATE:
-      consoleErrorTag = NS_LITERAL_STRING("PKPCouldNotSaveState");
-      break;
-    case nsISiteSecurityService::ERROR_ROOT_NOT_BUILT_IN:
-      consoleErrorTag = NS_LITERAL_STRING("PKPRootNotBuiltIn");
-      break;
-    default:
-      consoleErrorTag = NS_LITERAL_STRING("PKPUnknownError");
-      break;
-  }
-}
-
 /**
- * Process a single security header. Only two types are supported: HSTS and
- * HPKP.
+ * Process a single security header. Only one type is supported: HSTS
  */
 nsresult nsHttpChannel::ProcessSingleSecurityHeader(
     uint32_t aType, nsITransportSecurityInfo* aSecInfo, uint32_t aFlags) {
@@ -2192,9 +2159,6 @@ nsresult nsHttpChannel::ProcessSingleSecurityHeader(
   switch (aType) {
     case nsISiteSecurityService::HEADER_HSTS:
       atom = nsHttp::ResolveAtom("Strict-Transport-Security");
-      break;
-    case nsISiteSecurityService::HEADER_HPKP:
-      atom = nsHttp::ResolveAtom("Public-Key-Pins");
       break;
     default:
       MOZ_ASSERT_UNREACHABLE("Invalid security header type");
@@ -2209,7 +2173,8 @@ nsresult nsHttpChannel::ProcessSingleSecurityHeader(
     // Process header will now discard the headers itself if the channel
     // wasn't secure (whereas before it had to be checked manually)
     OriginAttributes originAttributes;
-    NS_GetOriginAttributes(this, originAttributes);
+    StoragePrincipalHelper::GetOriginAttributes(
+        this, originAttributes, StoragePrincipalHelper::eRegularPrincipal);
     uint32_t failureResult;
     uint32_t headerSource = nsISiteSecurityService::SOURCE_ORGANIC_REQUEST;
     rv = sss->ProcessHeader(aType, mURI, securityHeader, aSecInfo, aFlags,
@@ -2222,10 +2187,6 @@ nsresult nsHttpChannel::ProcessSingleSecurityHeader(
         case nsISiteSecurityService::HEADER_HSTS:
           GetSTSConsoleErrorTag(failureResult, consoleErrorTag);
           consoleErrorCategory = NS_LITERAL_STRING("Invalid HSTS Headers");
-          break;
-        case nsISiteSecurityService::HEADER_HPKP:
-          GetPKPConsoleErrorTag(failureResult, consoleErrorTag);
-          consoleErrorCategory = NS_LITERAL_STRING("Invalid HPKP Headers");
           break;
         default:
           return NS_ERROR_FAILURE;
@@ -2287,10 +2248,6 @@ nsresult nsHttpChannel::ProcessSecurityHeaders() {
   NS_ENSURE_TRUE(transSecInfo, NS_ERROR_FAILURE);
 
   rv = ProcessSingleSecurityHeader(nsISiteSecurityService::HEADER_HSTS,
-                                   transSecInfo, flags);
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  rv = ProcessSingleSecurityHeader(nsISiteSecurityService::HEADER_HPKP,
                                    transSecInfo, flags);
   NS_ENSURE_SUCCESS(rv, rv);
 
@@ -2459,7 +2416,8 @@ void nsHttpChannel::ProcessAltService() {
   }
 
   OriginAttributes originAttributes;
-  NS_GetOriginAttributes(this, originAttributes);
+  StoragePrincipalHelper::GetOriginAttributes(
+      this, originAttributes, StoragePrincipalHelper::eRegularPrincipal);
 
   AltSvcMapping::ProcessHeader(
       altSvc, scheme, originHost, originPort, mUsername, GetTopWindowOrigin(),
@@ -3008,6 +2966,8 @@ nsresult nsHttpChannel::ContinueProcessResponse4(nsresult rv) {
   if (NS_SUCCEEDED(rv)) {
     UpdateInhibitPersistentCachingFlag();
 
+    MaybeCreateCacheEntryWhenRCWN();
+
     rv = InitCacheEntry();
     if (NS_FAILED(rv)) {
       LOG(
@@ -3079,6 +3039,8 @@ nsresult nsHttpChannel::ContinueProcessNormal(nsresult rv) {
   ClearBogusContentEncodingIfNeeded();
 
   UpdateInhibitPersistentCachingFlag();
+
+  MaybeCreateCacheEntryWhenRCWN();
 
   // this must be called before firing OnStartRequest, since http clients,
   // such as imagelib, expect our cache entry to already have the correct
@@ -4056,7 +4018,6 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(
   AutoCacheWaitFlags waitFlags(this);
 
   nsAutoCString cacheKey;
-  nsAutoCString extension;
 
   nsCOMPtr<nsICacheStorageService> cacheStorageService(
       services::GetCacheStorageService());
@@ -4065,13 +4026,12 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(
   }
 
   nsCOMPtr<nsICacheStorage> cacheStorage;
-  nsCOMPtr<nsIURI> openURI;
   if (!mFallbackKey.IsEmpty() && mFallbackChannel) {
     // This is a fallback channel, open fallback URI instead
-    rv = NS_NewURI(getter_AddRefs(openURI), mFallbackKey);
+    rv = NS_NewURI(getter_AddRefs(mCacheEntryURI), mFallbackKey);
     NS_ENSURE_SUCCESS(rv, rv);
   } else {
-    openURI = mURI;
+    mCacheEntryURI = mURI;
   }
 
   RefPtr<LoadContextInfo> info = GetLoadContextInfo(this);
@@ -4148,13 +4108,13 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(
     cacheEntryOpenFlags |= nsICacheStorage::OPEN_BYPASS_IF_BUSY;
 
   if (mPostID) {
-    extension.Append(nsPrintfCString("%d", mPostID));
+    mCacheIdExtension.Append(nsPrintfCString("%d", mPostID));
   }
   if (mIsTRRServiceChannel) {
-    extension.Append("TRR");
+    mCacheIdExtension.Append("TRR");
   }
   if (mRequestHead.IsHead()) {
-    extension.Append("HEAD");
+    mCacheIdExtension.Append("HEAD");
   }
 
   if (IsIsolated()) {
@@ -4163,8 +4123,8 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(
       return NS_ERROR_FAILURE;
     }
 
-    extension.Append("-unique:");
-    extension.Append(topWindowOrigin);
+    mCacheIdExtension.Append("-unique:");
+    mCacheIdExtension.Append(topWindowOrigin);
   }
 
   mCacheOpenWithPriority = cacheEntryOpenFlags & nsICacheStorage::OPEN_PRIORITY;
@@ -4174,8 +4134,8 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(
   if (sRCWNEnabled && maybeRCWN && !mApplicationCacheForWrite) {
     bool hasAltData = false;
     uint32_t sizeInKb = 0;
-    rv = cacheStorage->GetCacheIndexEntryAttrs(openURI, extension, &hasAltData,
-                                               &sizeInKb);
+    rv = cacheStorage->GetCacheIndexEntryAttrs(
+        mCacheEntryURI, mCacheIdExtension, &hasAltData, &sizeInKb);
 
     // We will attempt to race the network vs the cache if we've found
     // this entry in the cache index, and it has appropriate attributes
@@ -4191,15 +4151,16 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(
     if (mNetworkTriggered) {
       mRaceCacheWithNetwork = sRCWNEnabled;
     }
-    rv = cacheStorage->AsyncOpenURI(openURI, extension, cacheEntryOpenFlags,
-                                    this);
+    rv = cacheStorage->AsyncOpenURI(mCacheEntryURI, mCacheIdExtension,
+                                    cacheEntryOpenFlags, this);
   } else {
     // We pass `this` explicitly as a parameter due to the raw pointer
     // to refcounted object in lambda analysis.
-    mCacheOpenFunc = [openURI, extension, cacheEntryOpenFlags,
+    mCacheOpenFunc = [cacheEntryOpenFlags,
                       cacheStorage](nsHttpChannel* self) -> void {
       MOZ_ASSERT(NS_IsMainThread(), "Should be called on the main thread");
-      cacheStorage->AsyncOpenURI(openURI, extension, cacheEntryOpenFlags, self);
+      cacheStorage->AsyncOpenURI(self->mCacheEntryURI, self->mCacheIdExtension,
+                                 cacheEntryOpenFlags, self);
     };
 
     // calls nsHttpChannel::Notify after `mCacheOpenDelay` milliseconds
@@ -5467,6 +5428,51 @@ void nsHttpChannel::CloseOfflineCacheEntry() {
   mOfflineCacheEntry = nullptr;
 }
 
+void nsHttpChannel::MaybeCreateCacheEntryWhenRCWN() {
+  mozilla::MutexAutoLock lock(mRCWNLock);
+
+  // Create cache entry for writing only when we're racing cache with network
+  // and we don't have the entry because network won.
+  if (mCacheEntry || !mRaceCacheWithNetwork ||
+      mFirstResponseSource != RESPONSE_FROM_NETWORK || mCacheEntryIsReadOnly) {
+    return;
+  }
+
+  LOG(("nsHttpChannel::MaybeCreateCacheEntryWhenRCWN [this=%p]", this));
+
+  nsCOMPtr<nsICacheStorageService> cacheStorageService(
+      services::GetCacheStorageService());
+  if (!cacheStorageService) {
+    return;
+  }
+
+  nsCOMPtr<nsICacheStorage> cacheStorage;
+  RefPtr<LoadContextInfo> info = GetLoadContextInfo(this);
+  Unused << cacheStorageService->DiskCacheStorage(info, false,
+                                                  getter_AddRefs(cacheStorage));
+  if (!cacheStorage) {
+    return;
+  }
+
+  Unused << cacheStorage->OpenTruncate(mCacheEntryURI, mCacheIdExtension,
+                                       getter_AddRefs(mCacheEntry));
+
+  LOG(("  created entry %p", mCacheEntry.get()));
+
+  if (AwaitingCacheCallbacks()) {
+    // Setting mIgnoreCacheEntry to true ensures that we won't close this
+    // write-only entry in OnCacheEntryAvailable() if this method was called
+    // after OnCacheEntryCheck().
+    mIgnoreCacheEntry = true;
+  }
+
+  mAvailableCachedAltDataType.Truncate();
+  mDeliveringAltData = false;
+  mAltDataLength = -1;
+  mCacheInputStream.CloseAndRelease();
+  mCachedContentIsValid = false;
+}
+
 // Initialize the cache entry for writing.
 //  - finalize storage policy
 //  - store security info
@@ -6021,11 +6027,17 @@ nsresult nsHttpChannel::ContinueProcessRedirectionAfterFallback(nsresult rv) {
       timings = mTransaction->Timings();
     }
 
+    nsAutoCString contentType;
+    if (mResponseHead) {
+      mResponseHead->ContentType(contentType);
+    }
+
     profiler_add_network_marker(
         mURI, priority, mChannelId, NetworkLoadType::LOAD_REDIRECT,
         mLastStatusReported, TimeStamp::Now(), mLogicalOffset,
         mCacheDisposition, mLoadInfo->GetInnerWindowID(), &timings,
-        mRedirectURI, std::move(mSource));
+        mRedirectURI, std::move(mSource),
+        Some(nsDependentCString(contentType.get())));
   }
 #endif
 
@@ -6497,6 +6509,8 @@ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
   Unused << mLoadInfo->SetHasStoragePermission(
       AntiTrackingUtils::HasStoragePermissionInParent(this));
 
+  AntiTrackingUtils::ComputeIsThirdPartyToTopWindow(this);
+
   static bool sRCWNInited = false;
   if (!sRCWNInited) {
     sRCWNInited = true;
@@ -6746,7 +6760,8 @@ nsresult nsHttpChannel::BeginConnect() {
   SetDoNotTrack();
 
   OriginAttributes originAttributes;
-  NS_GetOriginAttributes(this, originAttributes);
+  StoragePrincipalHelper::GetOriginAttributes(
+      this, originAttributes, StoragePrincipalHelper::eRegularPrincipal);
 
   RefPtr<nsHttpConnectionInfo> connInfo = new nsHttpConnectionInfo(
       host, port, EmptyCString(), mUsername, GetTopWindowOrigin(), proxyInfo,
@@ -6959,7 +6974,8 @@ nsresult nsHttpChannel::MaybeStartDNSPrefetch() {
 
   if (dnsStrategy & DNS_PREFETCH_ORIGIN) {
     OriginAttributes originAttributes;
-    NS_GetOriginAttributes(this, originAttributes);
+    StoragePrincipalHelper::GetOriginAttributes(
+        this, originAttributes, StoragePrincipalHelper::eRegularPrincipal);
 
     mDNSPrefetch = new nsDNSPrefetch(
         mURI, originAttributes, nsIRequest::GetTRRMode(), this, mTimingEnabled);
@@ -7565,15 +7581,6 @@ nsresult nsHttpChannel::ProcessCrossOriginEmbedderPolicyHeader() {
     return NS_OK;
   }
 
-  RefPtr<mozilla::dom::BrowsingContext> ctx;
-  mLoadInfo->GetBrowsingContext(getter_AddRefs(ctx));
-
-  if (!ctx) {
-    return NS_OK;
-  }
-
-  nsILoadInfo::CrossOriginEmbedderPolicy documentPolicy =
-      ctx->GetEmbedderPolicy();
   nsILoadInfo::CrossOriginEmbedderPolicy resultPolicy =
       nsILoadInfo::EMBEDDER_POLICY_NULL;
   rv = GetResponseEmbedderPolicy(&resultPolicy);
@@ -7582,23 +7589,14 @@ nsresult nsHttpChannel::ProcessCrossOriginEmbedderPolicyHeader() {
   }
 
   // https://mikewest.github.io/corpp/#abstract-opdef-process-navigation-response
-  if (mLoadInfo->GetExternalContentPolicyType() ==
+  RefPtr<WindowContext> ctx =
+      WindowContext::GetById(mLoadInfo->GetInnerWindowID());
+  if (ctx &&
+      mLoadInfo->GetExternalContentPolicyType() ==
           nsIContentPolicy::TYPE_SUBDOCUMENT &&
-      documentPolicy != nsILoadInfo::EMBEDDER_POLICY_NULL &&
+      ctx->GetEmbedderPolicy() != nsILoadInfo::EMBEDDER_POLICY_NULL &&
       resultPolicy != nsILoadInfo::EMBEDDER_POLICY_REQUIRE_CORP) {
     return NS_ERROR_BLOCKED_BY_POLICY;
-  }
-
-  // XXX Bug 1572513 - we should have set the embedder policy during
-  // initializing docment object.
-  RefPtr<mozilla::dom::BrowsingContext> frameCtx = ctx;
-  if (mLoadInfo->GetExternalContentPolicyType() ==
-      nsIContentPolicy::TYPE_SUBDOCUMENT) {
-    mLoadInfo->GetFrameBrowsingContext(getter_AddRefs(frameCtx));
-  }
-
-  if (frameCtx && !frameCtx->IsDiscarded()) {
-    frameCtx->SetEmbedderPolicy(resultPolicy);
   }
 
   return NS_OK;
@@ -7634,8 +7632,8 @@ nsresult nsHttpChannel::ProcessCrossOriginResourcePolicyHeader() {
   // 3.2.1.6 If policy is null, and embedder policy is "require-corp", set
   // policy to "same-origin".
   if (StaticPrefs::browser_tabs_remote_useCrossOriginEmbedderPolicy()) {
-    RefPtr<mozilla::dom::BrowsingContext> ctx;
-    mLoadInfo->GetBrowsingContext(getter_AddRefs(ctx));
+    RefPtr<WindowContext> ctx =
+        WindowContext::GetById(mLoadInfo->GetInnerWindowID());
 
     // Note that we treat invalid value as "cross-origin", which spec
     // indicates. We might want to make that stricter.
@@ -8337,11 +8335,17 @@ nsresult nsHttpChannel::ContinueOnStopRequest(nsresult aStatus, bool aIsFromNet,
     GetURI(getter_AddRefs(uri));
     int32_t priority = PRIORITY_NORMAL;
     GetPriority(&priority);
+
+    nsAutoCString contentType;
+    if (mResponseHead) {
+      mResponseHead->ContentType(contentType);
+    }
     profiler_add_network_marker(
         uri, priority, mChannelId, NetworkLoadType::LOAD_STOP,
         mLastStatusReported, TimeStamp::Now(), mLogicalOffset,
         mCacheDisposition, mLoadInfo->GetInnerWindowID(), &mTransactionTimings,
-        nullptr, std::move(mSource));
+        nullptr, std::move(mSource),
+        Some(nsDependentCString(contentType.get())));
   }
 #endif
 
@@ -8508,6 +8512,10 @@ nsHttpChannel::OnDataAvailable(nsIRequest* request, nsIInputStream* input,
       seekable = nullptr;
     }
 
+    mDataAlreadySent = false;
+    if (mTransaction) {
+      mDataAlreadySent = mTransaction->DataAlreadySent();
+    }
     nsresult rv =
         mListener->OnDataAvailable(this, input, mLogicalOffset, count);
     if (NS_SUCCEEDED(rv)) {
@@ -9797,8 +9805,8 @@ void nsHttpChannel::SetOriginHeader() {
   }
 
   nsCOMPtr<nsIURI> referrer;
-  mLoadInfo->TriggeringPrincipal()->GetURI(getter_AddRefs(referrer));
-
+  auto* basePrin = BasePrincipal::Cast(mLoadInfo->TriggeringPrincipal());
+  basePrin->GetURI(getter_AddRefs(referrer));
   if (!referrer || !dom::ReferrerInfo::IsReferrerSchemeAllowed(referrer)) {
     return;
   }

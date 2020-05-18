@@ -238,9 +238,13 @@ class FuncExport {
   }
 
   bool canHaveJitEntry() const {
-    return !funcType_.temporarilyUnsupportedReftypeForEntry() &&
-           !funcType_.temporarilyUnsupportedResultCountForJitEntry() &&
-           JitOptions.enableWasmJitEntry;
+    return
+#ifdef ENABLE_WASM_SIMD
+        !funcType_.hasV128ArgOrRet() &&
+#endif
+        !funcType_.temporarilyUnsupportedReftypeForEntry() &&
+        !funcType_.temporarilyUnsupportedResultCountForJitEntry() &&
+        JitOptions.enableWasmJitEntry;
   }
 
   bool clone(const FuncExport& src) {
@@ -322,13 +326,19 @@ struct MetadataCacheablePod {
   Maybe<uint32_t> startFuncIndex;
   Maybe<uint32_t> nameCustomSectionIndex;
   bool filenameIsURL;
+  bool bigIntEnabled;
+  bool v128Enabled;
+  bool omitsBoundsChecks;
 
   explicit MetadataCacheablePod(ModuleKind kind)
       : kind(kind),
         memoryUsage(MemoryUsage::None),
         minMemoryLength(0),
         globalDataLength(0),
-        filenameIsURL(false) {}
+        filenameIsURL(false),
+        bigIntEnabled(false),
+        v128Enabled(false),
+        omitsBoundsChecks(false) {}
 };
 
 typedef uint8_t ModuleHash[8];
@@ -341,7 +351,6 @@ struct Metadata : public ShareableBase<Metadata>, public MetadataCacheablePod {
   TableDescVector tables;
   CacheableChars filename;
   CacheableChars sourceMapURL;
-  bool omitsBoundsChecks;
 
   // namePayload points at the name section's CustomSection::payload so that
   // the Names (which are use payload-relative offsets) can be used
@@ -355,9 +364,6 @@ struct Metadata : public ShareableBase<Metadata>, public MetadataCacheablePod {
   FuncArgTypesVector debugFuncArgTypes;
   FuncReturnTypesVector debugFuncReturnTypes;
   ModuleHash debugHash;
-
-  // Feature flag that gets copied from ModuleEnvironment for BigInt support.
-  bool bigIntEnabled;
 
   explicit Metadata(ModuleKind kind = ModuleKind::Wasm)
       : MetadataCacheablePod(kind), debugEnabled(false), debugHash() {}

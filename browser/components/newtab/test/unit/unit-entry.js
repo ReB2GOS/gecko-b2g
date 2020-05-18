@@ -1,9 +1,4 @@
-import {
-  EventEmitter,
-  FakePerformance,
-  FakePrefs,
-  GlobalOverrider,
-} from "test/unit/utils";
+import { EventEmitter, FakePrefs, GlobalOverrider } from "test/unit/utils";
 import Adapter from "enzyme-adapter-react-16";
 import { chaiAssertions } from "test/schemas/pings";
 import chaiJsonSchema from "chai-json-schema";
@@ -50,6 +45,10 @@ const RemoteSettings = name => ({
 RemoteSettings.pollChanges = () => {};
 
 const TEST_GLOBAL = {
+  AboutReaderParent: {
+    addMessageListener: (messageName, listener) => {},
+    removeMessageListener: (messageName, listener) => {},
+  },
   AddonManager: {
     getActiveAddons() {
       return Promise.resolve({ addons: [], fullData: false });
@@ -247,7 +246,6 @@ const TEST_GLOBAL = {
       addMessageListener: (msg, cb) => this.receiveMessage(),
       removeMessageListener() {},
     },
-    appShell: { hiddenDOMWindow: { performance: new FakePerformance() } },
     obs: {
       addObserver() {},
       removeObserver() {},
@@ -346,6 +344,17 @@ const TEST_GLOBAL = {
     ww: { registerNotification() {}, unregisterNotification() {} },
     appinfo: { appBuildID: "20180710100040", version: "69.0a1" },
     scriptloader: { loadSubScript: () => {} },
+    startup: {
+      getStartupInfo() {
+        return {
+          process: {
+            getTime() {
+              return 1588010448000;
+            },
+          },
+        };
+      },
+    },
   },
   XPCOMUtils: {
     defineLazyGetter(object, name, f) {

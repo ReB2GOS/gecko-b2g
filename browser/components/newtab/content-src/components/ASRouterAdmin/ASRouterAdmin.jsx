@@ -791,9 +791,8 @@ export class ASRouterAdminInner extends React.PureComponent {
     const isBlockedByGroup = this.state.groups
       .filter(group => msg.groups.includes(group.id))
       .some(group => !group.enabled);
-    const msgProvider = this.state.providers.find(
-      provider => provider.id === msg.provider
-    );
+    const msgProvider =
+      this.state.providers.find(provider => provider.id === msg.provider) || {};
     const isProviderExcluded =
       msgProvider.exclude && msgProvider.exclude.includes(msg.id);
     const isMessageBlocked =
@@ -1089,6 +1088,21 @@ export class ASRouterAdminInner extends React.PureComponent {
               );
             } else if (provider.type === "remote-settings") {
               label = `remote settings (${provider.bucket})`;
+            } else if (provider.type === "remote-experiments") {
+              label = (
+                <span>
+                  remote settings (
+                  <a
+                    className="providerUrl"
+                    target="_blank"
+                    href="https://firefox.settings.services.mozilla.com/v1/buckets/main/collections/messaging-experiments/records"
+                    rel="noopener noreferrer"
+                  >
+                    messaging-experiments
+                  </a>
+                  )
+                </span>
+              );
             }
 
             let reasonsDisabled = [];

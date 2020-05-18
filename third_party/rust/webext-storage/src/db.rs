@@ -7,20 +7,24 @@ use crate::schema;
 use rusqlite::types::{FromSql, ToSql};
 use rusqlite::Connection;
 use rusqlite::OpenFlags;
-use sql_support::ConnExt;
+use sql_support::{ConnExt, SqlInterruptHandle, SqlInterruptScope};
 use std::fs;
+use std::ops::{Deref, DerefMut};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::result;
+use std::sync::{atomic::AtomicUsize, Arc};
 use url::Url;
 
-/// The entry-point to getting a database connection. No enforcement of this
-/// as a singleton is made - that's up to the caller. If you make multiple
-/// StorageDbs pointing at the same physical database, you are going to have a
-/// bad time. We only support a single writer connection - so that's the only
-/// thing we store. It's still a bit overkill, but there's only so many yaks
-/// in a day.
+/// A `StorageDb` wraps a read-write SQLite connection, and handles schema
+/// migrations and recovering from database file corruption. It can be used
+/// anywhere a `rusqlite::Connection` is expected, thanks to its `Deref{Mut}`
+/// implementations.
+///
+/// We only support a single writer connection - so that's the only thing we
+/// store. It's still a bit overkill, but there's only so many yaks in a day.
 pub struct StorageDb {
-    pub writer: Arc<Mutex<Connection>>,
+    writer: Connection,
+    interrupt_counter: Arc<AtomicUsize>,
 }
 impl StorageDb {
     /// Create a new, or fetch an already open, StorageDb backed by a file on disk.
@@ -31,7 +35,7 @@ impl StorageDb {
 
     /// Create a new, or fetch an already open, memory-based StorageDb. You must
     /// provide a name, but you are still able to have a single writer and many
-    ///  reader connections to the same memory DB open.
+    /// reader connections to the same memory DB open.
     #[cfg(test)]
     pub fn new_memory(db_path: &str) -> Result<Self> {
         let name = PathBuf::from(format!("file:{}?mode=memory&cache=shared", db_path));
@@ -49,7 +53,8 @@ impl StorageDb {
         let conn = Connection::open_with_flags(db_path.clone(), flags)?;
         match init_sql_connection(&conn, true) {
             Ok(()) => Ok(Self {
-                writer: Arc::new(Mutex::new(conn)),
+                writer: conn,
+                interrupt_counter: Arc::new(AtomicUsize::new(0)),
             }),
             Err(e) => {
                 // like with places, failure to upgrade means "you lose your data"
@@ -61,6 +66,66 @@ impl StorageDb {
                 }
             }
         }
+    }
+
+    /// Returns an interrupt handle for this database connection. This handle
+    /// should be handed out to consumers that want to interrupt long-running
+    /// operations. It's FFI-safe, and `Send + Sync`, since it only makes sense
+    /// to use from another thread. Calling `interrupt` on the handle sets a
+    /// flag on all currently active interrupt scopes.
+    pub fn interrupt_handle(&self) -> SqlInterruptHandle {
+        SqlInterruptHandle::new(
+            self.writer.get_interrupt_handle(),
+            self.interrupt_counter.clone(),
+        )
+    }
+
+    /// Creates an object that knows when it's been interrupted. A new interrupt
+    /// scope should be created inside each method that does long-running
+    /// database work, like batch writes. This is the other side of a
+    /// `SqlInterruptHandle`: when a handle is interrupted, it flags all active
+    /// interrupt scopes as interrupted, too, so that they can abort pending
+    /// work as soon as possible.
+    #[allow(dead_code)]
+    pub fn begin_interrupt_scope(&self) -> SqlInterruptScope {
+        SqlInterruptScope::new(self.interrupt_counter.clone())
+    }
+
+    /// Closes the database connection. If there are any unfinalized prepared
+    /// statements on the connection, `close` will fail and the `StorageDb` will
+    /// be returned to the caller so that it can retry, drop (via `mem::drop`)
+    // or leak (`mem::forget`) the connection.
+    ///
+    /// Keep in mind that dropping the connection tries to close it again, and
+    /// panics on error.
+    pub fn close(self) -> result::Result<(), (StorageDb, Error)> {
+        let StorageDb {
+            writer,
+            interrupt_counter,
+        } = self;
+        writer.close().map_err(|(writer, err)| {
+            (
+                StorageDb {
+                    writer,
+                    interrupt_counter,
+                },
+                err.into(),
+            )
+        })
+    }
+}
+
+impl Deref for StorageDb {
+    type Target = Connection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.writer
+    }
+}
+
+impl DerefMut for StorageDb {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.writer
     }
 }
 
@@ -85,8 +150,25 @@ fn init_sql_connection(conn: &Connection, is_writable: bool) -> Result<()> {
     Ok(())
 }
 
-fn define_functions(_c: &Connection) -> Result<()> {
+fn define_functions(c: &Connection) -> Result<()> {
+    use rusqlite::functions::FunctionFlags;
+    c.create_scalar_function(
+        "generate_guid",
+        0,
+        FunctionFlags::SQLITE_UTF8,
+        sql_fns::generate_guid,
+    )?;
     Ok(())
+}
+
+pub(crate) mod sql_fns {
+    use rusqlite::{functions::Context, Result};
+    use sync_guid::Guid as SyncGuid;
+
+    #[inline(never)]
+    pub fn generate_guid(_ctx: &Context<'_>) -> Result<SyncGuid> {
+        Ok(SyncGuid::random())
+    }
 }
 
 // These should be somewhere else...
@@ -141,6 +223,7 @@ fn unurl_path(p: impl AsRef<Path>) -> PathBuf {
 ///
 /// Errors if `p` is a relative non-url path, or if it's a URL path
 /// that's isn't a `file:` URL.
+#[allow(dead_code)]
 pub fn ensure_url_path(p: impl AsRef<Path>) -> Result<Url> {
     if let Some(u) = p.as_ref().to_str().and_then(|s| Url::parse(s).ok()) {
         if u.scheme() == "file" {
@@ -218,8 +301,7 @@ mod tests {
 
     #[test]
     fn test_meta() -> Result<()> {
-        let db = new_mem_db();
-        let writer = db.writer.lock().unwrap();
+        let writer = new_mem_db();
         assert_eq!(get_meta::<String>(&writer, "foo")?, None);
         put_meta(&writer, "foo", &"bar".to_string())?;
         assert_eq!(get_meta(&writer, "foo")?, Some("bar".to_string()));

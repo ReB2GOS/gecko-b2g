@@ -63,7 +63,6 @@
         windowtype="navigator:browser"
         macanimationtype="document"
         screenX="4" screenY="4"
-        fullscreenbutton="true"
         sizemode="normal"
         retargetdocumentfocus="urlbar-input"
         scrolling="false"
@@ -558,22 +557,23 @@
       </panelmultiview>
     </panel>
 
-    <panel id="confirmation-hint"
-           role="alert"
-           type="arrow"
-           hidden="true"
-           flip="slide"
-           position="bottomcenter topright"
-           tabspecific="true"
-           noautofocus="true">
-      <hbox id="confirmation-hint-checkmark-animation-container">
-       <image id="confirmation-hint-checkmark-image"/>
-      </hbox>
-      <vbox id="confirmation-hint-message-container">
-       <label id="confirmation-hint-message"/>
-       <label id="confirmation-hint-description"/>
-      </vbox>
-    </panel>
+    <html:template id="confirmation-hint-wrapper">
+      <panel id="confirmation-hint"
+             role="alert"
+             type="arrow"
+             flip="slide"
+             position="bottomcenter topright"
+             tabspecific="true"
+             noautofocus="true">
+        <hbox id="confirmation-hint-checkmark-animation-container">
+         <image id="confirmation-hint-checkmark-image"/>
+        </hbox>
+        <vbox id="confirmation-hint-message-container">
+         <label id="confirmation-hint-message"/>
+         <label id="confirmation-hint-description"/>
+        </vbox>
+      </panel>
+    </html:template>
 
     <menupopup id="pageActionContextMenu"
                onpopupshowing="BrowserPageActions.onContextMenuShowing(event, this);">
@@ -618,6 +618,7 @@
 #include ../../components/controlcenter/content/identityPanel.inc.xhtml
 #include ../../components/controlcenter/content/protectionsPanel.inc.xhtml
 #include ../../components/downloads/content/downloadsPanel.inc.xhtml
+#include ../../../devtools/startup/enableDevToolsPopup.inc.xhtml
 #include browser-allTabsMenu.inc.xhtml
 
     <hbox id="downloads-animation-container">
@@ -728,6 +729,7 @@
             <tabs id="tabbrowser-tabs"
                   is="tabbrowser-tabs"
                   flex="1"
+                  aria-multiselectable="true"
                   setfocus="false"
                   tooltip="tabbrowser-tab-tooltip"
                   stopwatchid="FX_TAB_CLICK_MS">
@@ -858,7 +860,8 @@
           <toolbartabstop/>
           <hbox id="urlbar" flex="1"
                 context=""
-                defaultPlaceholder="&urlbar.placeholder2;"
+                data-l10n-id="urlbar-default-placeholder"
+                data-l10n-attrs="defaultPlaceholder"
                 focused="true"
                 pageproxystate="invalid">
             <hbox id="urlbar-background"/>
@@ -876,7 +879,7 @@
                    onmouseover="gProtectionsHandler.onTrackingProtectionIconHoveredOrFocused();"
                    onfocus="gProtectionsHandler.onTrackingProtectionIconHoveredOrFocused();"
                    tooltip="tracking-protection-icon-tooltip">
-                <box id="tracking-protection-icon-box" animationsenabled="true">
+                <box id="tracking-protection-icon-box">
                   <image id="tracking-protection-icon"/>
                   <box id="tracking-protection-icon-animatable-box" flex="1">
                     <image id="tracking-protection-icon-animatable-image" flex="1"/>
@@ -897,7 +900,7 @@
                        consumeanchor="identity-box"
                        onclick="PageProxyClickHandler(event);"/>
                 <image id="permissions-granted-icon"
-                       tooltiptext="&urlbar.permissionsGranted.tooltip;"/>
+                       data-l10n-id="urlbar-permissions-granted"/>
                 <box style="pointer-events: none;">
                     <image class="sharing-icon" id="webrtc-sharing-icon"/>
                     <image class="sharing-icon geo-icon" id="geo-sharing-icon"/>
@@ -980,12 +983,12 @@
                          data-l10n-id="urlbar-storage-access-anchor"/>
                 </box>
                 <image id="remote-control-icon"
-                       tooltiptext="&urlbar.remoteControlNotificationAnchor.tooltip;"/>
+                       data-l10n-id="urlbar-remote-control-notification-anchor"/>
                 <label id="identity-icon-label" class="plain" crop="center" flex="1"/>
               </box>
               <box id="urlbar-label-box" align="center">
-                <label id="urlbar-label-switchtab" class="urlbar-label" value="&urlbar.switchToTab.label;"/>
-                <label id="urlbar-label-extension" class="urlbar-label" value="&urlbar.extension.label;"/>
+                <label id="urlbar-label-switchtab" class="urlbar-label" data-l10n-id="urlbar-switch-to-tab"/>
+                <label id="urlbar-label-extension" class="urlbar-label" data-l10n-id="urlbar-extension"/>
               </box>
               <moz-input-box tooltip="aHTMLTooltip"
                              class="urlbar-input-box"
@@ -999,12 +1002,13 @@
                             aria-controls="urlbar-results"
                             aria-autocomplete="both"
                             inputmode="mozAwesomebar"
-                            placeholder="&urlbar.placeholder2;"/>
+                            data-l10n-id="urlbar-placeholder"
+                            data-l10n-attrs="placeholder"/>
               </moz-input-box>
               <image id="urlbar-go-button"
                      class="urlbar-icon"
                      onclick="gURLBar.handleCommand(event);"
-                     tooltiptext="&goEndCap.tooltip;"/>
+                     data-l10n-id="urlbar-go-button"/>
               <hbox id="page-action-buttons" context="pageActionContextMenu">
                 <toolbartabstop/>
                 <hbox id="contextual-feature-recommendation" role="button" hidden="true">
@@ -1024,7 +1028,7 @@
                        tooltip="dynamic-shortcut-tooltip"
                        role="button"
                        hidden="true"
-                       onclick="ReaderParent.buttonClick(event);"/>
+                       onclick="AboutReaderParent.buttonClick(event);"/>
                 <toolbarbutton id="urlbar-zoom-button"
                        onclick="FullZoom.reset();"
                        tooltip="dynamic-shortcut-tooltip"
@@ -1033,23 +1037,15 @@
                 <image id="pageActionButton"
                        class="urlbar-icon urlbar-page-action"
                        role="button"
-                       tooltiptext="&pageActionButton.tooltip;"
+                       data-l10n-id="urlbar-page-action-button"
                        onmousedown="BrowserPageActions.mainButtonClicked(event);"
                        onkeypress="BrowserPageActions.mainButtonClicked(event);"/>
-                <hbox id="pocket-button-box"
-                      hidden="true"
-                      class="urlbar-icon-wrapper urlbar-page-action"
-                      onclick="BrowserPageActions.doCommandForAction(PageActions.actionForID('pocket'), event, this);">
-                  <image id="pocket-button"
-                         class="urlbar-icon"
-                         tooltiptext="&pocketButton.tooltiptext;"
-                         role="button"/>
-                  <hbox id="pocket-button-animatable-box">
-                    <image id="pocket-button-animatable-image"
-                           tooltiptext="&pocketButton.tooltiptext;"
-                           role="presentation"/>
-                  </hbox>
-                </hbox>
+                <image id="pocket-button"
+                       class="urlbar-icon urlbar-page-action"
+                       data-l10n-id="urlbar-pocket-button"
+                       role="button"
+                       hidden="true"
+                       onclick="BrowserPageActions.doCommandForAction(PageActions.actionForID('pocket'), event, this);"/>
                 <hbox id="star-button-box"
                       hidden="true"
                       class="urlbar-icon-wrapper urlbar-page-action"
@@ -1227,7 +1223,7 @@
       </toolbaritem>
     </toolbar>
 
-    <toolbarpalette id="BrowserToolbarPalette">
+    <html:template id="BrowserToolbarPalette">
 
       <toolbarbutton id="print-button" class="toolbarbutton-1 chromeclass-toolbar-additional"
 #ifdef XP_MACOSX
@@ -1359,7 +1355,7 @@
         <searchbar id="searchbar" flex="1"/>
         <toolbartabstop/>
       </toolbaritem>
-    </toolbarpalette>
+    </html:template>
   </toolbox>
   </box>
 
@@ -1398,9 +1394,11 @@
     <vbox id="browser-border-end" hidden="true" layer="true"/>
   </hbox>
 
-  <box id="customization-container" flex="1" hidden="true"><![CDATA[
+  <html:template id="customizationPanel">
+    <box id="customization-container" flex="1" hidden="true"><![CDATA[
 #include ../../components/customizableui/content/customizeMode.inc.xhtml
-  ]]></box>
+    ]]></box>
+  </html:template>
 
   <html:div id="fullscreen-and-pointerlock-wrapper">
     <html:div id="fullscreen-warning" class="pointerlockfswarning" hidden="true">

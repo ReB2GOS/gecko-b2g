@@ -24,6 +24,7 @@
 #endif
 
 #include "chrome/common/process_watcher.h"
+#include "mozilla/Result.h"
 
 #include "AudioChannelService.h"
 #include "DeviceStorageStatics.h"
@@ -90,7 +91,6 @@
 #include "mozilla/dom/BrowsingContextGroup.h"
 #include "mozilla/dom/CancelContentJSOptionsBinding.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
-#include "mozilla/dom/cellbroadcast/CellBroadcastParent.h"
 #include "mozilla/dom/ClientManager.h"
 #include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/ContentMediaController.h"
@@ -103,16 +103,13 @@
 #include "mozilla/dom/GeolocationBinding.h"
 #include "mozilla/dom/GeolocationPositionError.h"
 #include "mozilla/dom/GetFilesHelper.h"
-#include "mozilla/dom/icc/IccParent.h"
 #include "mozilla/dom/IPCBlobInputStreamParent.h"
 #include "mozilla/dom/IPCBlobUtils.h"
-#include "mozilla/dom/JSWindowActorService.h"
+#include "mozilla/dom/JSActorService.h"
+#include "mozilla/dom/JSProcessActorBinding.h"
 #include "mozilla/dom/LocalStorageCommon.h"
 #include "mozilla/dom/MediaController.h"
 #include "mozilla/dom/MemoryReportRequest.h"
-#include "mozilla/dom/mobileconnection/ImsRegistrationParent.h"
-#include "mozilla/dom/mobileconnection/MobileConnectionParent.h"
-// #include "mozilla/dom/mobilemessage/SmsParent.h"
 #include "mozilla/dom/MediaSessionUtils.h"
 #include "mozilla/dom/Notification.h"
 #include "mozilla/dom/PContentPermissionRequestParent.h"
@@ -131,8 +128,6 @@
 #include "mozilla/dom/ServiceWorkerRegistrar.h"
 #include "mozilla/dom/ServiceWorkerUtils.h"
 #include "mozilla/dom/StorageIPC.h"
-#include "mozilla/dom/subsidylock/SubsidyLockParent.h"
-#include "mozilla/dom/telephony/TelephonyParent.h"
 #include "mozilla/dom/URLClassifierParent.h"
 #include "mozilla/dom/WakeLock.h"
 #include "mozilla/dom/WindowGlobalParent.h"
@@ -142,7 +137,6 @@
 #include "mozilla/dom/nsMixedContentBlocker.h"
 #include "mozilla/dom/power/PowerManagerService.h"
 #include "mozilla/dom/quota/QuotaManagerService.h"
-#include "mozilla/dom/voicemail/VoicemailParent.h"
 #include "mozilla/embedding/printingui/PrintingParent.h"
 #include "mozilla/extensions/StreamFilterParent.h"
 #include "mozilla/gfx/GPUProcessManager.h"
@@ -255,6 +249,17 @@
 #include "xpcpublic.h"
 #include "nsOpenWindowInfo.h"
 
+#ifdef MOZ_B2G_RIL
+#include "mozilla/dom/cellbroadcast/CellBroadcastParent.h"
+#include "mozilla/dom/icc/IccParent.h"
+#include "mozilla/dom/mobileconnection/ImsRegistrationParent.h"
+#include "mozilla/dom/mobileconnection/MobileConnectionParent.h"
+// #include "mozilla/dom/mobilemessage/SmsParent.h"
+#include "mozilla/dom/subsidylock/SubsidyLockParent.h"
+#include "mozilla/dom/telephony/TelephonyParent.h"
+#include "mozilla/dom/voicemail/VoicemailParent.h"
+#endif // MOZ_B2G_RIL
+
 #ifdef MOZ_WEBRTC
 #  include "signaling/src/peerconnection/WebrtcGlobalParent.h"
 #endif
@@ -279,6 +284,8 @@
 
 #ifdef MOZ_WIDGET_ANDROID
 #  include "AndroidBridge.h"
+#  include "mozilla/java/GeckoProcessManagerWrappers.h"
+#  include "mozilla/java/GeckoProcessTypeWrappers.h"
 #endif
 
 #ifdef MOZ_WIDGET_GONK
@@ -356,17 +363,20 @@ static NS_DEFINE_CID(kCClipboardCID, NS_CLIPBOARD_CID);
 
 using base::KillProcess;
 
-using namespace CrashReporter;
-using namespace mozilla::dom::bluetooth;
-using namespace mozilla::dom::cellbroadcast;
-using namespace mozilla::dom::devicestorage;
+#ifdef MOZ_B2G_RIL
 using namespace mozilla::dom::icc;
-using namespace mozilla::dom::power;
+using namespace mozilla::dom::cellbroadcast;
 using namespace mozilla::dom::mobileconnection;
 // using namespace mozilla::dom::mobilemessage;
 using namespace mozilla::dom::telephony;
 using namespace mozilla::dom::voicemail;
 using namespace mozilla::dom::subsidylock;
+#endif // MOZ_B2G_RIL
+
+using namespace CrashReporter;
+using namespace mozilla::dom::bluetooth;
+using namespace mozilla::dom::devicestorage;
+using namespace mozilla::dom::power;
 using namespace mozilla::media;
 using namespace mozilla::embedding;
 using namespace mozilla::gfx;
@@ -1351,12 +1361,15 @@ already_AddRefed<RemoteBrowser> ContentParent::CreateBrowser(
   cpm->RegisterRemoteFrame(browserParent);
 
   nsCOMPtr<nsIPrincipal> initialPrincipal =
-      NullPrincipal::Create(aContext.OriginAttributesRef());
+      NullPrincipal::Create(aBrowsingContext->OriginAttributesRef());
   WindowGlobalInit windowInit = WindowGlobalActor::AboutBlankInitializer(
       aBrowsingContext, initialPrincipal);
 
-  auto windowParent =
-      MakeRefPtr<WindowGlobalParent>(windowInit, /* inprocess */ false);
+  RefPtr<WindowGlobalParent> windowParent =
+      WindowGlobalParent::CreateDisconnected(windowInit);
+  if (NS_WARN_IF(!windowParent)) {
+    return nullptr;
+  }
 
   // Open a remote endpoint for the initial PWindowGlobal actor.
   ManagedEndpoint<PWindowGlobalChild> windowEp =
@@ -1375,7 +1388,7 @@ already_AddRefed<RemoteBrowser> ContentParent::CreateBrowser(
     return nullptr;
   }
 
-  windowParent->Init(windowInit);
+  windowParent->Init();
 
   if (remoteType.EqualsLiteral(LARGE_ALLOCATION_REMOTE_TYPE)) {
     // Tell the BrowserChild object that it was created due to a
@@ -1496,30 +1509,6 @@ void ContentParent::ForwardKnownInfo() {
     Unused << SendVolumes(volumeInfo);
   }
 #endif /* MOZ_WIDGET_GONK */
-}
-
-NS_IMPL_ISUPPORTS(RemoteWindowContext, nsIRemoteWindowContext,
-                  nsIInterfaceRequestor)
-
-RemoteWindowContext::RemoteWindowContext(BrowserParent* aBrowserParent)
-    : mBrowserParent(aBrowserParent) {}
-
-NS_IMETHODIMP
-RemoteWindowContext::GetInterface(const nsIID& aIID, void** aSink) {
-  return QueryInterface(aIID, aSink);
-}
-
-NS_IMETHODIMP
-RemoteWindowContext::OpenURI(nsIURI* aURI) {
-  mBrowserParent->LoadURL(aURI);
-  return NS_OK;
-}
-
-NS_IMETHODIMP
-RemoteWindowContext::GetUsePrivateBrowsing(bool* aUsePrivateBrowsing) {
-  nsCOMPtr<nsILoadContext> loadContext = mBrowserParent->GetLoadContext();
-  *aUsePrivateBrowsing = loadContext && loadContext->UsePrivateBrowsing();
-  return NS_OK;
 }
 
 void ContentParent::MaybeAsyncSendShutDownMessage() {
@@ -1764,6 +1753,15 @@ void ContentParent::ActorDestroy(ActorDestroyReason why) {
   RecvRemoveGeolocationListener();
 
   mConsoleService = nullptr;
+
+  // Destroy our JSProcessActors, and reject any pending queries.
+  nsRefPtrHashtable<nsCStringHashKey, JSProcessActorParent> processActors;
+  mProcessActors.SwapElements(processActors);
+  for (auto iter = processActors.Iter(); !iter.Done(); iter.Next()) {
+    iter.Data()->RejectPendingQueries();
+    iter.Data()->AfterDestroy();
+  }
+  mProcessActors.Clear();
 
   if (obs) {
     RefPtr<nsHashPropertyBag> props = new nsHashPropertyBag();
@@ -2660,9 +2658,9 @@ bool ContentParent::InitInternal(ProcessPriority aInitialPriority) {
     // Send down to the content process the permissions for each of the
     // registered service worker scopes.
     for (auto& registration : registrations) {
-      nsCOMPtr<nsIPrincipal> principal =
-          PrincipalInfoToPrincipal(registration.principal());
-      if (principal) {
+      auto principalOrErr = PrincipalInfoToPrincipal(registration.principal());
+      if (principalOrErr.isOk()) {
+        nsCOMPtr<nsIPrincipal> principal = principalOrErr.unwrap();
         TransmitPermissionsForPrincipal(principal);
       }
     }
@@ -2711,12 +2709,16 @@ bool ContentParent::InitInternal(ProcessPriority aInitialPriority) {
     }
   }
 
-  // Send down WindowActorOptions at startup to content process.
-  RefPtr<JSWindowActorService> actorSvc = JSWindowActorService::GetSingleton();
+  // Send down { Parent, Window }ActorOptions at startup to content process.
+  RefPtr<JSActorService> actorSvc = JSActorService::GetSingleton();
   if (actorSvc) {
-    nsTArray<JSWindowActorInfo> infos;
-    actorSvc->GetJSWindowActorInfos(infos);
-    Unused << SendInitJSWindowActorInfos(infos);
+    nsTArray<JSProcessActorInfo> contentInfos;
+    actorSvc->GetJSProcessActorInfos(contentInfos);
+
+    nsTArray<JSWindowActorInfo> windowInfos;
+    actorSvc->GetJSWindowActorInfos(windowInfos);
+
+    Unused << SendInitJSActorInfos(contentInfos, windowInfos);
   }
 
   // Start up nsPluginHost and run FindPlugins to cache the plugin list.
@@ -3353,8 +3355,7 @@ bool ContentParent::CanOpenBrowser(const IPCTabContext& aContext) {
   // the app it's trying to open.)
   // On e10s we also allow UnsafeTabContext to allow service workers to open
   // windows. This is enforced in MaybeInvalidTabContext.
-  if (aContext.type() != IPCTabContext::TPopupIPCTabContext &&
-      aContext.type() != IPCTabContext::TUnsafeIPCTabContext) {
+  if (aContext.type() != IPCTabContext::TPopupIPCTabContext) {
     ASSERT_UNLESS_FUZZING(
         "Unexpected IPCTabContext type.  Aborting AllocPBrowserParent.");
     return false;
@@ -3362,14 +3363,8 @@ bool ContentParent::CanOpenBrowser(const IPCTabContext& aContext) {
 
   if (aContext.type() == IPCTabContext::TPopupIPCTabContext) {
     const PopupIPCTabContext& popupContext = aContext.get_PopupIPCTabContext();
-    if (popupContext.opener().type() != PBrowserOrId::TPBrowserParent) {
-      ASSERT_UNLESS_FUZZING(
-          "Unexpected PopupIPCTabContext type.  Aborting AllocPBrowserParent.");
-      return false;
-    }
 
-    auto opener =
-        BrowserParent::GetFrom(popupContext.opener().get_PBrowserParent());
+    auto opener = BrowserParent::GetFrom(popupContext.openerParent());
     if (!opener) {
       ASSERT_UNLESS_FUZZING(
           "Got null opener from child; aborting AllocPBrowserParent.");
@@ -3416,7 +3411,10 @@ mozilla::ipc::IPCResult ContentParent::RecvConstructPopupBrowser(
     return IPC_FAIL(this, "CanOpenBrowser Failed");
   }
 
-  if (aInitialWindowInit.browsingContext().IsNullOrDiscarded()) {
+  RefPtr<CanonicalBrowsingContext> browsingContext =
+      CanonicalBrowsingContext::Get(
+          aInitialWindowInit.context().mBrowsingContextId);
+  if (!browsingContext || browsingContext->IsDiscarded()) {
     return IPC_FAIL(this, "Null or discarded initial BrowsingContext");
   }
   if (!aInitialWindowInit.principal()) {
@@ -3431,8 +3429,7 @@ mozilla::ipc::IPCResult ContentParent::RecvConstructPopupBrowser(
     // type PopupIPCTabContext, and that the opener BrowserParent is
     // reachable.
     const PopupIPCTabContext& popupContext = aContext.get_PopupIPCTabContext();
-    auto opener =
-        BrowserParent::GetFrom(popupContext.opener().get_PBrowserParent());
+    auto opener = BrowserParent::GetFrom(popupContext.openerParent());
     openerTabId = opener->GetTabId();
     openerCpId = opener->Manager()->ChildID();
 
@@ -3454,8 +3451,6 @@ mozilla::ipc::IPCResult ContentParent::RecvConstructPopupBrowser(
   // window is remote.
   chromeFlags |= nsIWebBrowserChrome::CHROME_REMOTE_WINDOW;
 
-  CanonicalBrowsingContext* browsingContext =
-      aInitialWindowInit.browsingContext().get_canonical();
   if (NS_WARN_IF(!browsingContext->IsOwnedByProcess(ChildID()))) {
     return IPC_FAIL(this, "BrowsingContext Owned by Incorrect Process!");
   }
@@ -3463,8 +3458,11 @@ mozilla::ipc::IPCResult ContentParent::RecvConstructPopupBrowser(
   MaybeInvalidTabContext tc(aContext);
   MOZ_ASSERT(tc.IsValid());
 
-  auto initialWindow =
-      MakeRefPtr<WindowGlobalParent>(aInitialWindowInit, /* inprocess */ false);
+  RefPtr<WindowGlobalParent> initialWindow =
+      WindowGlobalParent::CreateDisconnected(aInitialWindowInit);
+  if (!initialWindow) {
+    return IPC_FAIL(this, "Failed to create WindowGlobalParent");
+  }
 
   auto parent = MakeRefPtr<BrowserParent>(this, aTabId, tc.GetTabContext(),
                                           browsingContext, chromeFlags);
@@ -3476,10 +3474,9 @@ mozilla::ipc::IPCResult ContentParent::RecvConstructPopupBrowser(
 
   // XXX: Why are we checking these requirements? It seems we should register
   // the created frame unconditionally?
-  if (openerTabId > 0 ||
-      aContext.type() == IPCTabContext::TUnsafeIPCTabContext) {
+  if (openerTabId > 0) {
     // The creation of PBrowser was triggered from content process through
-    // either window.open() or service worker's openWindow().
+    // window.open().
     // We need to register remote frame with the child generated tab id.
     auto* cpm = ContentProcessManager::GetSingleton();
     if (!cpm->RegisterRemoteFrame(parent)) {
@@ -3492,7 +3489,7 @@ mozilla::ipc::IPCResult ContentParent::RecvConstructPopupBrowser(
     return IPC_FAIL(this, "BindPWindowGlobalEndpoint failed");
   }
 
-  initialWindow->Init(aInitialWindowInit);
+  initialWindow->Init();
 
   // When enabling input event prioritization, input events may preempt other
   // normal priority IPC messages. To prevent the input events preempt
@@ -3712,28 +3709,16 @@ bool ContentParent::DeallocPTestShellParent(PTestShellParent* shell) {
   return true;
 }
 
+#ifdef MOZ_B2G_RIL
 PMobileConnectionParent* ContentParent::AllocPMobileConnectionParent(
     const uint32_t& aClientId) {
-#ifdef MOZ_B2G_RIL
-  RefPtr<MobileConnectionParent> parent = new MobileConnectionParent(aClientId);
-  // We release this ref in DeallocPMobileConnectionParent().
-  parent->AddRef();
-
-  return parent;
-#else
-  MOZ_CRASH("No support for mobileconnection on this platform!");
-#endif
+  return new mozilla::dom::mobileconnection::MobileConnectionParent(aClientId);
 }
 
 bool ContentParent::DeallocPMobileConnectionParent(
     PMobileConnectionParent* aActor) {
-#ifdef MOZ_B2G_RIL
-  // MobileConnectionParent is refcounted, must not be freed manually.
-  static_cast<MobileConnectionParent*>(aActor)->Release();
+  delete aActor;
   return true;
-#else
-  MOZ_CRASH("No support for mobileconnection on this platform!");
-#endif
 }
 
 PImsRegServiceFinderParent* ContentParent::AllocPImsRegServiceFinderParent() {
@@ -3742,7 +3727,7 @@ PImsRegServiceFinderParent* ContentParent::AllocPImsRegServiceFinderParent() {
   //    return nullptr;
   //}
 
-  return new ImsRegServiceFinderParent();
+  return new mozilla::dom::mobileconnection::ImsRegServiceFinderParent();
 }
 
 bool ContentParent::DeallocPImsRegServiceFinderParent(
@@ -3757,20 +3742,112 @@ PImsRegistrationParent* ContentParent::AllocPImsRegistrationParent(
   // if (!AssertAppProcessPermission(this, "mobileconnection")) {
   //    return nullptr;
   //}
-
-  RefPtr<ImsRegistrationParent> parent = new ImsRegistrationParent(aServiceId);
-  // We release this ref in DeallocPImsRegistrationParent().
-  parent->AddRef();
-
-  return parent;
+  return new mozilla::dom::mobileconnection::ImsRegistrationParent(aServiceId);
 }
 
 bool ContentParent::DeallocPImsRegistrationParent(
     PImsRegistrationParent* aActor) {
   // ImsRegistrationParent is refcounted, must not be freed manually.
-  static_cast<ImsRegistrationParent*>(aActor)->Release();
+  delete aActor;
   return true;
 }
+
+PTelephonyParent* ContentParent::AllocPTelephonyParent() {
+  // if (!AssertAppProcessPermission(this, "telephony")) {
+  //  return nullptr;
+  //}
+
+  return new mozilla::dom::telephony::TelephonyParent();
+}
+
+bool ContentParent::DeallocPTelephonyParent(PTelephonyParent* aActor) {
+  delete aActor;
+  return true;
+}
+
+PVoicemailParent*
+ContentParent::AllocPVoicemailParent()
+{
+  /*if (!AssertAppProcessPermission(this, "voicemail")) {
+    return nullptr;
+  }*/
+
+  return new mozilla::dom::voicemail::VoicemailParent();
+}
+
+mozilla::ipc::IPCResult
+ContentParent::RecvPVoicemailConstructor(PVoicemailParent* aActor)
+{
+  return static_cast<VoicemailParent*>(aActor)->Init();
+}
+
+bool
+ContentParent::DeallocPVoicemailParent(PVoicemailParent* aActor)
+{
+  delete aActor;
+  return true;
+}
+
+PIccParent* ContentParent::AllocPIccParent(const uint32_t& aServiceId) {
+  // if (!AssertAppProcessPermission(this, "mobileconnection")) {
+  //   return nullptr;
+  // }
+  return new mozilla::dom::icc::IccParent(aServiceId);
+}
+
+bool ContentParent::DeallocPIccParent(PIccParent* aActor) {
+  delete aActor;
+  return true;
+}
+
+PSubsidyLockParent* ContentParent::AllocPSubsidyLockParent(
+    const uint32_t& aClientId) {
+  return new SubsidyLockParent(aClientId);
+}
+
+bool ContentParent::DeallocPSubsidyLockParent(PSubsidyLockParent* aActor) {
+  delete aActor;
+  return true;
+}
+
+PCellBroadcastParent* ContentParent::AllocPCellBroadcastParent() {
+  // if (!AssertAppProcessPermission(this, "cellbroadcast")) {
+  //   return nullptr;
+  // }
+
+  return new mozilla::dom::cellbroadcast::CellBroadcastParent();
+}
+
+bool ContentParent::DeallocPCellBroadcastParent(PCellBroadcastParent* aActor) {
+  delete aActor;
+  return true;
+}
+
+mozilla::ipc::IPCResult ContentParent::RecvPCellBroadcastConstructor(
+    PCellBroadcastParent* aActor) {
+  return static_cast<CellBroadcastParent*>(aActor)->Init();
+}
+
+// PSmsParent*
+// ContentParent::AllocPSmsParent()
+// {
+//   if (!AssertAppProcessPermission(this, "sms")) {
+//     return nullptr;
+//   }
+
+//   SmsParent* parent = new SmsParent();
+//   parent->AddRef();
+//   return parent;
+// }
+
+// bool
+// ContentParent::DeallocPSmsParent(PSmsParent* aSms)
+// {
+//   static_cast<SmsParent*>(aSms)->Release();
+//   return true;
+// }
+
+#endif // MOZ_B2G_RIL
 
 PScriptCacheParent* ContentParent::AllocPScriptCacheParent(
     const FileDescOrError& cacheFile, const bool& wantCacheData) {
@@ -3884,46 +3961,6 @@ ContentParent::AllocPExternalHelperAppParent(
       uri, aContentLength, aWasFileChannel, aContentDisposition,
       aContentDispositionHint, aContentDispositionFilename);
   return parent.forget();
-}
-
-PTelephonyParent* ContentParent::AllocPTelephonyParent() {
-  // if (!AssertAppProcessPermission(this, "telephony")) {
-  //  return nullptr;
-  //}
-
-  TelephonyParent* actor = new TelephonyParent();
-  NS_ADDREF(actor);
-  return actor;
-}
-
-bool ContentParent::DeallocPTelephonyParent(PTelephonyParent* aActor) {
-  static_cast<TelephonyParent*>(aActor)->Release();
-  return true;
-}
-
-PVoicemailParent*
-ContentParent::AllocPVoicemailParent()
-{
-  /*if (!AssertAppProcessPermission(this, "voicemail")) {
-    return nullptr;
-  }*/
-
-  VoicemailParent* actor = new VoicemailParent();
-  actor->AddRef();
-  return actor;
-}
-
-mozilla::ipc::IPCResult
-ContentParent::RecvPVoicemailConstructor(PVoicemailParent* aActor)
-{
-  return static_cast<VoicemailParent*>(aActor)->Init();
-}
-
-bool
-ContentParent::DeallocPVoicemailParent(PVoicemailParent* aActor)
-{
-  static_cast<VoicemailParent*>(aActor)->Release();
-  return true;
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvPExternalHelperAppConstructor(
@@ -4041,82 +4078,6 @@ mozilla::ipc::IPCResult ContentParent::RecvPSpeechSynthesisConstructor(
 }
 #endif
 
-// MOZ_B2G_RIL
-PIccParent* ContentParent::AllocPIccParent(const uint32_t& aServiceId) {
-  // if (!AssertAppProcessPermission(this, "mobileconnection")) {
-  //   return nullptr;
-  // }
-  IccParent* parent = new IccParent(aServiceId);
-  // We release this ref in DeallocPIccParent().
-  parent->AddRef();
-
-  return parent;
-}
-
-bool ContentParent::DeallocPIccParent(PIccParent* aActor) {
-  // IccParent is refcounted, must not be freed manually.
-  static_cast<IccParent*>(aActor)->Release();
-  return true;
-}
-
-PSubsidyLockParent* ContentParent::AllocPSubsidyLockParent(
-    const uint32_t& aClientId) {
-#ifdef MOZ_B2G_RIL
-  return new SubsidyLockParent(aClientId);
-#else
-  MOZ_CRASH("No support for subsidylock on this platform!");
-#endif
-}
-
-bool ContentParent::DeallocPSubsidyLockParent(PSubsidyLockParent* aActor) {
-#ifdef MOZ_B2G_RIL
-  delete aActor;
-  return true;
-#else
-  MOZ_CRASH("No support for subsidylock on this platform!");
-#endif
-}
-
-PCellBroadcastParent* ContentParent::AllocPCellBroadcastParent() {
-  // if (!AssertAppProcessPermission(this, "cellbroadcast")) {
-  //   return nullptr;
-  // }
-
-  CellBroadcastParent* actor = new CellBroadcastParent();
-  actor->AddRef();
-  return actor;
-}
-
-bool ContentParent::DeallocPCellBroadcastParent(PCellBroadcastParent* aActor) {
-  static_cast<CellBroadcastParent*>(aActor)->Release();
-  return true;
-}
-
-mozilla::ipc::IPCResult ContentParent::RecvPCellBroadcastConstructor(
-    PCellBroadcastParent* aActor) {
-  return static_cast<CellBroadcastParent*>(aActor)->Init();
-}
-
-// PSmsParent*
-// ContentParent::AllocPSmsParent()
-// {
-//   if (!AssertAppProcessPermission(this, "sms")) {
-//     return nullptr;
-//   }
-
-//   SmsParent* parent = new SmsParent();
-//   parent->AddRef();
-//   return parent;
-// }
-
-// bool
-// ContentParent::DeallocPSmsParent(PSmsParent* aSms)
-// {
-//   static_cast<SmsParent*>(aSms)->Release();
-//   return true;
-// }
-// MOZ_B2G_RIL_END
-
 PSystemMessageServiceParent* ContentParent::AllocPSystemMessageServiceParent() {
   RefPtr<SystemMessageServiceParent> actor = new SystemMessageServiceParent();
   return actor.forget().take();
@@ -4192,7 +4153,11 @@ mozilla::ipc::IPCResult ContentParent::RecvAccumulateMixedContentHSTS(
 }
 
 mozilla::ipc::IPCResult ContentParent::RecvLoadURIExternal(
-    nsIURI* uri, PBrowserParent* windowContext) {
+    nsIURI* uri, const MaybeDiscarded<BrowsingContext>& aContext) {
+  if (aContext.IsDiscarded()) {
+    return IPC_OK();
+  }
+
   nsCOMPtr<nsIExternalProtocolService> extProtService(
       do_GetService(NS_EXTERNALPROTOCOLSERVICE_CONTRACTID));
   if (!extProtService) {
@@ -4203,9 +4168,8 @@ mozilla::ipc::IPCResult ContentParent::RecvLoadURIExternal(
     return IPC_FAIL_NO_REASON(this);
   }
 
-  RefPtr<RemoteWindowContext> context =
-      new RemoteWindowContext(static_cast<BrowserParent*>(windowContext));
-  extProtService->LoadURI(uri, context);
+  BrowsingContext* bc = aContext.get();
+  extProtService->LoadURI(uri, bc);
   return IPC_OK();
 }
 
@@ -4504,7 +4468,8 @@ mozilla::ipc::IPCResult ContentParent::RecvScriptErrorInternal(
     MOZ_ASSERT(JS::IsUnwrappedSavedFrame(stackObj));
 
     JS::RootedObject stackGlobal(cx, JS::GetNonCCWObjectGlobal(stackObj));
-    msg = new nsScriptErrorWithStack(stackObj, stackGlobal);
+    msg = new nsScriptErrorWithStack(JS::NothingHandleValue, stackObj,
+                                     stackGlobal);
   } else {
     msg = new nsScriptError();
   }
@@ -5626,7 +5591,8 @@ mozilla::ipc::IPCResult ContentParent::RecvNotifyPushObservers(
 mozilla::ipc::IPCResult ContentParent::RecvNotifyPushObserversWithData(
     const nsCString& aScope, const IPC::Principal& aPrincipal,
     const nsString& aMessageId, nsTArray<uint8_t>&& aData) {
-  PushMessageDispatcher dispatcher(aScope, aPrincipal, aMessageId, Some(aData));
+  PushMessageDispatcher dispatcher(aScope, aPrincipal, aMessageId,
+                                   Some(std::move(aData)));
   Unused << NS_WARN_IF(NS_FAILED(dispatcher.NotifyObserversAndWorkers()));
   return IPC_OK();
 }
@@ -6278,11 +6244,18 @@ mozilla::ipc::IPCResult ContentParent::RecvAutomaticStorageAccessCanBeGranted(
 
 mozilla::ipc::IPCResult
 ContentParent::RecvFirstPartyStorageAccessGrantedForOrigin(
-    uint64_t aParentWindowId, const Principal& aTrackingPrincipal,
-    const nsCString& aTrackingOrigin, const int& aAllowMode,
+    uint64_t aTopLevelWindowId,
+    const MaybeDiscarded<BrowsingContext>& aParentContext,
+    const Principal& aTrackingPrincipal, const nsCString& aTrackingOrigin,
+    const int& aAllowMode,
     FirstPartyStorageAccessGrantedForOriginResolver&& aResolver) {
+  if (aParentContext.IsNullOrDiscarded()) {
+    return IPC_OK();
+  }
+
   ContentBlocking::SaveAccessForOriginOnParentProcess(
-      aParentWindowId, aTrackingPrincipal, aTrackingOrigin, aAllowMode)
+      aTopLevelWindowId, aParentContext.get_canonical(), aTrackingPrincipal,
+      aTrackingOrigin, aAllowMode)
       ->Then(
           GetCurrentThreadSerialEventTarget(), __func__,
           [aResolver = std::move(aResolver)](
@@ -6335,9 +6308,9 @@ mozilla::ipc::IPCResult ContentParent::RecvNotifyMediaPlaybackChanged(
   if (aContext.IsNullOrDiscarded()) {
     return IPC_OK();
   }
-  if (RefPtr<MediaController> controller =
+  if (RefPtr<IMediaInfoUpdater> updater =
           aContext.get_canonical()->GetMediaController()) {
-    controller->NotifyMediaPlaybackChanged(aState);
+    updater->NotifyMediaPlaybackChanged(aContext.ContextId(), aState);
   }
   return IPC_OK();
 }
@@ -6347,9 +6320,9 @@ mozilla::ipc::IPCResult ContentParent::RecvNotifyMediaAudibleChanged(
   if (aContext.IsNullOrDiscarded()) {
     return IPC_OK();
   }
-  if (RefPtr<MediaController> controller =
+  if (RefPtr<IMediaInfoUpdater> updater =
           aContext.get_canonical()->GetMediaController()) {
-    controller->NotifyMediaAudibleChanged(aState);
+    updater->NotifyMediaAudibleChanged(aContext.ContextId(), aState);
   }
   return IPC_OK();
 }
@@ -6426,9 +6399,9 @@ mozilla::ipc::IPCResult ContentParent::RecvNotifyUpdateMediaMetadata(
   if (aContext.IsNullOrDiscarded()) {
     return IPC_OK();
   }
-  if (RefPtr<MediaController> controller =
+  if (RefPtr<IMediaInfoUpdater> updater =
           aContext.get_canonical()->GetMediaController()) {
-    controller->UpdateMetadata(aContext.ContextId(), aMetadata);
+    updater->UpdateMetadata(aContext.ContextId(), aMetadata);
   }
   return IPC_OK();
 }
@@ -6440,9 +6413,9 @@ ContentParent::RecvNotifyMediaSessionPlaybackStateChanged(
   if (aContext.IsNullOrDiscarded()) {
     return IPC_OK();
   }
-  if (RefPtr<MediaController> controller =
+  if (RefPtr<IMediaInfoUpdater> updater =
           aContext.get_canonical()->GetMediaController()) {
-    controller->SetDeclaredPlaybackState(aContext.ContextId(), aPlaybackState);
+    updater->SetDeclaredPlaybackState(aContext.ContextId(), aPlaybackState);
   }
   return IPC_OK();
 }
@@ -6528,21 +6501,6 @@ mozilla::ipc::IPCResult ContentParent::RecvCreateBrowsingContext(
 
   BrowsingContext::CreateFromIPC(std::move(aInit), group, this);
   return IPC_OK();
-}
-
-bool ContentParent::CheckBrowsingContextOwnership(
-    CanonicalBrowsingContext* aBC, const char* aOperation) const {
-  if (!aBC->IsOwnedByProcess(ChildID())) {
-    MOZ_DIAGNOSTIC_ASSERT(ChildID() == aBC->GetInFlightProcessId(),
-                          "Attempt to modify a BrowsingContext from a child "
-                          "which doesn't own it");
-
-    MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Warning,
-            ("ParentIPC: Trying to %s out of process context 0x%08" PRIx64,
-             aOperation, aBC->Id()));
-    return false;
-  }
-  return true;
 }
 
 bool ContentParent::CheckBrowsingContextEmbedder(CanonicalBrowsingContext* aBC,
@@ -6665,6 +6623,30 @@ mozilla::ipc::IPCResult ContentParent::RecvRaiseWindow(
   ContentParent* cp =
       cpm->GetContentProcessById(ContentParentId(context->OwnerProcessId()));
   Unused << cp->SendRaiseWindow(context, aCallerType);
+  return IPC_OK();
+}
+
+mozilla::ipc::IPCResult ContentParent::RecvAdjustWindowFocus(
+    const MaybeDiscarded<BrowsingContext>& aContext, bool aCheckPermission,
+    bool aIsVisible) {
+  if (aContext.IsNullOrDiscarded()) {
+    MOZ_LOG(
+        BrowsingContext::GetLog(), LogLevel::Debug,
+        ("ParentIPC: Trying to send a message to dead or detached context"));
+    return IPC_OK();
+  }
+  CanonicalBrowsingContext* context = aContext.get_canonical();
+  BrowsingContext* parent = context->GetParent();
+  if (!parent) {
+    return IPC_OK();
+  }
+
+  CanonicalBrowsingContext* canonicalParent = parent->Canonical();
+
+  ContentProcessManager* cpm = ContentProcessManager::GetSingleton();
+  ContentParent* cp = cpm->GetContentProcessById(
+      ContentParentId(canonicalParent->OwnerProcessId()));
+  Unused << cp->SendAdjustWindowFocus(context, aCheckPermission, aIsVisible);
   return IPC_OK();
 }
 
@@ -6951,6 +6933,99 @@ mozilla::ipc::IPCResult ContentParent::RecvCommitWindowContextTransaction(
 
 NS_IMETHODIMP ContentParent::GetChildID(uint64_t* aOut) {
   *aOut = this->ChildID();
+  return NS_OK;
+}
+
+IPCResult ContentParent::RecvRawMessage(const JSActorMessageMeta& aMeta,
+                                        const ClonedMessageData& aData,
+                                        const ClonedMessageData& aStack) {
+  StructuredCloneData data;
+  data.BorrowFromClonedMessageDataForParent(aData);
+  StructuredCloneData stack;
+  stack.BorrowFromClonedMessageDataForParent(aStack);
+  ReceiveRawMessage(aMeta, std::move(data), std::move(stack));
+  return IPC_OK();
+}
+
+void ContentParent::ReceiveRawMessage(const JSActorMessageMeta& aMeta,
+                                      StructuredCloneData&& aData,
+                                      StructuredCloneData&& aStack) {
+  RefPtr<JSProcessActorParent> actor =
+      GetActor(aMeta.actorName(), IgnoreErrors());
+  if (actor) {
+    actor->ReceiveRawMessage(aMeta, std::move(aData), std::move(aStack));
+  }
+}
+
+already_AddRefed<JSProcessActorParent> ContentParent::GetActor(
+    const nsACString& aName, ErrorResult& aRv) {
+  if (!CanSend()) {
+    aRv.ThrowInvalidStateError(nsPrintfCString(
+        "Cannot get actor '%s': content parent is ready to communicate.",
+        PromiseFlatCString(aName).get()));
+    return nullptr;
+  }
+
+  // Check if this actor has already been created, and return it if it has.
+  if (mProcessActors.Contains(aName)) {
+    return do_AddRef(mProcessActors.GetWeak(aName));
+  }
+
+  // Otherwise, we want to create a new instance of this actor.
+  JS::RootedObject obj(RootingCx());
+  ConstructActor(aName, &obj, aRv);
+  if (aRv.Failed()) {
+    return nullptr;
+  }
+
+  // Unwrap our actor to a JSProcessActorParent object.
+  RefPtr<JSProcessActorParent> actor;
+  if (NS_FAILED(UNWRAP_OBJECT(JSProcessActorParent, &obj, actor))) {
+    aRv.ThrowTypeMismatchError(
+        "Constructed actor does not inherit from JSProcessActorParent");
+    return nullptr;
+  }
+
+  MOZ_RELEASE_ASSERT(!actor->Manager(),
+                     "mManager was already initialized once!");
+  actor->Init(aName, this);
+  mProcessActors.Put(aName, RefPtr{actor});
+  return actor.forget();
+}
+
+NS_IMETHODIMP ContentParent::GetActor(const nsACString& aName,
+                                      JSProcessActorParent** retval) {
+  if (!CanSend()) {
+    return NS_ERROR_DOM_INVALID_STATE_ERR;
+  }
+
+  // Check if this actor has already been created, and return it if it has.
+  if (mProcessActors.Contains(aName)) {
+    RefPtr<JSProcessActorParent> actor(mProcessActors.Get(aName));
+    actor.forget(retval);
+    return NS_OK;
+  }
+
+  // Otherwise, we want to create a new instance of this actor.
+  JS::RootedObject obj(RootingCx());
+  ErrorResult result;
+  ConstructActor(aName, &obj, result);
+  if (result.Failed()) {
+    return result.StealNSResult();
+  }
+
+  // Unwrap our actor to a JSProcessActorParent object.
+  RefPtr<JSProcessActorParent> actor;
+  nsresult rv = UNWRAP_OBJECT(JSProcessActorParent, &obj, actor);
+  if (NS_FAILED(rv)) {
+    return rv;
+  }
+
+  MOZ_RELEASE_ASSERT(!actor->Manager(),
+                     "mManager was already initialized once!");
+  actor->Init(aName, this);
+  mProcessActors.Put(aName, RefPtr{actor});
+  actor.forget(retval);
   return NS_OK;
 }
 

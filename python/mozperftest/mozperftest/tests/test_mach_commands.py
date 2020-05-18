@@ -7,6 +7,8 @@ import os
 import mock
 import tempfile
 import shutil
+from contextlib import contextmanager
+import platform
 
 from mach.registrar import Registrar
 
@@ -14,8 +16,11 @@ Registrar.categories = {"testing": []}
 Registrar.commands_by_category = {"testing": set()}
 
 
-from mozperftest.environment import MachEnvironment
-from mozperftest.mach_commands import Perftest
+from mozperftest.environment import MachEnvironment  # noqa
+from mozperftest.mach_commands import Perftest, PerftestTests, ON_TRY  # noqa
+from mozperftest import mach_commands  # noqa
+from mozperftest.tests.support import EXAMPLE_TESTS_DIR  # noqa
+from mozperftest.utils import temporary_env, silence  # noqa
 
 
 class _TestMachEnvironment(MachEnvironment):
@@ -29,8 +34,8 @@ class _TestMachEnvironment(MachEnvironment):
         pass
 
 
-@mock.patch("mozperftest.MachEnvironment", new=_TestMachEnvironment)
-def test_command():
+@contextmanager
+def _get_command(klass=Perftest):
     from mozbuild.base import MozbuildObject
 
     config = MozbuildObject.from_environment()
@@ -43,10 +48,42 @@ def test_command():
         state_dir = tempfile.mkdtemp()
 
     try:
-        test = Perftest(context())
-        test.run_perftest()
+        yield klass(context())
     finally:
         shutil.rmtree(context.state_dir)
+
+
+@mock.patch("mozperftest.MachEnvironment", new=_TestMachEnvironment)
+@mock.patch("mozperftest.mach_commands.MachCommandBase._activate_virtualenv")
+def test_command(mocked_func):
+    with _get_command() as test, silence(test):
+        test.run_perftest(tests=[EXAMPLE_TESTS_DIR], flavor="script")
+        # XXX add assertions
+
+
+@mock.patch("mozperftest.MachEnvironment", new=_TestMachEnvironment)
+@mock.patch("mozperftest.mach_commands.MachCommandBase._activate_virtualenv")
+def test_doc_flavor(mocked_func):
+    with _get_command() as test, silence(test):
+        test.run_perftest(tests=[EXAMPLE_TESTS_DIR], flavor="doc")
+
+
+@mock.patch("mozperftest.MachEnvironment", new=_TestMachEnvironment)
+@mock.patch("mozperftest.mach_commands.MachCommandBase._activate_virtualenv")
+@mock.patch("mozperftest.mach_commands.PerftestTests._run_python_script")
+def test_test_runner(*mocked):
+    if platform.system() == "Darwin" and ON_TRY:
+        return
+
+    # simulating on try to run the paths parser
+    old = mach_commands.ON_TRY
+    mach_commands.ON_TRY = True
+    with _get_command(PerftestTests) as test, silence(test), temporary_env(
+        MOZ_AUTOMATION="1"
+    ):
+        test.run_tests(tests=[EXAMPLE_TESTS_DIR])
+
+    mach_commands.ON_TRY = old
 
 
 if __name__ == "__main__":

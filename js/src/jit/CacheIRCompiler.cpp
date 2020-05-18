@@ -22,6 +22,7 @@
 #include "jit/SharedICRegisters.h"
 #include "proxy/Proxy.h"
 #include "vm/ArrayBufferObject.h"
+#include "vm/ArrayBufferViewObject.h"
 #include "vm/BigIntType.h"
 #include "vm/FunctionFlags.h"  // js::FunctionFlags
 #include "vm/GeneratorObject.h"
@@ -1390,25 +1391,6 @@ bool CacheIRCompiler::emitGuardIsNullOrUndefined(ValOperandId inputId) {
   return true;
 }
 
-bool CacheIRCompiler::emitGuardIsNotNullOrUndefined(ValOperandId inputId) {
-  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
-  JSValueType knownType = allocator.knownType(inputId);
-  if (knownType == JSVAL_TYPE_UNDEFINED || knownType == JSVAL_TYPE_NULL) {
-    return false;
-  }
-
-  ValueOperand input = allocator.useValueRegister(masm, inputId);
-  FailurePath* failure;
-  if (!addFailurePath(&failure)) {
-    return false;
-  }
-
-  masm.branchTestNull(Assembler::Equal, input, failure->label());
-  masm.branchTestUndefined(Assembler::Equal, input, failure->label());
-
-  return true;
-}
-
 bool CacheIRCompiler::emitGuardIsNull(ValOperandId inputId) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
   JSValueType knownType = allocator.knownType(inputId);
@@ -1972,20 +1954,6 @@ bool CacheIRCompiler::emitGuardNotDOMProxy(ObjOperandId objId) {
   masm.branchTestProxyHandlerFamily(Assembler::Equal, obj, scratch,
                                     GetDOMProxyHandlerFamily(),
                                     failure->label());
-  return true;
-}
-
-bool CacheIRCompiler::emitGuardSpecificInt32Immediate(Int32OperandId integerId,
-                                                      int32_t expected) {
-  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
-  Register reg = allocator.useRegister(masm, integerId);
-
-  FailurePath* failure;
-  if (!addFailurePath(&failure)) {
-    return false;
-  }
-
-  masm.branch32(Assembler::NotEqual, reg, Imm32(expected), failure->label());
   return true;
 }
 
@@ -3097,6 +3065,18 @@ bool CacheIRCompiler::emitLoadArgumentsObjectLengthResult(ObjOperandId objId) {
   return true;
 }
 
+bool CacheIRCompiler::emitLoadTypedArrayLengthResult(ObjOperandId objId,
+                                                     uint32_t getterOffset) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+  AutoOutputRegister output(*this);
+  Register obj = allocator.useRegister(masm, objId);
+  AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
+
+  masm.unboxInt32(Address(obj, ArrayBufferViewObject::lengthOffset()), scratch);
+  EmitStoreResult(masm, scratch, JSVAL_TYPE_INT32, output);
+  return true;
+}
+
 bool CacheIRCompiler::emitLoadFunctionLengthResult(ObjOperandId objId) {
   JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
   AutoOutputRegister output(*this);
@@ -3161,6 +3141,29 @@ bool CacheIRCompiler::emitLoadStringCharResult(StringOperandId strId,
   masm.loadPtr(BaseIndex(scratch2, scratch1, ScalePointer), scratch2);
 
   EmitStoreResult(masm, scratch2, JSVAL_TYPE_STRING, output);
+  return true;
+}
+
+bool CacheIRCompiler::emitLoadStringCharCodeResult(StringOperandId strId,
+                                                   Int32OperandId indexId) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+  AutoOutputRegister output(*this);
+  Register str = allocator.useRegister(masm, strId);
+  Register index = allocator.useRegister(masm, indexId);
+  AutoScratchRegisterMaybeOutput scratch1(allocator, masm, output);
+  AutoScratchRegister scratch2(allocator, masm);
+
+  FailurePath* failure;
+  if (!addFailurePath(&failure)) {
+    return false;
+  }
+
+  // Bounds check, load string char.
+  masm.spectreBoundsCheck32(index, Address(str, JSString::offsetOfLength()),
+                            scratch1, failure->label());
+  masm.loadStringChar(str, index, scratch1, scratch2, failure->label());
+
+  EmitStoreResult(masm, scratch1, JSVAL_TYPE_INT32, output);
   return true;
 }
 
@@ -3685,6 +3688,44 @@ bool CacheIRCompiler::emitArrayJoinResult(ObjOperandId objId) {
   return true;
 }
 
+bool CacheIRCompiler::emitMathAbsInt32Result(Int32OperandId inputId) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoOutputRegister output(*this);
+  AutoScratchRegisterMaybeOutput scratch(allocator, masm, output);
+
+  Register input = allocator.useRegister(masm, inputId);
+
+  FailurePath* failure;
+  if (!addFailurePath(&failure)) {
+    return false;
+  }
+
+  masm.mov(input, scratch);
+  // Don't negate already positive values.
+  Label positive;
+  masm.branchTest32(Assembler::NotSigned, scratch, scratch, &positive);
+  // neg32 might overflow for INT_MIN.
+  masm.branchNeg32(Assembler::Overflow, scratch, failure->label());
+  masm.bind(&positive);
+
+  EmitStoreResult(masm, scratch, JSVAL_TYPE_INT32, output);
+  return true;
+}
+
+bool CacheIRCompiler::emitMathAbsNumberResult(NumberOperandId inputId) {
+  JitSpew(JitSpew_Codegen, "%s", __FUNCTION__);
+
+  AutoOutputRegister output(*this);
+  AutoScratchFloatRegister scratch(this);
+
+  allocator.ensureDoubleRegister(masm, inputId, FloatReg0);
+
+  masm.absDouble(FloatReg0, scratch);
+  masm.boxDouble(scratch, output.valueReg(), scratch);
+  return true;
+}
+
 bool CacheIRCompiler::emitStoreTypedElement(ObjOperandId objId,
                                             TypedThingLayout layout,
                                             Scalar::Type elementType,
@@ -3722,6 +3763,7 @@ bool CacheIRCompiler::emitStoreTypedElement(ObjOperandId objId,
 
     case Scalar::MaxTypedArrayViewType:
     case Scalar::Int64:
+    case Scalar::V128:
       MOZ_CRASH("Unsupported TypedArray type");
   }
 
@@ -3779,6 +3821,24 @@ bool CacheIRCompiler::emitStoreTypedElement(ObjOperandId objId,
 
   masm.bind(&done);
   return true;
+}
+
+bool CacheIRCompiler::emitStoreTypedArrayElement(ObjOperandId objId,
+                                                 Scalar::Type elementType,
+                                                 Int32OperandId indexId,
+                                                 uint32_t rhsId,
+                                                 bool handleOOB) {
+  return emitStoreTypedElement(objId, TypedThingLayout::TypedArray, elementType,
+                               indexId, rhsId, handleOOB);
+}
+
+bool CacheIRCompiler::emitStoreTypedObjectElement(ObjOperandId objId,
+                                                  TypedThingLayout layout,
+                                                  Scalar::Type elementType,
+                                                  Int32OperandId indexId,
+                                                  uint32_t rhsId) {
+  return emitStoreTypedElement(objId, layout, elementType, indexId, rhsId,
+                               false);
 }
 
 static bool CanNurseryAllocateBigInt(JSContext* cx) {
@@ -3942,7 +4002,6 @@ bool CacheIRCompiler::emitLoadTypedElementResult(ObjOperandId objId,
 
 bool CacheIRCompiler::emitLoadTypedArrayElementResult(ObjOperandId objId,
                                                       Int32OperandId indexId,
-
                                                       Scalar::Type elementType,
                                                       bool handleOOB) {
   return emitLoadTypedElementResult(
@@ -3991,6 +4050,7 @@ bool CacheIRCompiler::emitStoreTypedObjectScalarProperty(
 
     case Scalar::MaxTypedArrayViewType:
     case Scalar::Int64:
+    case Scalar::V128:
       MOZ_CRASH("Unsupported TypedArray type");
   }
 
@@ -5616,7 +5676,7 @@ void js::jit::LoadTypedThingData(MacroAssembler& masm, TypedThingLayout layout,
                                  Register obj, Register result) {
   switch (layout) {
     case TypedThingLayout::TypedArray:
-      masm.loadPtr(Address(obj, TypedArrayObject::dataOffset()), result);
+      masm.loadPtr(Address(obj, ArrayBufferViewObject::dataOffset()), result);
       break;
     case TypedThingLayout::OutlineTypedObject:
       masm.loadPtr(Address(obj, OutlineTypedObject::offsetOfData()), result);
@@ -5635,7 +5695,8 @@ void js::jit::LoadTypedThingLength(MacroAssembler& masm,
                                    Register result) {
   switch (layout) {
     case TypedThingLayout::TypedArray:
-      masm.unboxInt32(Address(obj, TypedArrayObject::lengthOffset()), result);
+      masm.unboxInt32(Address(obj, ArrayBufferViewObject::lengthOffset()),
+                      result);
       break;
     case TypedThingLayout::OutlineTypedObject:
     case TypedThingLayout::InlineTypedObject:

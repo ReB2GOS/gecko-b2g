@@ -48,11 +48,12 @@ already_AddRefed<DOMLocalization> DOMLocalization::Constructor(
   }
 
   RefPtr<DOMLocalization> domLoc = new DOMLocalization(global);
-  domLoc->Init(aResourceIds, aSync, aBundleGenerator, aRv);
 
-  if (NS_WARN_IF(aRv.Failed())) {
-    return nullptr;
+  if (aResourceIds.Length()) {
+    domLoc->AddResourceIds(aResourceIds);
   }
+
+  domLoc->Activate(aSync, true, aBundleGenerator);
 
   return domLoc.forget();
 }
@@ -217,8 +218,9 @@ class ElementTranslationHandler : public PromiseNativeHandler {
       }
     }
 
-    mDOMLocalization->ApplyTranslations(mElements, l10nData, mProto, rv);
-    if (NS_WARN_IF(rv.Failed())) {
+    bool allTranslated =
+        mDOMLocalization->ApplyTranslations(mElements, l10nData, mProto, rv);
+    if (NS_WARN_IF(rv.Failed()) || !allTranslated) {
       mReturnValuePromise->MaybeRejectWithUndefined();
       return;
     }
@@ -318,8 +320,9 @@ already_AddRefed<Promise> DOMLocalization::TranslateElements(
 
     FormatMessagesSync(cx, l10nKeys, l10nMessages, aRv);
 
-    ApplyTranslations(domElements, l10nMessages, aProto, aRv);
-    if (NS_WARN_IF(aRv.Failed())) {
+    bool allTranslated =
+        ApplyTranslations(domElements, l10nMessages, aProto, aRv);
+    if (NS_WARN_IF(aRv.Failed()) || !allTranslated) {
       promise->MaybeRejectWithUndefined();
       return MaybeWrapPromise(promise);
     }
@@ -442,32 +445,35 @@ void DOMLocalization::SetRootInfo(Element* aElement) {
   aElement->SetAttr(kNameSpaceID_None, dirAtom, dir, true);
 }
 
-void DOMLocalization::ApplyTranslations(
+bool DOMLocalization::ApplyTranslations(
     nsTArray<nsCOMPtr<Element>>& aElements,
     nsTArray<Nullable<L10nMessage>>& aTranslations,
     nsXULPrototypeDocument* aProto, ErrorResult& aRv) {
   if (aElements.Length() != aTranslations.Length()) {
     aRv.Throw(NS_ERROR_FAILURE);
-    return;
+    return false;
   }
 
   PauseObserving(aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     aRv.Throw(NS_ERROR_FAILURE);
-    return;
+    return false;
   }
+
+  bool hasMissingTranslation = false;
 
   nsTArray<L10nOverlaysError> errors;
   for (size_t i = 0; i < aTranslations.Length(); ++i) {
     Element* elem = aElements[i];
     if (aTranslations[i].IsNull()) {
+      hasMissingTranslation = true;
       continue;
     }
     L10nOverlays::TranslateElement(*elem, aTranslations[i].Value(), errors,
                                    aRv);
     if (NS_WARN_IF(aRv.Failed())) {
-      aRv.Throw(NS_ERROR_FAILURE);
-      return;
+      hasMissingTranslation = true;
+      continue;
     }
     if (aProto) {
       // We only need to rebuild deep if the translation has a value.
@@ -477,13 +483,15 @@ void DOMLocalization::ApplyTranslations(
     }
   }
 
+  ReportL10nOverlaysErrors(errors);
+
   ResumeObserving(aRv);
   if (NS_WARN_IF(aRv.Failed())) {
     aRv.Throw(NS_ERROR_FAILURE);
-    return;
+    return false;
   }
 
-  ReportL10nOverlaysErrors(errors);
+  return !hasMissingTranslation;
 }
 
 /* Protected */

@@ -181,6 +181,10 @@ enum class CacheKind : uint8_t {
 
 extern const char* const CacheKindNames[];
 
+#ifdef DEBUG
+extern size_t NumInputsForCacheKind(CacheKind kind);
+#endif
+
 enum class CacheOp {
 #define DEFINE_OP(op, ...) op,
   CACHE_IR_OPS(DEFINE_OP)
@@ -1077,6 +1081,8 @@ class MOZ_RAII GetPropIRGenerator : public IRGenerator {
                                       HandleId id);
   AttachDecision tryAttachObjectLength(HandleObject obj, ObjOperandId objId,
                                        HandleId id);
+  AttachDecision tryAttachTypedArrayLength(HandleObject obj, ObjOperandId objId,
+                                           HandleId id);
   AttachDecision tryAttachModuleNamespace(HandleObject obj, ObjOperandId objId,
                                           HandleId id);
   AttachDecision tryAttachWindowProxy(HandleObject obj, ObjOperandId objId,
@@ -1472,6 +1478,8 @@ class MOZ_RAII GetIteratorIRGenerator : public IRGenerator {
   void trackAttached(const char* name);
 };
 
+enum class StringChar { CodeAt, At };
+
 class MOZ_RAII CallIRGenerator : public IRGenerator {
  private:
   JSOp op_;
@@ -1489,9 +1497,16 @@ class MOZ_RAII CallIRGenerator : public IRGenerator {
   bool getTemplateObjectForNative(HandleFunction calleeFunc,
                                   MutableHandleObject result);
 
-  AttachDecision tryAttachArrayPush();
-  AttachDecision tryAttachArrayJoin();
-  AttachDecision tryAttachIsSuspendedGenerator();
+  void emitNativeCalleeGuard(HandleFunction callee);
+
+  AttachDecision tryAttachArrayPush(HandleFunction callee);
+  AttachDecision tryAttachArrayJoin(HandleFunction callee);
+  AttachDecision tryAttachIsSuspendedGenerator(HandleFunction callee);
+  AttachDecision tryAttachStringChar(HandleFunction callee, StringChar kind);
+  AttachDecision tryAttachStringCharCodeAt(HandleFunction callee);
+  AttachDecision tryAttachStringCharAt(HandleFunction callee);
+  AttachDecision tryAttachMathAbs(HandleFunction callee);
+
   AttachDecision tryAttachFunCall(HandleFunction calleeFunc);
   AttachDecision tryAttachFunApply(HandleFunction calleeFunc);
   AttachDecision tryAttachCallScripted(HandleFunction calleeFunc);

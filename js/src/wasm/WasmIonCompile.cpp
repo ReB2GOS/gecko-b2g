@@ -194,6 +194,8 @@ class FunctionCompiler {
         case ValType::I64:
           ins = MConstant::NewInt64(alloc(), 0);
           break;
+        case ValType::V128:
+          return iter().fail("Ion has no SIMD support yet");
         case ValType::F32:
           ins = MConstant::New(alloc(), Float32Value(0.f), MIRType::Float32);
           break;
@@ -1160,6 +1162,8 @@ class FunctionCompiler {
             def = MWasmRegisterResult::New(alloc(), MIRType::RefOrNull,
                                            result.gpr());
             break;
+          case wasm::ValType::V128:
+            return this->iter().fail("Ion has no SIMD support yet");
         }
       } else {
         MOZ_ASSERT(stackResultArea);
@@ -2344,11 +2348,12 @@ static bool EmitGetGlobal(FunctionCompiler& f) {
     case ValType::F64:
       result = f.constant(value.f64());
       break;
+    case ValType::V128:
+      return f.iter().fail("Ion has no SIMD support yet");
     case ValType::Ref:
       switch (value.type().refTypeKind()) {
         case RefType::Func:
         case RefType::Any:
-        case RefType::Null:
           MOZ_ASSERT(value.ref().isNull());
           result = f.nullRefConstant();
           break;
@@ -3850,7 +3855,7 @@ static bool EmitRefNull(FunctionCompiler& f) {
 
 static bool EmitRefIsNull(FunctionCompiler& f) {
   MDefinition* input;
-  if (!f.iter().readConversion(RefType::any(), ValType::I32, &input)) {
+  if (!f.iter().readRefIsNull(&input)) {
     return false;
   }
 
@@ -4345,6 +4350,15 @@ static bool EmitBodyExprs(FunctionCompiler& f) {
           default:
             return f.iter().unrecognizedOpcode(&op);
         }
+      }
+#endif
+
+      // SIMD operations
+#ifdef ENABLE_WASM_SIMD
+      case uint16_t(Op::SimdPrefix): {
+        // We should not implement anything in Ion, but focus on implementing it
+        // in Cranelift.
+        return f.iter().unrecognizedOpcode(&op);
       }
 #endif
 

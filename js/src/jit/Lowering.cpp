@@ -1415,7 +1415,6 @@ void LIRGenerator::visitAbs(MAbs* ins) {
     default:
       MOZ_CRASH();
   }
-
   defineReuseInput(lir, ins, 0);
 }
 
@@ -2193,13 +2192,33 @@ void LIRGenerator::visitTruncateToInt32(MTruncateToInt32* truncate) {
   }
 }
 
+void LIRGenerator::visitToBigInt(MToBigInt* ins) {
+  MDefinition* opd = ins->input();
+
+  switch (opd->type()) {
+    case MIRType::Value: {
+      auto* lir = new (alloc()) LValueToBigInt(useBox(opd));
+      assignSnapshot(lir, Bailout_NonPrimitiveInput);
+      define(lir, ins);
+      assignSafepoint(lir, ins);
+      break;
+    }
+
+    case MIRType::BigInt:
+      redefine(ins, opd);
+      break;
+
+    default:
+      MOZ_CRASH("unexpected type");
+  }
+}
+
 void LIRGenerator::visitToInt64(MToInt64* ins) {
   MDefinition* opd = ins->input();
 
   switch (opd->type()) {
     case MIRType::Value: {
-      LValueToInt64* lir =
-          new (alloc()) LValueToInt64(useBox(opd), temp(), tempToUnbox());
+      auto* lir = new (alloc()) LValueToInt64(useBox(opd), temp());
       assignSnapshot(lir, Bailout_NonPrimitiveInput);
       defineInt64(lir, ins);
       assignSafepoint(lir, ins);
@@ -2207,18 +2226,13 @@ void LIRGenerator::visitToInt64(MToInt64* ins) {
     }
 
     case MIRType::Boolean: {
-      LBooleanToInt64* lir =
-          new (alloc()) LBooleanToInt64(useRegisterAtStart(opd));
+      auto* lir = new (alloc()) LBooleanToInt64(useRegisterAtStart(opd));
       defineInt64(lir, ins);
-      assignSafepoint(lir, ins);
       break;
     }
 
     case MIRType::String: {
-      LStringToInt64* lir =
-          new (alloc()) LStringToInt64(useRegister(opd), temp());
-      // May bail out on parse failure.
-      assignSnapshot(lir, Bailout_NonPrimitiveInput);
+      auto* lir = new (alloc()) LStringToInt64(useRegister(opd));
       defineInt64(lir, ins);
       assignSafepoint(lir, ins);
       break;
@@ -2240,15 +2254,14 @@ void LIRGenerator::visitToInt64(MToInt64* ins) {
 
 void LIRGenerator::visitTruncateBigIntToInt64(MTruncateBigIntToInt64* ins) {
   MOZ_ASSERT(ins->input()->type() == MIRType::BigInt);
-  LTruncateBigIntToInt64* lir =
-      new (alloc()) LTruncateBigIntToInt64(useRegister(ins->input()));
+  auto* lir = new (alloc()) LTruncateBigIntToInt64(useRegister(ins->input()));
   defineInt64(lir, ins);
 }
 
 void LIRGenerator::visitInt64ToBigInt(MInt64ToBigInt* ins) {
   MOZ_ASSERT(ins->input()->type() == MIRType::Int64);
-  LInt64ToBigInt* lir =
-      new (alloc()) LInt64ToBigInt(useInt64(ins->input()), temp(), temp());
+  auto* lir =
+      new (alloc()) LInt64ToBigInt(useInt64Register(ins->input()), temp());
   define(lir, ins);
   assignSafepoint(lir, ins);
 }
@@ -2629,10 +2642,11 @@ void LIRGenerator::visitMaybeCopyElementsForWrite(
   assignSafepoint(check, ins);
 }
 
-void LIRGenerator::visitLoadSlot(MLoadSlot* ins) {
+void LIRGenerator::visitLoadDynamicSlot(MLoadDynamicSlot* ins) {
   switch (ins->type()) {
     case MIRType::Value:
-      defineBox(new (alloc()) LLoadSlotV(useRegisterAtStart(ins->slots())),
+      defineBox(new (alloc())
+                    LLoadDynamicSlotV(useRegisterAtStart(ins->slots())),
                 ins);
       break;
 
@@ -2641,8 +2655,8 @@ void LIRGenerator::visitLoadSlot(MLoadSlot* ins) {
       MOZ_CRASH("typed load must have a payload");
 
     default:
-      define(new (alloc())
-                 LLoadSlotT(useRegisterForTypedLoad(ins->slots(), ins->type())),
+      define(new (alloc()) LLoadDynamicSlotT(
+                 useRegisterForTypedLoad(ins->slots(), ins->type())),
              ins);
       break;
   }
@@ -2701,19 +2715,19 @@ void LIRGenerator::visitWasmReinterpret(MWasmReinterpret* ins) {
   }
 }
 
-void LIRGenerator::visitStoreSlot(MStoreSlot* ins) {
+void LIRGenerator::visitStoreDynamicSlot(MStoreDynamicSlot* ins) {
   LInstruction* lir;
 
   switch (ins->value()->type()) {
     case MIRType::Value:
       lir = new (alloc())
-          LStoreSlotV(useRegister(ins->slots()), useBox(ins->value()));
+          LStoreDynamicSlotV(useRegister(ins->slots()), useBox(ins->value()));
       add(lir, ins);
       break;
 
     case MIRType::Double:
-      add(new (alloc())
-              LStoreSlotT(useRegister(ins->slots()), useRegister(ins->value())),
+      add(new (alloc()) LStoreDynamicSlotT(useRegister(ins->slots()),
+                                           useRegister(ins->value())),
           ins);
       break;
 
@@ -2721,8 +2735,8 @@ void LIRGenerator::visitStoreSlot(MStoreSlot* ins) {
       MOZ_CRASH("Float32 shouldn't be stored in a slot.");
 
     default:
-      add(new (alloc()) LStoreSlotT(useRegister(ins->slots()),
-                                    useRegisterOrConstant(ins->value())),
+      add(new (alloc()) LStoreDynamicSlotT(useRegister(ins->slots()),
+                                           useRegisterOrConstant(ins->value())),
           ins);
       break;
   }
@@ -2968,21 +2982,25 @@ void LIRGenerator::visitGetNextEntryForIterator(MGetNextEntryForIterator* ins) {
   assignSafepoint(lir, ins);
 }
 
-void LIRGenerator::visitTypedArrayLength(MTypedArrayLength* ins) {
+void LIRGenerator::visitArrayBufferViewLength(MArrayBufferViewLength* ins) {
   MOZ_ASSERT(ins->object()->type() == MIRType::Object);
-  define(new (alloc()) LTypedArrayLength(useRegisterAtStart(ins->object())),
+  define(new (alloc())
+             LArrayBufferViewLength(useRegisterAtStart(ins->object())),
          ins);
 }
 
-void LIRGenerator::visitTypedArrayByteOffset(MTypedArrayByteOffset* ins) {
+void LIRGenerator::visitArrayBufferViewByteOffset(
+    MArrayBufferViewByteOffset* ins) {
   MOZ_ASSERT(ins->object()->type() == MIRType::Object);
-  define(new (alloc()) LTypedArrayByteOffset(useRegisterAtStart(ins->object())),
+  define(new (alloc())
+             LArrayBufferViewByteOffset(useRegisterAtStart(ins->object())),
          ins);
 }
 
-void LIRGenerator::visitTypedArrayElements(MTypedArrayElements* ins) {
+void LIRGenerator::visitArrayBufferViewElements(MArrayBufferViewElements* ins) {
   MOZ_ASSERT(ins->type() == MIRType::Elements);
-  define(new (alloc()) LTypedArrayElements(useRegisterAtStart(ins->object())),
+  define(new (alloc())
+             LArrayBufferViewElements(useRegisterAtStart(ins->object())),
          ins);
 }
 
@@ -3152,7 +3170,7 @@ void LIRGenerator::visitInArray(MInArray* ins) {
 }
 
 void LIRGenerator::visitLoadElement(MLoadElement* ins) {
-  MOZ_ASSERT(IsValidElementsType(ins->elements(), ins->offsetAdjustment()));
+  MOZ_ASSERT(ins->elements()->type() == MIRType::Elements);
   MOZ_ASSERT(ins->index()->type() == MIRType::Int32);
 
   switch (ins->type()) {
@@ -3270,7 +3288,7 @@ void LIRGenerator::visitLoadElementFromState(MLoadElementFromState* ins) {
 }
 
 void LIRGenerator::visitStoreElement(MStoreElement* ins) {
-  MOZ_ASSERT(IsValidElementsType(ins->elements(), ins->offsetAdjustment()));
+  MOZ_ASSERT(ins->elements()->type() == MIRType::Elements);
   MOZ_ASSERT(ins->index()->type() == MIRType::Int32);
 
   const LUse elements = useRegister(ins->elements());
@@ -3470,34 +3488,95 @@ void LIRGenerator::visitStringSplit(MStringSplit* ins) {
 }
 
 void LIRGenerator::visitLoadUnboxedScalar(MLoadUnboxedScalar* ins) {
-  MOZ_ASSERT(IsValidElementsType(ins->elements(), ins->offsetAdjustment()));
+  MOZ_ASSERT(ins->elements()->type() == MIRType::Elements);
   MOZ_ASSERT(ins->index()->type() == MIRType::Int32);
 
   const LUse elements = useRegister(ins->elements());
   const LAllocation index = useRegisterOrConstant(ins->index());
 
-  MOZ_ASSERT(IsNumberType(ins->type()) || ins->type() == MIRType::Boolean);
-
-  // We need a temp register for Uint32Array with known double result.
-  LDefinition tempDef = LDefinition::BogusTemp();
-  if (ins->readType() == Scalar::Uint32 && IsFloatingPointType(ins->type())) {
-    tempDef = temp();
-  }
+  MOZ_ASSERT(IsNumericType(ins->type()) || ins->type() == MIRType::Boolean);
 
   Synchronization sync = Synchronization::Load();
   if (ins->requiresMemoryBarrier()) {
     LMemoryBarrier* fence = new (alloc()) LMemoryBarrier(sync.barrierBefore);
     add(fence, ins);
   }
-  LLoadUnboxedScalar* lir =
-      new (alloc()) LLoadUnboxedScalar(elements, index, tempDef);
+
+  if (!Scalar::isBigIntType(ins->storageType())) {
+    // We need a temp register for Uint32Array with known double result.
+    LDefinition tempDef = LDefinition::BogusTemp();
+    if (ins->storageType() == Scalar::Uint32 &&
+        IsFloatingPointType(ins->type())) {
+      tempDef = temp();
+    }
+
+    auto* lir = new (alloc()) LLoadUnboxedScalar(elements, index, tempDef);
+    if (ins->fallible()) {
+      assignSnapshot(lir, Bailout_Overflow);
+    }
+    define(lir, ins);
+  } else {
+    MOZ_ASSERT(ins->type() == MIRType::BigInt);
+
+    auto* lir =
+        new (alloc()) LLoadUnboxedBigInt(elements, index, temp(), tempInt64());
+    define(lir, ins);
+    assignSafepoint(lir, ins);
+  }
+
+  if (ins->requiresMemoryBarrier()) {
+    LMemoryBarrier* fence = new (alloc()) LMemoryBarrier(sync.barrierAfter);
+    add(fence, ins);
+  }
+}
+
+void LIRGenerator::visitLoadDataViewElement(MLoadDataViewElement* ins) {
+  MOZ_ASSERT(ins->elements()->type() == MIRType::Elements);
+  MOZ_ASSERT(ins->index()->type() == MIRType::Int32);
+
+  MOZ_ASSERT(IsNumericType(ins->type()));
+
+  const LUse elements = useRegister(ins->elements());
+  const LUse index = useRegister(ins->index());
+  const LAllocation littleEndian = useRegisterOrConstant(ins->littleEndian());
+
+  // We need a temp register for:
+  // - Uint32Array with known double result,
+  // - Float32Array,
+  // - and BigInt64Array and BigUint64Array.
+  LDefinition tempDef = LDefinition::BogusTemp();
+  if ((ins->storageType() == Scalar::Uint32 &&
+       IsFloatingPointType(ins->type())) ||
+      ins->storageType() == Scalar::Float32) {
+    tempDef = temp();
+  }
+  if (Scalar::isBigIntType(ins->storageType())) {
+#ifdef JS_CODEGEN_X86
+    // There are not enough registers on x86.
+    if (littleEndian.isConstant()) {
+      tempDef = temp();
+    }
+#else
+    tempDef = temp();
+#endif
+  }
+
+  // We also need a separate 64-bit temp register for:
+  // - Float64Array
+  // - and BigInt64Array and BigUint64Array.
+  LInt64Definition temp64Def = LInt64Definition::BogusTemp();
+  if (Scalar::byteSize(ins->storageType()) == 8) {
+    temp64Def = tempInt64();
+  }
+
+  auto* lir = new (alloc())
+      LLoadDataViewElement(elements, index, littleEndian, tempDef, temp64Def);
   if (ins->fallible()) {
     assignSnapshot(lir, Bailout_Overflow);
   }
   define(lir, ins);
-  if (ins->requiresMemoryBarrier()) {
-    LMemoryBarrier* fence = new (alloc()) LMemoryBarrier(sync.barrierAfter);
-    add(fence, ins);
+  if (Scalar::isBigIntType(ins->storageType())) {
+    assignSafepoint(lir, ins);
   }
 }
 
@@ -3546,17 +3625,28 @@ void LIRGenerator::visitLoadTypedArrayElementHole(
   const LUse object = useRegister(ins->object());
   const LAllocation index = useRegister(ins->index());
 
-  LLoadTypedArrayElementHole* lir =
-      new (alloc()) LLoadTypedArrayElementHole(object, index, temp());
-  if (ins->fallible()) {
-    assignSnapshot(lir, Bailout_Overflow);
+  if (!Scalar::isBigIntType(ins->arrayType())) {
+    auto* lir = new (alloc()) LLoadTypedArrayElementHole(object, index, temp());
+    if (ins->fallible()) {
+      assignSnapshot(lir, Bailout_Overflow);
+    }
+    defineBox(lir, ins);
+  } else {
+#ifdef JS_CODEGEN_X86
+    LDefinition tmp = LDefinition::BogusTemp();
+#else
+    LDefinition tmp = temp();
+#endif
+
+    auto* lir = new (alloc())
+        LLoadTypedArrayElementHoleBigInt(object, index, tmp, tempInt64());
+    defineBox(lir, ins);
+    assignSafepoint(lir, ins);
   }
-  defineBox(lir, ins);
-  assignSafepoint(lir, ins);
 }
 
 void LIRGenerator::visitStoreUnboxedScalar(MStoreUnboxedScalar* ins) {
-  MOZ_ASSERT(IsValidElementsType(ins->elements(), ins->offsetAdjustment()));
+  MOZ_ASSERT(ins->elements()->type() == MIRType::Elements);
   MOZ_ASSERT(ins->index()->type() == MIRType::Int32);
 
   if (ins->isFloatWrite()) {
@@ -3564,6 +3654,8 @@ void LIRGenerator::visitStoreUnboxedScalar(MStoreUnboxedScalar* ins) {
                   ins->value()->type() == MIRType::Float32);
     MOZ_ASSERT_IF(ins->writeType() == Scalar::Float64,
                   ins->value()->type() == MIRType::Double);
+  } else if (ins->isBigIntWrite()) {
+    MOZ_ASSERT(ins->value()->type() == MIRType::BigInt);
   } else {
     MOZ_ASSERT(ins->value()->type() == MIRType::Int32);
   }
@@ -3575,6 +3667,8 @@ void LIRGenerator::visitStoreUnboxedScalar(MStoreUnboxedScalar* ins) {
   // For byte arrays, the value has to be in a byte register on x86.
   if (ins->isByteWrite()) {
     value = useByteOpRegisterOrNonDoubleConstant(ins->value());
+  } else if (ins->isBigIntWrite()) {
+    value = useRegister(ins->value());
   } else {
     value = useRegisterOrNonDoubleConstant(ins->value());
   }
@@ -3588,11 +3682,55 @@ void LIRGenerator::visitStoreUnboxedScalar(MStoreUnboxedScalar* ins) {
     LMemoryBarrier* fence = new (alloc()) LMemoryBarrier(sync.barrierBefore);
     add(fence, ins);
   }
-  add(new (alloc()) LStoreUnboxedScalar(elements, index, value), ins);
+  if (!ins->isBigIntWrite()) {
+    add(new (alloc()) LStoreUnboxedScalar(elements, index, value), ins);
+  } else {
+    add(new (alloc()) LStoreUnboxedBigInt(elements, index, value, tempInt64()),
+        ins);
+  }
   if (ins->requiresMemoryBarrier()) {
     LMemoryBarrier* fence = new (alloc()) LMemoryBarrier(sync.barrierAfter);
     add(fence, ins);
   }
+}
+
+void LIRGenerator::visitStoreDataViewElement(MStoreDataViewElement* ins) {
+  MOZ_ASSERT(ins->elements()->type() == MIRType::Elements);
+  MOZ_ASSERT(ins->index()->type() == MIRType::Int32);
+  MOZ_ASSERT(ins->littleEndian()->type() == MIRType::Boolean);
+
+  if (ins->isFloatWrite()) {
+    MOZ_ASSERT_IF(ins->writeType() == Scalar::Float32,
+                  ins->value()->type() == MIRType::Float32);
+    MOZ_ASSERT_IF(ins->writeType() == Scalar::Float64,
+                  ins->value()->type() == MIRType::Double);
+  } else if (ins->isBigIntWrite()) {
+    MOZ_ASSERT(ins->value()->type() == MIRType::BigInt);
+  } else {
+    MOZ_ASSERT(ins->value()->type() == MIRType::Int32);
+  }
+
+  LUse elements = useRegister(ins->elements());
+  LUse index = useRegister(ins->index());
+  LAllocation value;
+  if (ins->isBigIntWrite()) {
+    value = useRegister(ins->value());
+  } else {
+    value = useRegisterOrNonDoubleConstant(ins->value());
+  }
+  LAllocation littleEndian = useRegisterOrConstant(ins->littleEndian());
+
+  LDefinition tempDef = LDefinition::BogusTemp();
+  LInt64Definition temp64Def = LInt64Definition::BogusTemp();
+  if (Scalar::byteSize(ins->writeType()) < 8) {
+    tempDef = temp();
+  } else {
+    temp64Def = tempInt64();
+  }
+
+  add(new (alloc()) LStoreDataViewElement(elements, index, value, littleEndian,
+                                          tempDef, temp64Def),
+      ins);
 }
 
 void LIRGenerator::visitStoreTypedArrayElementHole(
@@ -3606,6 +3744,8 @@ void LIRGenerator::visitStoreTypedArrayElementHole(
                   ins->value()->type() == MIRType::Float32);
     MOZ_ASSERT_IF(ins->arrayType() == Scalar::Float64,
                   ins->value()->type() == MIRType::Double);
+  } else if (ins->isBigIntWrite()) {
+    MOZ_ASSERT(ins->value()->type() == MIRType::BigInt);
   } else {
     MOZ_ASSERT(ins->value()->type() == MIRType::Int32);
   }
@@ -3613,19 +3753,28 @@ void LIRGenerator::visitStoreTypedArrayElementHole(
   LUse elements = useRegister(ins->elements());
   LAllocation length = useAny(ins->length());
   LAllocation index = useRegister(ins->index());
+
   // For byte arrays, the value has to be in a byte register on x86.
   LAllocation value;
   if (ins->isByteWrite()) {
     value = useByteOpRegisterOrNonDoubleConstant(ins->value());
+  } else if (ins->isBigIntWrite()) {
+    value = useRegister(ins->value());
   } else {
     value = useRegisterOrNonDoubleConstant(ins->value());
   }
 
-  LDefinition spectreTemp =
-      BoundsCheckNeedsSpectreTemp() ? temp() : LDefinition::BogusTemp();
-  auto* lir = new (alloc())
-      LStoreTypedArrayElementHole(elements, length, index, value, spectreTemp);
-  add(lir, ins);
+  if (!ins->isBigIntWrite()) {
+    LDefinition spectreTemp =
+        BoundsCheckNeedsSpectreTemp() ? temp() : LDefinition::BogusTemp();
+    auto* lir = new (alloc()) LStoreTypedArrayElementHole(
+        elements, length, index, value, spectreTemp);
+    add(lir, ins);
+  } else {
+    auto* lir = new (alloc()) LStoreTypedArrayElementHoleBigInt(
+        elements, length, index, value, tempInt64());
+    add(lir, ins);
+  }
 }
 
 void LIRGenerator::visitLoadFixedSlot(MLoadFixedSlot* ins) {
@@ -3654,7 +3803,31 @@ void LIRGenerator::visitLoadFixedSlotAndUnbox(MLoadFixedSlotAndUnbox* ins) {
   if (ins->fallible()) {
     assignSnapshot(lir, ins->bailoutKind());
   }
+  define(lir, ins);
+}
 
+void LIRGenerator::visitLoadDynamicSlotAndUnbox(MLoadDynamicSlotAndUnbox* ins) {
+  MDefinition* slots = ins->slots();
+  MOZ_ASSERT(slots->type() == MIRType::Slots);
+
+  auto* lir = new (alloc()) LLoadDynamicSlotAndUnbox(useRegisterAtStart(slots));
+  if (ins->fallible()) {
+    assignSnapshot(lir, ins->bailoutKind());
+  }
+  define(lir, ins);
+}
+
+void LIRGenerator::visitLoadElementAndUnbox(MLoadElementAndUnbox* ins) {
+  MDefinition* elements = ins->elements();
+  MDefinition* index = ins->index();
+  MOZ_ASSERT(elements->type() == MIRType::Elements);
+  MOZ_ASSERT(index->type() == MIRType::Int32);
+
+  auto* lir = new (alloc())
+      LLoadElementAndUnbox(useRegister(elements), useRegisterOrConstant(index));
+  if (ins->fallible()) {
+    assignSnapshot(lir, ins->bailoutKind());
+  }
   define(lir, ins);
 }
 
@@ -3810,18 +3983,25 @@ void LIRGenerator::visitGuardObjectIdentity(MGuardObjectIdentity* ins) {
   redefine(ins, ins->object());
 }
 
+void LIRGenerator::visitGuardSpecificAtom(MGuardSpecificAtom* ins) {
+  auto* guard = new (alloc()) LGuardSpecificAtom(useRegister(ins->str()));
+  assignSnapshot(guard, Bailout_SpecificAtomGuard);
+  add(guard, ins);
+  redefine(ins, ins->str());
+}
+
 void LIRGenerator::visitGuardShape(MGuardShape* ins) {
   MOZ_ASSERT(ins->object()->type() == MIRType::Object);
 
   if (JitOptions.spectreObjectMitigationsMisc) {
     auto* lir =
         new (alloc()) LGuardShape(useRegisterAtStart(ins->object()), temp());
-    assignSnapshot(lir, ins->bailoutKind());
+    assignSnapshot(lir, Bailout_ShapeGuard);
     defineReuseInput(lir, ins, 0);
   } else {
     auto* lir = new (alloc())
         LGuardShape(useRegister(ins->object()), LDefinition::BogusTemp());
-    assignSnapshot(lir, ins->bailoutKind());
+    assignSnapshot(lir, Bailout_ShapeGuard);
     add(lir, ins);
     redefine(ins, ins->object());
   }
@@ -3888,6 +4068,22 @@ void LIRGenerator::visitGuardReceiverPolymorphic(
     add(lir, ins);
     redefine(ins, ins->object());
   }
+}
+
+void LIRGenerator::visitGuardValue(MGuardValue* ins) {
+  MOZ_ASSERT(ins->value()->type() == MIRType::Value);
+  auto* lir = new (alloc()) LGuardValue(useBox(ins->value()));
+  assignSnapshot(lir, Bailout_ValueGuard);
+  add(lir, ins);
+  redefine(ins, ins->value());
+}
+
+void LIRGenerator::visitGuardNullOrUndefined(MGuardNullOrUndefined* ins) {
+  MOZ_ASSERT(ins->value()->type() == MIRType::Value);
+  auto* lir = new (alloc()) LGuardNullOrUndefined(useBox(ins->value()));
+  assignSnapshot(lir, Bailout_NullOrUndefinedGuard);
+  add(lir, ins);
+  redefine(ins, ins->value());
 }
 
 void LIRGenerator::visitAssertRange(MAssertRange* ins) {
@@ -4722,17 +4918,6 @@ void LIRGenerator::visitCheckIsObj(MCheckIsObj* ins) {
   MOZ_ASSERT(checkVal->type() == MIRType::Value);
 
   LCheckIsObj* lir = new (alloc()) LCheckIsObj(useBoxAtStart(checkVal));
-  redefine(ins, checkVal);
-  add(lir, ins);
-  assignSafepoint(lir, ins);
-}
-
-void LIRGenerator::visitCheckIsCallable(MCheckIsCallable* ins) {
-  MDefinition* checkVal = ins->checkValue();
-  MOZ_ASSERT(checkVal->type() == MIRType::Value);
-
-  LCheckIsCallable* lir =
-      new (alloc()) LCheckIsCallable(useBox(checkVal), temp());
   redefine(ins, checkVal);
   add(lir, ins);
   assignSafepoint(lir, ins);

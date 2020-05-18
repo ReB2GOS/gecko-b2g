@@ -36,21 +36,19 @@ static PHalChild* Hal() {
   return sHal;
 }
 
-void Vibrate(const nsTArray<uint32_t>& pattern, const WindowIdentifier& id) {
+void Vibrate(const nsTArray<uint32_t>& pattern, WindowIdentifier&& id) {
   HAL_LOG("Vibrate: Sending to parent process.");
 
-  AutoTArray<uint32_t, 8> p(pattern);
-
-  WindowIdentifier newID(id);
+  WindowIdentifier newID(std::move(id));
   newID.AppendProcessID();
-  Hal()->SendVibrate(p, newID.AsArray(),
+  Hal()->SendVibrate(pattern, newID.AsArray(),
                      BrowserChild::GetFrom(newID.GetWindow()));
 }
 
-void CancelVibrate(const WindowIdentifier& id) {
+void CancelVibrate(WindowIdentifier&& id) {
   HAL_LOG("CancelVibrate: Sending to parent process.");
 
-  WindowIdentifier newID(id);
+  WindowIdentifier newID(std::move(id));
   newID.AppendProcessID();
   Hal()->SendCancelVibrate(newID.AsArray(),
                            BrowserChild::GetFrom(newID.GetWindow()));
@@ -161,6 +159,37 @@ void NotifySwitchStateFromInputDevice(SwitchDevice aDevice, SwitchState aState) 
   MOZ_CRASH("Only the main process may notify switch state change.");
 }
 
+void
+EnableFlashlightNotifications()
+{
+  Hal()->SendEnableFlashlightNotifications();
+}
+
+void
+DisableFlashlightNotifications()
+{
+  Hal()->SendDisableFlashlightNotifications();
+}
+
+void
+RequestCurrentFlashlightState()
+{
+  Hal()->SendGetFlashlightEnabled();
+}
+
+bool
+GetFlashlightEnabled()
+{
+  MOZ_CRASH("GetFlashlightEnabled() can't be called from sandboxed contexts.");
+  return true;
+}
+
+void
+SetFlashlightEnabled(bool aEnabled)
+{
+  Hal()->SendSetFlashlightEnabled(aEnabled);
+}
+
 bool EnableAlarm() {
   MOZ_CRASH("Alarms can't be programmed from sandboxed contexts.  Yet.");
 }
@@ -213,7 +242,9 @@ class HalParent : public PHalParent,
                   public ISensorObserver,
                   public WakeLockObserver,
                   public ScreenConfigurationObserver,
-                  public SwitchObserver {
+                  public SwitchObserver,
+                  public FlashlightObserver
+{
  public:
   virtual void ActorDestroy(ActorDestroyReason aWhy) override {
     // NB: you *must* unconditionally unregister your observer here,
@@ -225,6 +256,7 @@ class HalParent : public PHalParent,
       hal::UnregisterSensorObserver(sensor, this);
     }
     hal::UnregisterWakeLockObserver(this);
+    hal::UnregisterFlashlightObserver(this);
   }
 
   virtual mozilla::ipc::IPCResult RecvVibrate(
@@ -236,8 +268,7 @@ class HalParent : public PHalParent,
     nsCOMPtr<nsIDOMWindow> window =
       do_QueryInterface(browserParent->GetBrowserDOMWindow());
     */
-    WindowIdentifier newID(id, nullptr);
-    hal::Vibrate(pattern, newID);
+    hal::Vibrate(pattern, WindowIdentifier(std::move(id), nullptr));
     return IPC_OK();
   }
 
@@ -248,9 +279,36 @@ class HalParent : public PHalParent,
     nsCOMPtr<nsIDOMWindow> window =
       browserParent->GetBrowserDOMWindow();
     */
-    WindowIdentifier newID(id, nullptr);
-    hal::CancelVibrate(newID);
+    hal::CancelVibrate(WindowIdentifier(std::move(id), nullptr));
     return IPC_OK();
+  }
+
+  virtual mozilla::ipc::IPCResult RecvEnableFlashlightNotifications() override {
+    hal::RegisterFlashlightObserver(this);
+    return IPC_OK();
+  }
+
+  virtual mozilla::ipc::IPCResult RecvDisableFlashlightNotifications() override {
+    hal::UnregisterFlashlightObserver(this);
+    return IPC_OK();
+  }
+
+  virtual mozilla::ipc::IPCResult RecvGetFlashlightEnabled() override {
+    bool flashlightState = hal::GetFlashlightEnabled();
+    FlashlightInformation flashlightInfo;
+    flashlightInfo.enabled() = flashlightState;
+    Unused << SendNotifyFlashlightState(flashlightInfo);
+    return IPC_OK();
+  }
+
+  virtual mozilla::ipc::IPCResult RecvSetFlashlightEnabled(
+      const bool& aEnabled) override {
+    hal::SetFlashlightEnabled(aEnabled);
+    return IPC_OK();
+  }
+
+  void Notify(const FlashlightInformation& aFlashlightInfo) override {
+    Unused << SendNotifyFlashlightState(aFlashlightInfo);
   }
 
   virtual mozilla::ipc::IPCResult RecvEnableBatteryNotifications() override {
@@ -469,6 +527,11 @@ class HalChild : public PHalChild {
 
   virtual mozilla::ipc::IPCResult RecvNotifySwitchChange(const mozilla::hal::SwitchEvent& aEvent) override {
     hal::NotifySwitchChange(aEvent);
+    return IPC_OK();
+  }
+
+  mozilla::ipc::IPCResult RecvNotifyFlashlightState(const FlashlightInformation& aFlashlightState) override {
+    hal::UpdateFlashlightState(aFlashlightState);
     return IPC_OK();
   }
 };

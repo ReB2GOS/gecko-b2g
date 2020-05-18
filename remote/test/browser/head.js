@@ -55,7 +55,9 @@ this.add_task = function(taskFn, opts = {}) {
         const browsingContextId = tab.linkedBrowser.browsingContext.id;
 
         const targets = await CDP.List();
-        target = targets.find(target => target.id === browsingContextId);
+        target = targets.find(
+          target => target.browsingContextId === browsingContextId
+        );
       }
 
       client = await CDP({ target });
@@ -276,6 +278,25 @@ async function loadURL(url, expectedURL = undefined) {
 }
 
 /**
+ * Enable the Runtime domain
+ */
+async function enableRuntime(client) {
+  const { Runtime } = client;
+
+  // Enable watching for new execution context
+  await Runtime.enable();
+  info("Runtime domain has been enabled");
+
+  // Calling Runtime.enable will emit executionContextCreated for the existing contexts
+  const { context } = await Runtime.executionContextCreated();
+  ok(!!context.id, "The execution context has an id");
+  ok(context.auxData.isDefault, "The execution context is the default one");
+  ok(!!context.auxData.frameId, "The execution context has a frame id set");
+
+  return context;
+}
+
+/**
  * Retrieve the value of a property on the content window.
  */
 function getContentProperty(prop) {
@@ -423,18 +444,23 @@ class RecordEvents {
    *     https://github.com/cyrus-and/chrome-remote-interface#clientdomaineventcallback
    * @param {string} options.eventName
    *     Name to use for reporting.
+   * @param {Function=} options.callback
+   *     ({ eventName, payload }) => {} to be called when each event is received
    * @param {function(payload):string=} options.messageFn
    */
   addRecorder(options = {}) {
     const {
       event,
       eventName,
-      messageFn = () => `Received ${eventName}`,
+      messageFn = () => `Recorded ${eventName}`,
+      callback,
     } = options;
+
     const promise = new Promise(resolve => {
       const unsubscribe = event(payload => {
         info(messageFn(payload));
-        this.events.push({ eventName, payload });
+        this.events.push({ eventName, payload, index: this.events.length });
+        callback?.({ eventName, payload, index: this.events.length - 1 });
         if (this.events.length > this.total) {
           this.subscriptions.delete(unsubscribe);
           unsubscribe();
@@ -443,14 +469,42 @@ class RecordEvents {
       });
       this.subscriptions.add(unsubscribe);
     });
+
     this.promises.add(promise);
+  }
+
+  /**
+   * Register a promise to await while recording the timeline. The returned
+   * callback resolves the registered promise and adds `step`
+   * to the timeline, along with an associated payload, if provided.
+   *
+   * @param {string} step
+   * @return {Function} callback
+   */
+  addPromise(step) {
+    let callback;
+    const promise = new Promise(resolve => {
+      callback = value => {
+        resolve();
+        info(`Recorded ${step}`);
+        this.events.push({
+          eventName: step,
+          payload: value,
+          index: this.events.length,
+        });
+        return value;
+      };
+    });
+
+    this.promises.add(promise);
+    return callback;
   }
 
   /**
    * Record events until we hit the timeout or the expected total is exceeded.
    *
    * @param {number=} timeout
-   *     milliseconds
+   *     Timeout in milliseconds. Defaults to 1000.
    *
    * @return {Array<{ eventName, payload }>} Recorded events
    */
@@ -475,5 +529,34 @@ class RecordEvents {
       return event.payload;
     }
     return {};
+  }
+
+  /**
+   * Find given events.
+   *
+   * @param {string} eventName
+   *
+   * @return {Array<object>}
+   *     The events payload, if any.
+   */
+  findEvents(eventName) {
+    return this.events
+      .filter(event => event.eventName == eventName)
+      .map(event => event.payload);
+  }
+
+  /**
+   * Find index of first occurrence of the given event.
+   *
+   * @param {string} eventName
+   *
+   * @return {number} The event index, -1 if not found.
+   */
+  indexOf(eventName) {
+    const event = this.events.find(el => el.eventName == eventName);
+    if (event) {
+      return event.index;
+    }
+    return -1;
   }
 }

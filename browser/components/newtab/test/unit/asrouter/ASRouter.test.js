@@ -790,7 +790,7 @@ describe("ASRouter", () => {
       // Since we've previously gotten messages during init and we haven't advanced our fake timer,
       // no updates should be triggered.
       await Router.loadMessagesFromAllProviders();
-      assert.equal(Router.state, previousState);
+      assert.deepEqual(Router.state, previousState);
     });
     it("should not trigger an update if we only have local providers", async () => {
       await createRouterAndInit([
@@ -803,11 +803,14 @@ describe("ASRouter", () => {
       ]);
 
       const previousState = Router.state;
+      const stub = sandbox.stub(MessageLoaderUtils, "loadMessagesForProvider");
 
       clock.tick(300);
 
       await Router.loadMessagesFromAllProviders();
-      assert.equal(Router.state, previousState);
+
+      assert.deepEqual(Router.state, previousState);
+      assert.notCalled(stub);
     });
     it("should apply personalization if defined", async () => {
       personalizedCfrScores = { FOO: 1, BAR: 2 };
@@ -2642,6 +2645,22 @@ describe("ASRouter", () => {
           "tab"
         );
       });
+      it("should call openLinkIn with the entrypoint params on OPEN_ABOUT_PAGE", async () => {
+        let [testMessage] = Router.state.messages;
+        testMessage.button_action = {
+          type: "OPEN_ABOUT_PAGE",
+          data: { args: "something", entrypoint: "entryPoint=foo" },
+        };
+        const msg = fakeExecuteUserAction(testMessage.button_action);
+        await Router.onMessage(msg);
+
+        assert.calledOnce(msg.target.browser.ownerGlobal.openTrustedLinkIn);
+        assert.calledWith(
+          msg.target.browser.ownerGlobal.openTrustedLinkIn,
+          "about:something?entryPoint=foo",
+          "tab"
+        );
+      });
       it("should call MigrationUtils.showMigrationWizard on SHOW_MIGRATION_WIZARD", async () => {
         let [testMessage] = Router.state.messages;
         testMessage.button_action = {
@@ -2703,6 +2722,21 @@ describe("ASRouter", () => {
         assert.calledWith(
           msg.target.browser.ownerGlobal.openPreferences,
           "something"
+        );
+      });
+      it("should call openPreferences with the correct params on OPEN_PREFERENCES_PAGE (snippets payload)", async () => {
+        let [testMessage] = Router.state.messages;
+        testMessage.button_action = {
+          type: "OPEN_PREFERENCES_PAGE",
+          data: { args: "arg_from_snippets" },
+        };
+        const msg = fakeExecuteUserAction(testMessage.button_action);
+        await Router.onMessage(msg);
+
+        assert.calledOnce(msg.target.browser.ownerGlobal.openPreferences);
+        assert.calledWith(
+          msg.target.browser.ownerGlobal.openPreferences,
+          "arg_from_snippets"
         );
       });
       it("should call openPreferences with the correct entrypoint if defined", async () => {

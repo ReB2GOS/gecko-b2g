@@ -50,6 +50,8 @@ MOZ_MUST_USE bool EliminateDeadResumePointOperands(MIRGenerator* mir,
 
 MOZ_MUST_USE bool EliminateDeadCode(MIRGenerator* mir, MIRGraph& graph);
 
+MOZ_MUST_USE bool FoldLoadsWithUnbox(MIRGenerator* mir, MIRGraph& graph);
+
 MOZ_MUST_USE bool ApplyTypeInformation(MIRGenerator* mir, MIRGraph& graph);
 
 void RenumberBlocks(MIRGraph& graph);
@@ -172,7 +174,9 @@ bool DeadIfUnused(const MDefinition* def);
 
 bool IsDiscardable(const MDefinition* def);
 
-void DumpMIRExpressions(MIRGraph& graph);
+class CompileInfo;
+void DumpMIRExpressions(MIRGraph& graph, const CompileInfo& info,
+                        const char* phase);
 
 }  // namespace jit
 }  // namespace js

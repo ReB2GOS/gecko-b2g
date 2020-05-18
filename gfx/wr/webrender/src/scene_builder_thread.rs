@@ -607,7 +607,7 @@ impl SceneBuilderThread {
 
         let mut discard_frame_state_for_pipelines = Vec::new();
         let mut removed_pipelines = Vec::new();
-        let rebuild_scene = !txn.scene_ops.is_empty();
+        let mut rebuild_scene = false;
         for message in txn.scene_ops.drain(..) {
             match message {
                 SceneMsg::UpdateEpoch(pipeline_id, epoch) => {
@@ -644,6 +644,11 @@ impl SceneBuilderThread {
                         continue;
                     }
 
+                    // Note: We could further reduce the amount of unnecessary scene
+                    // building by keeping track of which pipelines are used by the
+                    // scene (bug 1490751).
+                    rebuild_scene = true;
+
                     scene.set_display_list(
                         pipeline_id,
                         epoch,
@@ -668,7 +673,10 @@ impl SceneBuilderThread {
                     }
                 }
                 SceneMsg::SetRootPipeline(pipeline_id) => {
-                    scene.set_root_pipeline_id(pipeline_id);
+                    if scene.root_pipeline_id != Some(pipeline_id) {
+                        rebuild_scene = true;
+                        scene.set_root_pipeline_id(pipeline_id);
+                    }
                 }
                 SceneMsg::RemovePipeline(pipeline_id) => {
                     scene.remove_pipeline(pipeline_id);

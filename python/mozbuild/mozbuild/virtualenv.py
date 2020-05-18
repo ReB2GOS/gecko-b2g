@@ -12,7 +12,6 @@ import os
 import shutil
 import subprocess
 import sys
-import warnings
 
 from distutils.version import LooseVersion
 
@@ -441,33 +440,6 @@ class VirtualenvManager(object):
                 old_env_variables[k] = os.environ[k]
                 del os.environ[k]
 
-            # HACK ALERT.
-            #
-            # The following adjustment to the VSNNCOMNTOOLS environment
-            # variables are wrong. This is done as a hack to facilitate the
-            # building of binary Python packages - notably psutil - on Windows
-            # machines that don't have the Visual Studio 2008 binaries
-            # installed. This hack assumes the Python on that system was built
-            # with Visual Studio 2008. The hack is wrong for the reasons
-            # explained at
-            # http://stackoverflow.com/questions/3047542/building-lxml-for-python-2-7-on-windows/5122521#5122521.
-            if sys.platform in ('win32', 'cygwin') and \
-                    'VS90COMNTOOLS' not in os.environ:
-
-                warnings.warn('Hacking environment to allow binary Python '
-                              'extensions to build. You can make this warning go away '
-                              'by installing Visual Studio 2008. You can download the '
-                              'Express Edition installer from '
-                              'http://go.microsoft.com/?linkid=7729279')
-
-                # We list in order from oldest to newest to prefer the closest
-                # to 2008 so differences are minimized.
-                for ver in ('100', '110', '120'):
-                    var = 'VS%sCOMNTOOLS' % ver
-                    if var in os.environ:
-                        os.environ['VS90COMNTOOLS'] = os.environ[var]
-                        break
-
             for package in packages:
                 handle_package(package)
 
@@ -531,6 +503,9 @@ class VirtualenvManager(object):
         else:
             thismodule = __file__
 
+        # __PYVENV_LAUNCHER__ confuses pip about the python interpreter
+        # See https://bugzilla.mozilla.org/show_bug.cgi?id=1635481
+        os.environ.pop('__PYVENV_LAUNCHER__', None)
         args = [self.python_path, thismodule, 'populate', self.topsrcdir,
                 self.topobjdir, self.virtualenv_root, self.manifest_path]
 

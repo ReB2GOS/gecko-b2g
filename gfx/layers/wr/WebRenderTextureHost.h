@@ -85,11 +85,13 @@ class WebRenderTextureHost : public TextureHost {
 
   bool NeedsYFlip() const override;
 
+  void MaybeNofityForUse(wr::TransactionBuilder& aTxn);
+
  protected:
   void CreateRenderTextureHost(const SurfaceDescriptor& aDesc,
                                TextureHost* aTexture);
 
-  RefPtr<TextureHost> mWrappedTextureHost;
+  const RefPtr<TextureHost> mWrappedTextureHost;
   wr::ExternalImageId mExternalImageId;
 };
 

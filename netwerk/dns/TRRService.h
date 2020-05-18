@@ -53,8 +53,8 @@ class TRRService : public nsIObserver,
                               bool pb,
                               const nsACString& aOriginSuffix) override;
   LookupStatus CompleteLookupByType(nsHostRecord*, nsresult,
-                                    const nsTArray<nsCString>*, uint32_t,
-                                    bool pb) override;
+                                    mozilla::net::TypeRecordResultType&,
+                                    uint32_t, bool pb) override;
   void TRRBlacklist(const nsACString& host, const nsACString& originSuffix,
                     bool privateBrowsing, bool aParentsToo);
   bool IsTRRBlacklisted(const nsACString& aHost,
@@ -106,6 +106,8 @@ class TRRService : public nsIObserver,
   void CheckURIPrefs();
   void ProcessURITemplate(nsACString& aURI);
   void ClearEntireCache();
+
+  static uint32_t ModeFromPrefs();
 
   bool mInitialized;
   Atomic<uint32_t, Relaxed> mMode;

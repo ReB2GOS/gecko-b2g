@@ -12,6 +12,7 @@
 #include "nsAccCache.h"
 #include "nsAccessiblePivot.h"
 #include "nsAccUtils.h"
+#include "nsDeckFrame.h"
 #include "nsEventShell.h"
 #include "nsTextEquivUtils.h"
 #include "Role.h"
@@ -1042,6 +1043,13 @@ void DocAccessible::ARIAAttributeChanged(Accessible* aAccessible,
     return;
   }
 
+  if (aAttribute == nsGkAtoms::aria_haspopup) {
+    RefPtr<AccEvent> event =
+        new AccStateChangeEvent(aAccessible, states::HASPOPUP);
+    FireDelayedEvent(event);
+    return;
+  }
+
   if (aAttribute == nsGkAtoms::aria_owns) {
     mNotificationController->ScheduleRelocation(aAccessible);
   }
@@ -1110,6 +1118,12 @@ void DocAccessible::ContentStateChanged(dom::Document* aDocument,
   if (aStateMask.HasState(NS_EVENT_STATE_INVALID)) {
     RefPtr<AccEvent> event =
         new AccStateChangeEvent(accessible, states::INVALID, true);
+    FireDelayedEvent(event);
+  }
+
+  if (aStateMask.HasState(NS_EVENT_STATE_REQUIRED)) {
+    RefPtr<AccEvent> event =
+        new AccStateChangeEvent(accessible, states::REQUIRED);
     FireDelayedEvent(event);
   }
 

@@ -76,7 +76,7 @@ StaticAutoPtr<WindowIdentifier::IDArrayType> gLastIDToVibrate;
 
 static void RecordLastIDToVibrate(const WindowIdentifier& aId) {
   if (!InSandbox()) {
-    *gLastIDToVibrate = aId.AsArray();
+    *gLastIDToVibrate = aId.AsArray().Clone();
   }
 }
 
@@ -107,7 +107,7 @@ void Vibrate(const nsTArray<uint32_t>& pattern, nsPIDOMWindowInner* window) {
   Vibrate(pattern, WindowIdentifier(window));
 }
 
-void Vibrate(const nsTArray<uint32_t>& pattern, const WindowIdentifier& id) {
+void Vibrate(const nsTArray<uint32_t>& pattern, WindowIdentifier&& id) {
   AssertMainThread();
 
   // Only active windows may start vibrations.  If |id| hasn't gone
@@ -126,21 +126,23 @@ void Vibrate(const nsTArray<uint32_t>& pattern, const WindowIdentifier& id) {
   // Don't forward our ID if we are not in the sandbox, because hal_impl
   // doesn't need it, and we don't want it to be tempted to read it.  The
   // empty identifier will assert if it's used.
-  PROXY_IF_SANDBOXED(Vibrate(pattern, InSandbox() ? id : WindowIdentifier()));
+  PROXY_IF_SANDBOXED(
+      Vibrate(pattern, InSandbox() ? std::move(id) : WindowIdentifier()));
 }
 
 void CancelVibrate(nsPIDOMWindowInner* window) {
   CancelVibrate(WindowIdentifier(window));
 }
 
-void CancelVibrate(const WindowIdentifier& id) {
+void CancelVibrate(WindowIdentifier&& id) {
   AssertMainThread();
 
   if (MayCancelVibration(id)) {
     // Don't forward our ID if we are not in the sandbox, because hal_impl
     // doesn't need it, and we don't want it to be tempted to read it.  The
     // empty identifier will assert if it's used.
-    PROXY_IF_SANDBOXED(CancelVibrate(InSandbox() ? id : WindowIdentifier()));
+    PROXY_IF_SANDBOXED(
+        CancelVibrate(InSandbox() ? std::move(id) : WindowIdentifier()));
   }
 }
 
@@ -323,6 +325,62 @@ void GetCurrentBatteryInformation(BatteryInformation* aInfo) {
 void NotifyBatteryChange(const BatteryInformation& aInfo) {
   BatteryObservers()->CacheInformation(aInfo);
   BatteryObservers()->BroadcastCachedInformation();
+}
+
+class FlashlightObserversManager : public ObserversManager<FlashlightInformation>
+{
+protected:
+  void EnableNotifications() {
+    PROXY_IF_SANDBOXED(EnableFlashlightNotifications());
+  }
+
+  void DisableNotifications() {
+    PROXY_IF_SANDBOXED(DisableFlashlightNotifications());
+  }
+};
+
+static FlashlightObserversManager sFlashlightObservers;
+
+void
+RegisterFlashlightObserver(FlashlightObserver* aObserver)
+{
+  AssertMainThread();
+  sFlashlightObservers.AddObserver(aObserver);
+}
+
+void
+UnregisterFlashlightObserver(FlashlightObserver* aObserver)
+{
+  AssertMainThread();
+  sFlashlightObservers.RemoveObserver(aObserver);
+}
+
+void
+UpdateFlashlightState(const FlashlightInformation& aFlashlightState)
+{
+  AssertMainThread();
+  sFlashlightObservers.BroadcastInformation(aFlashlightState);
+}
+
+void
+RequestCurrentFlashlightState()
+{
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(RequestCurrentFlashlightState());
+}
+
+bool
+GetFlashlightEnabled()
+{
+  AssertMainThread();
+  RETURN_PROXY_IF_SANDBOXED(GetFlashlightEnabled(), true);
+}
+
+void
+SetFlashlightEnabled(bool aEnabled)
+{
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(SetFlashlightEnabled(aEnabled));
 }
 
 bool GetScreenEnabled()

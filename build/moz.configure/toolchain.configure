@@ -370,8 +370,8 @@ add_old_configure_assignment('TOOLCHAIN_PREFIX', first_toolchain_prefix)
 include('compilers-util.configure')
 
 
-def try_preprocess(compiler, language, source):
-    return try_invoke_compiler(compiler, language, source, ['-E'])
+def try_preprocess(compiler, language, source, onerror=None):
+    return try_invoke_compiler(compiler, language, source, ['-E'], onerror)
 
 
 @imports(_from='mozbuild.configure.constants', _import='CompilerType')
@@ -1970,8 +1970,22 @@ set_config('CARGO_INCREMENTAL', cargo_incremental)
 
 # Linker detection
 # ==============================================================
-
-
+# The policy is as follows:
+# For Windows:
+# - the linker is picked via the LINKER environment variable per windows.configure,
+#   but ought to be llvm-lld in any case.
+# For macOS:
+# - the linker is ld64, either from XCode on macOS, or from cctools-ports when
+#   cross-compiling. lld can be enabled manually, but as of writing, mach-o support
+#   for lld is incomplete.
+# For other OSes:
+# - on local developer builds: lld is used if present. Otherwise gold is used if present
+#   otherwise, BFD ld is used.
+# - on release/official builds: whatever "ld" resolves to is used, except on Android x86_64
+#   where BFD ld is used. Usually, "ld" resolves to BFD ld, except with the Android NDK,
+#   where it resolves to gold. lld is not used by default on Linux and Android because
+#   it introduces layout changes that prevent elfhack from working. See e.g.
+#   https://bugzilla.mozilla.org/show_bug.cgi?id=1563654#c2.
 @depends(target)
 def is_linker_option_enabled(target):
     if target.kernel not in ('WINNT', 'SunOS'):
@@ -2051,6 +2065,9 @@ def select_linker(linker, c_compiler, developer_options, enable_gold,
         # specific to it on stderr when it fails to process --version.
         env = dict(os.environ)
         env['LD_PRINT_OPTIONS'] = '1'
+        # Some locales might not print out the strings we are looking for, so
+        # ensure consistent output.
+        env['LC_ALL'] = 'C'
         retcode, stdout, stderr = get_cmd_output(*cmd, env=env)
         if retcode == 1 and 'Logging ld64 options' in stderr:
             kind = 'ld64'

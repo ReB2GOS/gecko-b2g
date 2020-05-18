@@ -12,19 +12,6 @@ common_options = [("processStartTime", "true"),
                   ("firefox.android.intentArgument", "'-d'"),
                   ("firefox.android.intentArgument", url)]
 
-app_options = {
-    "org.mozilla.geckoview_example": [
-        ("firefox.android.activity", "'org.mozilla.geckoview_example.GeckoViewActivity'")
-    ],
-    "org.mozilla.fennec_aurora": [
-        ("firefox.android.activity", "'org.mozilla.fenix.IntentReceiverActivity'")
-    ],
-    "org.mozilla.firefox": [
-        ("firefox.android.activity", "'org.mozilla.gecko.BrowserApp'")
-    ]
-}
-
 
 def before_runs(env, **kw):
     add_options(env, common_options)
-    add_options(env, app_options[env.get_arg("android-app-name")])

@@ -90,6 +90,7 @@ class BrowserParent final : public PBrowserParent,
                             public TabContext,
                             public LiveResizeListener {
   typedef mozilla::dom::ClonedMessageData ClonedMessageData;
+  using TapType = GeckoContentController_TapType;
 
   friend class PBrowserParent;
 
@@ -119,6 +120,8 @@ class BrowserParent final : public PBrowserParent,
    * is focused.
    */
   static BrowserParent* GetFocused();
+
+  static BrowserParent* GetLastMouseRemoteTarget();
 
   static BrowserParent* GetFrom(nsFrameLoader* aFrameLoader);
 
@@ -412,6 +415,8 @@ class BrowserParent final : public PBrowserParent,
   mozilla::ipc::IPCResult RecvRequestFocus(const bool& aCanRaise,
                                            const CallerType aCallerType);
 
+  mozilla::ipc::IPCResult RecvWheelZoomChange(bool aIncrease);
+
   mozilla::ipc::IPCResult RecvLookUpDictionary(
       const nsString& aText, nsTArray<mozilla::FontRange>&& aFontRangeArray,
       const bool& aIsVertical, const LayoutDeviceIntPoint& aPoint);
@@ -567,8 +572,7 @@ class BrowserParent final : public PBrowserParent,
   mozilla::ipc::IPCResult RecvResetPrefersReducedMotionOverrideForTest();
 
   void SendMouseEvent(const nsAString& aType, float aX, float aY,
-                      int32_t aButton, int32_t aClickCount, int32_t aModifiers,
-                      bool aIgnoreRootScrollFrame);
+                      int32_t aButton, int32_t aClickCount, int32_t aModifiers);
 
   /**
    * The following Send*Event() marks aEvent as posted to remote process if
@@ -851,7 +855,12 @@ class BrowserParent final : public PBrowserParent,
   // Recomputes sFocus and returns it.
   static BrowserParent* UpdateFocus();
 
-  void OnSubFrameCrashed();
+  // Keeps track of which BrowserParent the real mouse event is sent to.
+  static BrowserParent* sLastMouseRemoteTarget;
+
+  // Unsetter for LastMouseRemoteTarget; only unsets if argument matches
+  // current sLastMouseRemoteTarget.
+  static void UnsetLastMouseRemoteTarget(BrowserParent* aBrowserParent);
 
   struct APZData {
     bool operator==(const APZData& aOther) {

@@ -9,10 +9,15 @@ use serde::{ser::SerializeMap, Serialize, Serializer};
 use serde_json::{Map, Value as JsonValue};
 use sql_support::{self, ConnExt};
 
-// These constants are defined by the chrome.storage.sync spec.
-const QUOTA_BYTES: usize = 102_400;
-const QUOTA_BYTES_PER_ITEM: usize = 8_192;
-const MAX_ITEMS: usize = 512;
+// These constants are defined by the chrome.storage.sync spec. We export them
+// publicly from this module, then from the crate, so they wind up in the
+// clients.
+// Note the limits for `chrome.storage.sync` and `chrome.storage.local` are
+// different, and these are from `.sync` - we'll have work to do if we end up
+// wanting this to be used for `.local` too!
+pub const SYNC_QUOTA_BYTES: usize = 102_400;
+pub const SYNC_QUOTA_BYTES_PER_ITEM: usize = 8_192;
+pub const SYNC_MAX_ITEMS: usize = 512;
 // Note there are also constants for "operations per minute" etc, which aren't
 // enforced here.
 
@@ -38,43 +43,83 @@ fn get_from_db(conn: &Connection, ext_id: &str) -> Result<Option<JsonMap>> {
 }
 
 fn save_to_db(tx: &Transaction<'_>, ext_id: &str, val: &JsonValue) -> Result<()> {
-    // The quota is enforced on the byte count, which is what .len() returns.
-    let sval = val.to_string();
-    if sval.len() > QUOTA_BYTES {
-        return Err(ErrorKind::QuotaError(QuotaReason::TotalBytes).into());
+    // This function also handles removals. Either an empty map or explicit null
+    // is a removal. If there's a mirror record for this extension ID, then we
+    // must leave a tombstone behind for syncing.
+    let is_delete = match val {
+        JsonValue::Null => true,
+        JsonValue::Object(m) => m.is_empty(),
+        _ => false,
+    };
+    if is_delete {
+        let in_mirror = tx
+            .try_query_one(
+                "SELECT EXISTS(SELECT 1 FROM storage_sync_mirror WHERE ext_id = :ext_id);",
+                rusqlite::named_params! {
+                    ":ext_id": ext_id,
+                },
+                true,
+            )?
+            .unwrap_or_default();
+        if in_mirror {
+            log::trace!("saving data for '{}': leaving a tombstone", ext_id);
+            tx.execute_named_cached(
+                "
+                INSERT INTO storage_sync_data(ext_id, data, sync_change_counter)
+                VALUES (:ext_id, NULL, 1)
+                ON CONFLICT (ext_id) DO UPDATE
+                SET data = NULL, sync_change_counter = sync_change_counter + 1",
+                rusqlite::named_params! {
+                    ":ext_id": ext_id,
+                },
+            )?;
+        } else {
+            log::trace!("saving data for '{}': removing the row", ext_id);
+            tx.execute_named_cached(
+                "
+                DELETE FROM storage_sync_data WHERE ext_id = :ext_id",
+                rusqlite::named_params! {
+                    ":ext_id": ext_id,
+                },
+            )?;
+        }
+    } else {
+        // Convert to bytes so we can enforce the quota.
+        let sval = val.to_string();
+        if sval.len() > SYNC_QUOTA_BYTES {
+            return Err(ErrorKind::QuotaError(QuotaReason::TotalBytes).into());
+        }
+        log::trace!("saving data for '{}': writing", ext_id);
+        tx.execute_named_cached(
+            "INSERT INTO storage_sync_data(ext_id, data, sync_change_counter)
+                VALUES (:ext_id, :data, 1)
+                ON CONFLICT (ext_id) DO UPDATE
+                set data=:data, sync_change_counter = sync_change_counter + 1",
+            rusqlite::named_params! {
+                ":ext_id": ext_id,
+                ":data": &sval,
+            },
+        )?;
     }
-    // XXX - sync support will need to do the change_counter thing here.
-    tx.execute_named(
-        "INSERT OR REPLACE INTO storage_sync_data(ext_id, data)
-            VALUES (:ext_id, :data)",
-        &[(":ext_id", &ext_id), (":data", &sval)],
-    )?;
     Ok(())
 }
 
 fn remove_from_db(tx: &Transaction<'_>, ext_id: &str) -> Result<()> {
-    // XXX - sync support will need to do the tombstone thing here.
-    tx.execute_named(
-        "DELETE FROM storage_sync_data
-        WHERE ext_id = :ext_id",
-        &[(":ext_id", &ext_id)],
-    )?;
-    Ok(())
+    save_to_db(tx, ext_id, &JsonValue::Null)
 }
 
 // This is a "helper struct" for the callback part of the chrome.storage spec,
 // but shaped in a way to make it more convenient from the rust side of the
-// world. The strings are all json, we keeping them as strings here makes
-// various things easier and avoid a round-trip to/from json/string.
+// world.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageValueChange {
     #[serde(skip_serializing)]
     key: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    old_value: Option<String>,
+    old_value: Option<JsonValue>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    new_value: Option<String>,
+    new_value: Option<JsonValue>,
 }
 
 // This is, largely, a helper so that this serializes correctly as per the
@@ -121,6 +166,14 @@ impl Serialize for StorageChanges {
     }
 }
 
+// A helper to determine the size of a key/value combination from the
+// perspective of quota and getBytesInUse().
+pub fn get_quota_size_of(key: &str, v: &JsonValue) -> usize {
+    // Reading the chrome docs literally re the quota, the length of the key
+    // is just the string len, but the value is the json val, as bytes.
+    key.len() + v.to_string().len()
+}
+
 /// The implementation of `storage[.sync].set()`. On success this returns the
 /// StorageChanges defined by the chrome API - it's assumed the caller will
 /// arrange to deliver this to observers as defined in that API.
@@ -138,21 +191,18 @@ pub fn set(tx: &Transaction<'_>, ext_id: &str, val: JsonValue) -> Result<Storage
     // iterate over the value we are adding/updating.
     for (k, v) in val_map.into_iter() {
         let old_value = current.remove(&k);
-        if current.len() >= MAX_ITEMS {
+        if current.len() >= SYNC_MAX_ITEMS {
             return Err(ErrorKind::QuotaError(QuotaReason::MaxItems).into());
         }
-        // Setup the change entry for this key, and we can leverage it to check
-        // for the quota.
-        let new_value_s = v.to_string();
         // Reading the chrome docs literally re the quota, the length of the key
         // is just the string len, but the value is the json val, as bytes
-        if k.len() + new_value_s.len() >= QUOTA_BYTES_PER_ITEM {
+        if get_quota_size_of(&k, &v) > SYNC_QUOTA_BYTES_PER_ITEM {
             return Err(ErrorKind::QuotaError(QuotaReason::ItemBytes).into());
         }
         let change = StorageValueChange {
             key: k.clone(),
-            old_value: old_value.map(|ov| ov.to_string()),
-            new_value: Some(new_value_s),
+            old_value,
+            new_value: Some(v.clone()),
         };
         changes.push(change);
         current.insert(k, v);
@@ -226,7 +276,7 @@ pub fn remove(tx: &Transaction<'_>, ext_id: &str, keys: JsonValue) -> Result<Sto
         if let Some(v) = existing.remove(&key) {
             result.push(StorageValueChange {
                 key,
-                old_value: Some(v.to_string()),
+                old_value: Some(v),
                 new_value: None,
             });
         }
@@ -250,14 +300,37 @@ pub fn clear(tx: &Transaction<'_>, ext_id: &str) -> Result<StorageChanges> {
         result.push(StorageValueChange {
             key: key.to_string(),
             new_value: None,
-            old_value: Some(val.to_string()),
+            old_value: Some(val),
         });
     }
     remove_from_db(tx, ext_id)?;
     Ok(result)
 }
 
-// TODO - get_bytes_in_use()
+/// The implementation of `storage[.sync].getBytesInUse()`.
+pub fn get_bytes_in_use(conn: &Connection, ext_id: &str, keys: JsonValue) -> Result<usize> {
+    let maybe_existing = get_from_db(conn, ext_id)?;
+    let existing = match maybe_existing {
+        None => return Ok(0),
+        Some(v) => v,
+    };
+    // Make an array of all the keys we we are going to count.
+    let keys: Vec<&str> = match &keys {
+        JsonValue::Null => existing.keys().map(|v| v.as_str()).collect(),
+        JsonValue::String(name) => vec![name.as_str()],
+        JsonValue::Array(names) => names.iter().filter_map(|v| v.as_str()).collect(),
+        // in the spirit of json-based APIs, silently ignore strange things.
+        _ => return Ok(0),
+    };
+    // We must use the same way of counting as our quota enforcement.
+    let mut size = 0;
+    for key in keys.into_iter() {
+        if let Some(v) = existing.get(key) {
+            size += get_quota_size_of(key, &v);
+        }
+    }
+    Ok(size)
+}
 
 #[cfg(test)]
 mod tests {
@@ -270,11 +343,22 @@ mod tests {
         let c = StorageChanges {
             changes: vec![StorageValueChange {
                 key: "key".to_string(),
-                old_value: Some("old".to_string()),
+                old_value: Some(json!("old")),
                 new_value: None,
             }],
         };
         assert_eq!(serde_json::to_string(&c)?, r#"{"key":{"oldValue":"old"}}"#);
+        let c = StorageChanges {
+            changes: vec![StorageValueChange {
+                key: "key".to_string(),
+                old_value: None,
+                new_value: Some(json!({"foo": "bar"})),
+            }],
+        };
+        assert_eq!(
+            serde_json::to_string(&c)?,
+            r#"{"key":{"newValue":{"foo":"bar"}}}"#
+        );
         Ok(())
     }
 
@@ -283,8 +367,8 @@ mod tests {
         for (name, old_value, new_value) in changes {
             r.push(StorageValueChange {
                 key: (*name).to_string(),
-                old_value: old_value.as_ref().map(|v| v.to_string()),
-                new_value: new_value.as_ref().map(|v| v.to_string()),
+                old_value: old_value.clone(),
+                new_value: new_value.clone(),
             });
         }
         r
@@ -293,9 +377,8 @@ mod tests {
     #[test]
     fn test_simple() -> Result<()> {
         let ext_id = "x";
-        let db = new_mem_db();
-        let mut conn = db.writer.lock().unwrap();
-        let tx = conn.transaction()?;
+        let mut db = new_mem_db();
+        let tx = db.transaction()?;
 
         // an empty store.
         for q in vec![
@@ -350,11 +433,20 @@ mod tests {
             remove(&tx, &ext_id, json!("foo"))?,
             make_changes(&[("foo", Some(json!("new")), None)]),
         );
+
+        assert_eq!(
+            set(&tx, &ext_id, json!({"foo": {"sub-object": "sub-value"}}))?,
+            make_changes(&[("foo", None, Some(json!({"sub-object": "sub-value"}))),])
+        );
+
         // XXX - other variants.
 
         assert_eq!(
             clear(&tx, &ext_id)?,
-            make_changes(&[("other", Some(json!("also new")), None)]),
+            make_changes(&[
+                ("foo", Some(json!({"sub-object": "sub-value"})), None),
+                ("other", Some(json!("also new")), None),
+            ]),
         );
         assert_eq!(get(&tx, &ext_id, JsonValue::Null)?, json!({}));
 
@@ -365,9 +457,8 @@ mod tests {
     fn test_check_get_impl() -> Result<()> {
         // This is a port of checkGetImpl in test_ext_storage.js in Desktop.
         let ext_id = "x";
-        let db = new_mem_db();
-        let mut conn = db.writer.lock().unwrap();
-        let tx = conn.transaction()?;
+        let mut db = new_mem_db();
+        let tx = db.transaction()?;
 
         let prop = "test-prop";
         let value = "test-value";
@@ -421,9 +512,8 @@ mod tests {
     fn test_bug_1621162() -> Result<()> {
         // apparently Firefox, unlike Chrome, will not optimize the changes.
         // See bug 1621162 for more!
-        let db = new_mem_db();
-        let mut conn = db.writer.lock().unwrap();
-        let tx = conn.transaction()?;
+        let mut db = new_mem_db();
+        let tx = db.transaction()?;
         let ext_id = "xyz";
 
         set(&tx, &ext_id, json!({"foo": "bar" }))?;
@@ -437,11 +527,10 @@ mod tests {
 
     #[test]
     fn test_quota_maxitems() -> Result<()> {
-        let db = new_mem_db();
-        let mut conn = db.writer.lock().unwrap();
-        let tx = conn.transaction()?;
+        let mut db = new_mem_db();
+        let tx = db.transaction()?;
         let ext_id = "xyz";
-        for i in 1..MAX_ITEMS + 1 {
+        for i in 1..SYNC_MAX_ITEMS + 1 {
             set(
                 &tx,
                 &ext_id,
@@ -458,16 +547,20 @@ mod tests {
 
     #[test]
     fn test_quota_bytesperitem() -> Result<()> {
-        let db = new_mem_db();
-        let mut conn = db.writer.lock().unwrap();
-        let tx = conn.transaction()?;
+        let mut db = new_mem_db();
+        let tx = db.transaction()?;
         let ext_id = "xyz";
         // A string 5 bytes less than the max. This should be counted as being
-        // 3 bytes less than the max as the quotes are counted.
-        let val = "x".repeat(QUOTA_BYTES_PER_ITEM - 5);
+        // 3 bytes less than the max as the quotes are counted. Plus the length
+        // of the key (no quotes) means we should come in 2 bytes under.
+        let val = "x".repeat(SYNC_QUOTA_BYTES_PER_ITEM - 5);
 
         // Key length doesn't push it over.
         set(&tx, &ext_id, json!({ "x": val }))?;
+        assert_eq!(
+            get_bytes_in_use(&tx, &ext_id, json!("x"))?,
+            SYNC_QUOTA_BYTES_PER_ITEM - 2
+        );
 
         // Key length does push it over.
         let e = set(&tx, &ext_id, json!({ "xxxx": val })).unwrap_err();
@@ -475,6 +568,38 @@ mod tests {
             ErrorKind::QuotaError(QuotaReason::ItemBytes) => {}
             _ => panic!("unexpected error type"),
         };
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_bytes_in_use() -> Result<()> {
+        let mut db = new_mem_db();
+        let tx = db.transaction()?;
+        let ext_id = "xyz";
+
+        assert_eq!(get_bytes_in_use(&tx, &ext_id, json!(null))?, 0);
+
+        set(&tx, &ext_id, json!({ "a": "a" }))?; // should be 4
+        set(&tx, &ext_id, json!({ "b": "bb" }))?; // should be 5
+        set(&tx, &ext_id, json!({ "c": "ccc" }))?; // should be 6
+        set(&tx, &ext_id, json!({ "n": 999_999 }))?; // should be 7
+
+        assert_eq!(get_bytes_in_use(&tx, &ext_id, json!("x"))?, 0);
+        assert_eq!(get_bytes_in_use(&tx, &ext_id, json!("a"))?, 4);
+        assert_eq!(get_bytes_in_use(&tx, &ext_id, json!("b"))?, 5);
+        assert_eq!(get_bytes_in_use(&tx, &ext_id, json!("c"))?, 6);
+        assert_eq!(get_bytes_in_use(&tx, &ext_id, json!("n"))?, 7);
+
+        assert_eq!(get_bytes_in_use(&tx, &ext_id, json!(["a"]))?, 4);
+        assert_eq!(get_bytes_in_use(&tx, &ext_id, json!(["a", "x"]))?, 4);
+        assert_eq!(get_bytes_in_use(&tx, &ext_id, json!(["a", "b"]))?, 9);
+        assert_eq!(get_bytes_in_use(&tx, &ext_id, json!(["a", "c"]))?, 10);
+
+        assert_eq!(
+            get_bytes_in_use(&tx, &ext_id, json!(["a", "b", "c", "n"]))?,
+            22
+        );
+        assert_eq!(get_bytes_in_use(&tx, &ext_id, json!(null))?, 22);
         Ok(())
     }
 }

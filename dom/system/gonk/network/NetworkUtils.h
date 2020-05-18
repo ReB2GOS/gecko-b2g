@@ -11,7 +11,6 @@
 #include "mozilla/FileUtils.h"
 #include "nsTArray.h"
 #include "NetIdManager.h"
-#include "nsAutoPtr.h"
 
 class NetworkParams;
 class CommandChain;
@@ -157,7 +156,7 @@ class NetworkParams {
   nsString mCmd;
   nsString mDomain;
   nsString mGateway;
-  nsTArray<nsString> mGateways;
+  CopyableTArray<nsString> mGateways;
   nsString mIfname;
   long mNetworkType;
   nsString mIp;
@@ -175,14 +174,14 @@ class NetworkParams {
   nsString mKey;
   nsString mPrefix;
   nsString mLink;
-  nsTArray<nsString> mInterfaceList;
+  CopyableTArray<nsString> mInterfaceList;
   nsString mWifiStartIp;
   nsString mWifiEndIp;
   nsString mUsbStartIp;
   nsString mUsbEndIp;
   nsString mDns1;
   nsString mDns2;
-  nsTArray<nsString> mDnses;
+  CopyableTArray<nsString> mDnses;
   nsString mStartIp;
   nsString mEndIp;
   nsString mServerIp;
@@ -200,7 +199,7 @@ class NetworkParams {
   long mDns1_long;
   long mDns2_long;
   long mMtu;
-  nsTArray<nsString> mIPv6Routes;
+  CopyableTArray<nsString> mIPv6Routes;
   nsString mIpv6Ip;
   nsString mIPv6Prefix;
   nsString mNat64Prefix;
@@ -428,7 +427,7 @@ class NetworkUtils final {
   /*
    * Utility class to access libnetutils.
    */
-  nsAutoPtr<NetUtils> mNetUtils;
+  mozilla::UniquePtr<NetUtils> mNetUtils;
 
   NetIdManager mNetIdManager;
 };

@@ -126,7 +126,7 @@ class nsDisplayCanvas final : public nsPaintedDisplayItem {
         RefPtr<WebRenderCanvasData> canvasData =
             aManager->CommandBuilder()
                 .CreateOrRecycleWebRenderUserData<WebRenderCanvasData>(
-                    this, aBuilder.GetRenderRoot(), &isRecycled);
+                    this, &isRecycled);
         nsHTMLCanvasFrame* canvasFrame =
             static_cast<nsHTMLCanvasFrame*>(mFrame);
         if (!canvasFrame->UpdateWebRenderCanvasData(aDisplayListBuilder,
@@ -135,7 +135,7 @@ class nsDisplayCanvas final : public nsPaintedDisplayItem {
         }
         WebRenderCanvasRendererAsync* data = canvasData->GetCanvasRenderer();
         MOZ_ASSERT(data);
-        data->UpdateCompositableClient(aBuilder.GetRenderRoot());
+        data->UpdateCompositableClient();
 
         // Push IFrame for async image pipeline.
         // XXX Remove this once partial display list update is supported.
@@ -179,8 +179,7 @@ class nsDisplayCanvas final : public nsPaintedDisplayItem {
         aManager->WrBridge()->AddWebRenderParentCommand(
             OpUpdateAsyncImagePipeline(data->GetPipelineId().value(), scBounds,
                                        scTransform, scaleToSize, filter,
-                                       mixBlendMode),
-            aBuilder.GetRenderRoot());
+                                       mixBlendMode));
         break;
       }
       case CanvasContextType::WebGPU: {
@@ -199,7 +198,7 @@ class nsDisplayCanvas final : public nsPaintedDisplayItem {
         RefPtr<WebRenderLocalCanvasData> canvasData =
             aManager->CommandBuilder()
                 .CreateOrRecycleWebRenderUserData<WebRenderLocalCanvasData>(
-                    this, aBuilder.GetRenderRoot(), &isRecycled);
+                    this, &isRecycled);
         if (!canvasContext->UpdateWebRenderLocalCanvasData(canvasData)) {
           return true;
         }
@@ -216,6 +215,13 @@ class nsDisplayCanvas final : public nsPaintedDisplayItem {
         LayoutDeviceRect bounds = LayoutDeviceRect::FromAppUnits(
             dest, mFrame->PresContext()->AppUnitsPerDevPixel());
 
+        const RGBDescriptor rgbDesc(canvasSizeInPx, canvasData->mFormat, false);
+        const auto targetStride = ImageDataSerializer::GetRGBStride(rgbDesc);
+        const bool preferCompositorSurface = true;
+        const wr::ImageDescriptor imageDesc(
+            canvasSizeInPx, targetStride, canvasData->mFormat,
+            wr::OpacityType::Opaque, preferCompositorSurface);
+
         wr::ImageKey imageKey;
         auto imageKeyMaybe = canvasContext->GetImageKey();
         // Check that the key exists, and its namespace matches the active
@@ -225,16 +231,8 @@ class nsDisplayCanvas final : public nsPaintedDisplayItem {
           imageKey = imageKeyMaybe.value();
         } else {
           imageKey = canvasContext->CreateImageKey(aManager);
-          const RGBDescriptor rgbDesc(canvasSizeInPx, canvasData->mFormat,
-                                      false);
-          const auto targetStride = ImageDataSerializer::GetRGBStride(rgbDesc);
-          const bool preferCompositorSurface = true;
-          const wr::ImageDescriptor imageDesc(
-              canvasSizeInPx, targetStride, canvasData->mFormat,
-              wr::OpacityType::Opaque, preferCompositorSurface);
           aResources.AddPrivateExternalImage(canvasContext->mExternalImageId,
                                              imageKey, imageDesc);
-          canvasData->mDescriptor = imageDesc;
         }
 
         mozilla::wr::ImageRendering rendering = wr::ToImageRendering(
@@ -242,6 +240,7 @@ class nsDisplayCanvas final : public nsPaintedDisplayItem {
         aBuilder.PushImage(wr::ToLayoutRect(bounds), wr::ToLayoutRect(bounds),
                            !BackfaceIsHidden(), rendering, imageKey);
 
+        canvasData->mDescriptor = imageDesc;
         canvasData->mImageKey = imageKey;
         canvasData->RequestFrameReadback();
         break;
@@ -257,7 +256,7 @@ class nsDisplayCanvas final : public nsPaintedDisplayItem {
         RefPtr<WebRenderCanvasData> canvasData =
             aManager->CommandBuilder()
                 .CreateOrRecycleWebRenderUserData<WebRenderCanvasData>(
-                    this, aBuilder.GetRenderRoot(), &isRecycled);
+                    this, &isRecycled);
         if (!canvasFrame->UpdateWebRenderCanvasData(aDisplayListBuilder,
                                                     canvasData)) {
           canvasData->ClearImageContainer();

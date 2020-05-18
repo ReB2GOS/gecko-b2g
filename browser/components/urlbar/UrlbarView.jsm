@@ -389,7 +389,7 @@ class UrlbarView {
       return false;
     }
 
-    if (!this.input.openViewOnFocus || !queryOptions.event) {
+    if (!queryOptions.event) {
       return false;
     }
 
@@ -400,6 +400,7 @@ class UrlbarView {
       if (
         // Do not show Top Sites in private windows.
         !this.input.isPrivate &&
+        this.input.openViewOnFocus &&
         !this.isOpen &&
         ["mousedown", "command"].includes(queryOptions.event.type)
       ) {
@@ -439,7 +440,13 @@ class UrlbarView {
     queryOptions.autofillIgnoresSelection = true;
     queryOptions.event.interactionType = "returned";
 
-    this._openPanel();
+    if (
+      this._queryContext &&
+      this._queryContext.results &&
+      this._queryContext.results.length
+    ) {
+      this._openPanel();
+    }
 
     // If we had cached results, this will just refresh them, avoiding results
     // flicker, otherwise there may be some noise.
@@ -450,6 +457,7 @@ class UrlbarView {
   // UrlbarController listener methods.
   onQueryStarted(queryContext) {
     this._queryWasCancelled = false;
+    this._queryUpdatedResults = false;
     this._startRemoveStaleRowsTimer();
   }
 
@@ -460,9 +468,16 @@ class UrlbarView {
 
   onQueryFinished(queryContext) {
     this._cancelRemoveStaleRowsTimer();
-    // If the query has not been canceled, remove stale rows immediately.
     if (!this._queryWasCancelled) {
-      this._removeStaleRows();
+      // If the query has not been canceled and returned some results, remove
+      // stale rows immediately. If no results were returned, just clear and
+      // close the view.
+      if (this._queryUpdatedResults) {
+        this._removeStaleRows();
+      } else {
+        this.clear();
+        this.close();
+      }
     }
   }
 
@@ -473,6 +488,7 @@ class UrlbarView {
     if (!this.isOpen) {
       this.clear();
     }
+    this._queryUpdatedResults = true;
     this._updateResults(queryContext);
 
     let firstResult = queryContext.results[0];
