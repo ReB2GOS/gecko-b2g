@@ -39,6 +39,12 @@ ac_add_options --enable-small-chunk-size
 ac_add_options --with-android-ndk=$ANDROID_NDK
 ac_add_options --with-android-version=$PLATFORM_VERSION
 
+if [ "$HOST_OS" == "Darwin" ]; then
+  ac_add_options --with-android-toolchain=$ANDROID_NDK/toolchains/arm-linux-androideabi-4.9/prebuilt/darwin-x86_64
+else
+      
+fi
+
 # Use sccache
 ac_add_options --with-ccache=sccache
 
