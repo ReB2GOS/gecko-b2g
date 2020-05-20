@@ -48,11 +48,14 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(B2G)
 #ifdef MOZ_B2G_CAMERA
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCameraManager)
 #endif
-#ifndef DISABLE_WIFI
+#if defined(MOZ_WIDGET_GONK) && !defined(DISABLE_WIFI)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWifiManager)
 #endif
 #ifdef MOZ_AUDIO_CHANNEL_MANAGER
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAudioChannelManager)
+#endif
+#ifdef MOZ_B2G_FM
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFMRadio)
 #endif
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
@@ -276,7 +279,7 @@ nsDOMCameraManager* B2G::GetCameras(ErrorResult& aRv) {
 }
 #endif // MOZ_B2G_CAMERA
 
-#ifndef DISABLE_WIFI
+#if defined(MOZ_WIDGET_GONK) && !defined(DISABLE_WIFI)
 WifiManager* B2G::GetWifiManager(ErrorResult& aRv) {
   if (!mWifiManager) {
     if (!mOwner) {
@@ -291,7 +294,7 @@ WifiManager* B2G::GetWifiManager(ErrorResult& aRv) {
   }
   return mWifiManager;
 }
-#endif
+#endif // MOZ_WIDGET_GONK && !DISABLE_WIFI
 
 /* static */
 bool B2G::HasCameraSupport(JSContext* /* unused */, JSObject* aGlobal) {
@@ -303,8 +306,8 @@ bool B2G::HasCameraSupport(JSContext* /* unused */, JSObject* aGlobal) {
 
 /* static */
 bool B2G::HasWifiManagerSupport(JSContext* /* unused */, JSObject* aGlobal) {
-#ifdef DISABLE_WIFI
-  return false;
+#if defined(MOZ_WIDGET_GONK) && !defined(DISABLE_WIFI)
+  return true;
 #endif
   // On XBL scope, the global object is NOT |window|. So we have
   // to use nsContentUtils::GetObjectPrincipal to get the principal
@@ -350,6 +353,20 @@ system::AudioChannelManager* B2G::GetAudioChannelManager(ErrorResult& aRv) {
     mAudioChannelManager->Init(mOwner);
   }
   return mAudioChannelManager;
+}
+#endif
+
+#ifdef MOZ_B2G_FM
+FMRadio* B2G::GetFmRadio(ErrorResult& aRv) {
+  if (!mFMRadio) {
+    if (!mOwner) {
+      aRv.Throw(NS_ERROR_UNEXPECTED);
+      return nullptr;
+    }
+    mFMRadio = new FMRadio();
+    mFMRadio->Init(mOwner);
+  }
+  return mFMRadio;
 }
 #endif
 

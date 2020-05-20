@@ -17,11 +17,11 @@ interface WifiHasInternetEvent : Event
    * Network object with a SSID field describing the network affected by
    * this change.
    */
-  readonly attribute any network;
+  readonly attribute WifiNetwork? network;
 };
 
 dictionary WifiHasInternetEventInit : EventInit
 {
   boolean hasInternet = false;
-  any network = null;
+  WifiNetwork? network = null;
 };

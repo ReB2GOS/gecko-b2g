@@ -13,6 +13,7 @@
 #ifdef JS_HAS_INTL_API
 #  include "builtin/intl/Collator.h"
 #  include "builtin/intl/DateTimeFormat.h"
+#  include "builtin/intl/DisplayNames.h"
 #  include "builtin/intl/ListFormat.h"
 #  include "builtin/intl/NumberFormat.h"
 #  include "builtin/intl/PluralRules.h"
@@ -112,6 +113,7 @@ static bool CanInlineCrossRealm(InlinableNative native) {
 
     case InlinableNative::IntlGuardToCollator:
     case InlinableNative::IntlGuardToDateTimeFormat:
+    case InlinableNative::IntlGuardToDisplayNames:
     case InlinableNative::IntlGuardToListFormat:
     case InlinableNative::IntlGuardToNumberFormat:
     case InlinableNative::IntlGuardToPluralRules:
@@ -370,6 +372,8 @@ IonBuilder::InliningResult IonBuilder::inlineNativeCall(CallInfo& callInfo,
       return inlineGuardToClass(callInfo, &CollatorObject::class_);
     case InlinableNative::IntlGuardToDateTimeFormat:
       return inlineGuardToClass(callInfo, &DateTimeFormatObject::class_);
+    case InlinableNative::IntlGuardToDisplayNames:
+      return inlineGuardToClass(callInfo, &DisplayNamesObject::class_);
     case InlinableNative::IntlGuardToListFormat:
       return inlineGuardToClass(callInfo, &ListFormatObject::class_);
     case InlinableNative::IntlGuardToNumberFormat:
@@ -381,6 +385,7 @@ IonBuilder::InliningResult IonBuilder::inlineNativeCall(CallInfo& callInfo,
 #else
     case InlinableNative::IntlGuardToCollator:
     case InlinableNative::IntlGuardToDateTimeFormat:
+    case InlinableNative::IntlGuardToDisplayNames:
     case InlinableNative::IntlGuardToListFormat:
     case InlinableNative::IntlGuardToNumberFormat:
     case InlinableNative::IntlGuardToPluralRules:
@@ -422,43 +427,43 @@ IonBuilder::InliningResult IonBuilder::inlineNativeCall(CallInfo& callInfo,
     case InlinableNative::MathSign:
       return inlineMathSign(callInfo);
     case InlinableNative::MathSin:
-      return inlineMathFunction(callInfo, MMathFunction::Sin);
+      return inlineMathFunction(callInfo, UnaryMathFunction::Sin);
     case InlinableNative::MathTan:
-      return inlineMathFunction(callInfo, MMathFunction::Tan);
+      return inlineMathFunction(callInfo, UnaryMathFunction::Tan);
     case InlinableNative::MathCos:
-      return inlineMathFunction(callInfo, MMathFunction::Cos);
+      return inlineMathFunction(callInfo, UnaryMathFunction::Cos);
     case InlinableNative::MathExp:
-      return inlineMathFunction(callInfo, MMathFunction::Exp);
+      return inlineMathFunction(callInfo, UnaryMathFunction::Exp);
     case InlinableNative::MathLog:
-      return inlineMathFunction(callInfo, MMathFunction::Log);
+      return inlineMathFunction(callInfo, UnaryMathFunction::Log);
     case InlinableNative::MathASin:
-      return inlineMathFunction(callInfo, MMathFunction::ASin);
+      return inlineMathFunction(callInfo, UnaryMathFunction::ASin);
     case InlinableNative::MathATan:
-      return inlineMathFunction(callInfo, MMathFunction::ATan);
+      return inlineMathFunction(callInfo, UnaryMathFunction::ATan);
     case InlinableNative::MathACos:
-      return inlineMathFunction(callInfo, MMathFunction::ACos);
+      return inlineMathFunction(callInfo, UnaryMathFunction::ACos);
     case InlinableNative::MathLog10:
-      return inlineMathFunction(callInfo, MMathFunction::Log10);
+      return inlineMathFunction(callInfo, UnaryMathFunction::Log10);
     case InlinableNative::MathLog2:
-      return inlineMathFunction(callInfo, MMathFunction::Log2);
+      return inlineMathFunction(callInfo, UnaryMathFunction::Log2);
     case InlinableNative::MathLog1P:
-      return inlineMathFunction(callInfo, MMathFunction::Log1P);
+      return inlineMathFunction(callInfo, UnaryMathFunction::Log1P);
     case InlinableNative::MathExpM1:
-      return inlineMathFunction(callInfo, MMathFunction::ExpM1);
+      return inlineMathFunction(callInfo, UnaryMathFunction::ExpM1);
     case InlinableNative::MathCosH:
-      return inlineMathFunction(callInfo, MMathFunction::CosH);
+      return inlineMathFunction(callInfo, UnaryMathFunction::CosH);
     case InlinableNative::MathSinH:
-      return inlineMathFunction(callInfo, MMathFunction::SinH);
+      return inlineMathFunction(callInfo, UnaryMathFunction::SinH);
     case InlinableNative::MathTanH:
-      return inlineMathFunction(callInfo, MMathFunction::TanH);
+      return inlineMathFunction(callInfo, UnaryMathFunction::TanH);
     case InlinableNative::MathACosH:
-      return inlineMathFunction(callInfo, MMathFunction::ACosH);
+      return inlineMathFunction(callInfo, UnaryMathFunction::ACosH);
     case InlinableNative::MathASinH:
-      return inlineMathFunction(callInfo, MMathFunction::ASinH);
+      return inlineMathFunction(callInfo, UnaryMathFunction::ASinH);
     case InlinableNative::MathATanH:
-      return inlineMathFunction(callInfo, MMathFunction::ATanH);
+      return inlineMathFunction(callInfo, UnaryMathFunction::ATanH);
     case InlinableNative::MathCbrt:
-      return inlineMathFunction(callInfo, MMathFunction::Cbrt);
+      return inlineMathFunction(callInfo, UnaryMathFunction::Cbrt);
 
     // Reflect natives.
     case InlinableNative::ReflectGetPrototypeOf:
@@ -735,7 +740,7 @@ MIRType IonBuilder::getInlineReturnType() {
 }
 
 IonBuilder::InliningResult IonBuilder::inlineMathFunction(
-    CallInfo& callInfo, MMathFunction::Function function) {
+    CallInfo& callInfo, UnaryMathFunction function) {
   if (callInfo.constructing()) {
     return InliningStatus_NotInlined;
   }
@@ -1424,7 +1429,7 @@ IonBuilder::InliningResult IonBuilder::inlineMathFloor(CallInfo& callInfo) {
                               RoundingMode::Down);
       } else {
         ins = MMathFunction::New(alloc(), callInfo.getArg(0),
-                                 MMathFunction::Floor);
+                                 UnaryMathFunction::Floor);
       }
 
       current->add(ins);
@@ -1476,7 +1481,7 @@ IonBuilder::InliningResult IonBuilder::inlineMathCeil(CallInfo& callInfo) {
                               RoundingMode::Up);
       } else {
         ins = MMathFunction::New(alloc(), callInfo.getArg(0),
-                                 MMathFunction::Ceil);
+                                 UnaryMathFunction::Ceil);
       }
 
       current->add(ins);
@@ -1542,8 +1547,8 @@ IonBuilder::InliningResult IonBuilder::inlineMathRound(CallInfo& callInfo) {
 
   if (IsFloatingPointType(argType) && returnType == MIRType::Double) {
     callInfo.setImplicitlyUsedUnchecked();
-    MMathFunction* ins =
-        MMathFunction::New(alloc(), callInfo.getArg(0), MMathFunction::Round);
+    MMathFunction* ins = MMathFunction::New(alloc(), callInfo.getArg(0),
+                                            UnaryMathFunction::Round);
     current->add(ins);
     current->push(ins);
     return InliningStatus_Inlined;
@@ -1778,7 +1783,7 @@ IonBuilder::InliningResult IonBuilder::inlineMathTrunc(CallInfo& callInfo) {
                               RoundingMode::TowardsZero);
       } else {
         ins = MMathFunction::New(alloc(), callInfo.getArg(0),
-                                 MMathFunction::Trunc);
+                                 UnaryMathFunction::Trunc);
       }
 
       current->add(ins);
@@ -3633,7 +3638,7 @@ IonBuilder::InliningResult IonBuilder::inlineToInteger(CallInfo& callInfo) {
       ins = MNearbyInt::New(alloc(), input, MIRType::Double,
                             RoundingMode::TowardsZero);
     } else {
-      ins = MMathFunction::New(alloc(), input, MMathFunction::Trunc);
+      ins = MMathFunction::New(alloc(), input, UnaryMathFunction::Trunc);
     }
     current->add(ins);
 
@@ -4218,19 +4223,10 @@ IonBuilder::InliningResult IonBuilder::inlineWasmCall(CallInfo& callInfo,
       inst.metadata(bestTier).lookupFuncExport(funcIndex);
   const wasm::FuncType& sig = funcExport.funcType();
 
-// Bug 1631656 - Don't try to inline with I64 args on 32-bit platforms because
-// it is more difficult (because it requires multiple LIR arguments per I64).
-#ifdef JS_64BIT
-  bool bigIntEnabled = inst.code().metadata().bigIntEnabled;
-#else
-  bool bigIntEnabled = false;
-#endif
-
   // Check that the function doesn't take or return non-compatible JS
   // argument types before adding nodes to the MIR graph, otherwise they'd be
   // dead code.
-  if ((sig.hasI64ArgOrRet() && !bigIntEnabled) ||
-      sig.temporarilyUnsupportedReftypeForInlineEntry() ||
+  if (sig.temporarilyUnsupportedReftypeForInlineEntry() ||
       !JitOptions.enableWasmIonFastCalls) {
     return InliningStatus_NotInlined;
   }
@@ -4250,19 +4246,25 @@ IonBuilder::InliningResult IonBuilder::inlineWasmCall(CallInfo& callInfo,
     return InliningStatus_NotInlined;
   }
 
-  // Bug 1631650 - On 64-bit platforms, we give up inlining for I64 args
+  // Bug 1631656 - Don't try to inline with I64 args on 32-bit platforms because
+  // it is more difficult (because it requires multiple LIR arguments per I64).
+  //
+  // Bug 1631650 - On 64-bit platforms, we also give up inlining for I64 args
   // spilled to the stack because it causes problems with register allocation.
-#if defined(ENABLE_WASM_BIGINT) && JS_BITS_PER_WORD == 64
-  if (sig.hasI64ArgOrRet()) {
-    ABIArgGenerator abi;
-    for (const auto& valType : sig.args()) {
-      ABIArg abiArg = abi.next(ToMIRType(valType));
-      if (abiArg.kind() == ABIArg::Stack) {
-        return InliningStatus_NotInlined;
-      }
+#ifdef JS_64BIT
+  const bool inlineWithI64 = true;
+#else
+  const bool inlineWithI64 = false;
+#endif
+  ABIArgGenerator abi;
+  for (const auto& valType : sig.args()) {
+    MIRType mirType = ToMIRType(valType);
+    ABIArg abiArg = abi.next(mirType);
+    if (mirType == MIRType::Int64 &&
+        (!inlineWithI64 || (abiArg.kind() == ABIArg::Stack))) {
+      return InliningStatus_NotInlined;
     }
   }
-#endif
 
   auto* call = MIonToWasmCall::New(alloc(), inst.object(), funcExport);
   if (!call) {
@@ -4291,14 +4293,9 @@ IonBuilder::InliningResult IonBuilder::inlineWasmCall(CallInfo& callInfo,
       case wasm::ValType::I32:
         conversion = MTruncateToInt32::New(alloc(), arg);
         break;
-      case wasm::ValType::I64: {
-#ifdef ENABLE_WASM_BIGINT
+      case wasm::ValType::I64:
         conversion = MToInt64::New(alloc(), arg);
         break;
-#else
-        MOZ_CRASH("impossible per above check");
-#endif
-      }
       case wasm::ValType::F32:
         conversion = MToFloat32::New(alloc(), arg);
         break;
@@ -4338,7 +4335,6 @@ IonBuilder::InliningResult IonBuilder::inlineWasmCall(CallInfo& callInfo,
 
   current->add(call);
 
-#ifdef ENABLE_WASM_BIGINT
   // Add any post-function call conversions that are necessary.
   MInstruction* postConversion = call;
   const wasm::ValTypeVector& results = sig.results();
@@ -4362,10 +4358,6 @@ IonBuilder::InliningResult IonBuilder::inlineWasmCall(CallInfo& callInfo,
   }
   current->push(postConversion);
   MOZ_TRY(resumeAfter(postConversion));
-#else
-  current->push(call);
-  MOZ_TRY(resumeAfter(call));
-#endif
 
   callInfo.setImplicitlyUsedUnchecked();
 

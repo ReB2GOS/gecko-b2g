@@ -56,14 +56,21 @@ class ResourceWatcher {
    *
    * @param {Array:string} resources
    *        List of all resources which should be fetched and observed.
-   * @param {Function} onAvailable
-   *        Function which will be called once per existing resource and
-   *        each time a resource is created
-   * @param {Function} onDestroyed
-   *        Function which will be called each time a resource in the remote
-   *        target is destroyed
+   * @param {Object} options
+   *        - {Function} onAvailable: This attribute is mandatory.
+   *                                  Function which will be called once per existing
+   *                                  resource and each time a resource is created.
+   *        - {Function} onDestroyed: This attribute is optional.
+   *                                  Function which will be called each time a resource in
+   *                                  the remote target is destroyed.
+   *        - {boolean} ignoreExistingResources:
+   *                                  This attribute is optional. Default value is false.
+   *                                  If set to true, onAvailable won't be called with
+   *                                  existing resources.
    */
-  async watch(resources, onAvailable, onDestroyed) {
+  async watch(resources, options) {
+    const { ignoreExistingResources = false } = options;
+
     // First ensuring enabling listening to targets.
     // This will call onTargetAvailable for all already existing targets,
     // as well as for the one created later.
@@ -72,11 +79,15 @@ class ResourceWatcher {
     await this._watchAllTargets();
 
     for (const resource of resources) {
-      this._availableListeners.on(resource, onAvailable);
-      if (onDestroyed) {
-        this._destroyedListeners.on(resource, onDestroyed);
+      if (ignoreExistingResources) {
+        // Register listeners after _startListening
+        // so that it avoids the listeners to get cached resources.
+        await this._startListening(resource);
+        this._registerListeners(resource, options);
+      } else {
+        this._registerListeners(resource, options);
+        await this._startListening(resource);
       }
-      await this._startListening(resource);
     }
   }
 
@@ -84,7 +95,9 @@ class ResourceWatcher {
    * Stop watching for given type of resources.
    * See `watch` for the arguments as both methods receive the same.
    */
-  unwatch(resources, onAvailable, onDestroyed) {
+  unwatch(resources, options) {
+    const { onAvailable, onDestroyed } = options;
+
     for (const resource of resources) {
       this._availableListeners.off(resource, onAvailable);
       if (onDestroyed) {
@@ -100,6 +113,20 @@ class ResourceWatcher {
     }
     if (listeners <= 0) {
       this._unwatchAllTargets();
+    }
+  }
+
+  /**
+   * Register listeners to watch for a given type of resource.
+   *
+   * @param {Object}
+   *        - {Function} onAvailable: mandatory
+   *        - {Function} onDestroyed: optional
+   */
+  _registerListeners(resource, { onAvailable, onDestroyed }) {
+    this._availableListeners.on(resource, onAvailable);
+    if (onDestroyed) {
+      this._destroyedListeners.on(resource, onDestroyed);
     }
   }
 

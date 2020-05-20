@@ -498,7 +498,7 @@ class ValType {
       case jit::MIRType::Double:
         tc_ = PackTypeCode(TypeCode::F64);
         break;
-      case jit::MIRType::Int8x16:
+      case jit::MIRType::Simd128:
         tc_ = PackTypeCode(TypeCode::V128);
         break;
       default:
@@ -668,7 +668,7 @@ static inline jit::MIRType ToMIRType(ValType vt) {
     case ValType::F64:
       return jit::MIRType::Double;
     case ValType::V128:
-      return jit::MIRType::Int8x16;
+      return jit::MIRType::Simd128;
     case ValType::Ref:
       return jit::MIRType::RefOrNull;
   }
@@ -1141,19 +1141,6 @@ class FuncType {
   }
   bool operator!=(const FuncType& rhs) const { return !(*this == rhs); }
 
-  bool hasI64ArgOrRet() const {
-    for (ValType arg : args()) {
-      if (arg == ValType::I64) {
-        return true;
-      }
-    }
-    for (ValType result : results()) {
-      if (result == ValType::I64) {
-        return true;
-      }
-    }
-    return false;
-  }
   // Entry from JS to wasm via the JIT is currently unimplemented for
   // functions that return multiple values.
   bool temporarilyUnsupportedResultCountForJitEntry() const {
@@ -2655,7 +2642,7 @@ enum class SymbolicAddress {
   HandleDebugTrap,
   HandleThrow,
   HandleTrap,
-  ReportInt64OrV128JSCall,
+  ReportV128JSCall,
   CallImport_Void,
   CallImport_I32,
   CallImport_I64,
@@ -2666,10 +2653,8 @@ enum class SymbolicAddress {
   CoerceInPlace_ToInt32,
   CoerceInPlace_ToNumber,
   CoerceInPlace_JitEntry,
-#ifdef ENABLE_WASM_BIGINT
   CoerceInPlace_ToBigInt,
   AllocateBigInt,
-#endif
   BoxValue_Anyref,
   DivI64,
   UDivI64,

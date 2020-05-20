@@ -1857,6 +1857,25 @@ void nsHttpChannel::SetCachedContentType() {
   mCacheEntry->SetContentType(contentType);
 }
 
+void nsHttpChannel::UpdateAntiTrackingInfo() {
+  Unused << mLoadInfo->SetHasStoragePermission(
+      AntiTrackingUtils::HasStoragePermissionInParent(this));
+
+  AntiTrackingUtils::ComputeIsThirdPartyToTopWindow(this);
+
+  // We only need to set FPD for top-level loads. FPD will automatically be
+  // propagated to non-top level loads via CookieJarSetting.
+  if (mLoadInfo->GetExternalContentPolicyType() ==
+      nsIContentPolicy::TYPE_DOCUMENT) {
+    nsCOMPtr<nsICookieJarSettings> cookieJarSettings;
+    Unused << mLoadInfo->GetCookieJarSettings(
+        getter_AddRefs(cookieJarSettings));
+
+    mozilla::net::CookieJarSettings::Cast(cookieJarSettings)
+        ->SetFirstPartyDomain(mURI);
+  }
+}
+
 nsresult nsHttpChannel::CallOnStartRequest() {
   LOG(("nsHttpChannel::CallOnStartRequest [this=%p]", this));
 
@@ -6506,11 +6525,6 @@ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  Unused << mLoadInfo->SetHasStoragePermission(
-      AntiTrackingUtils::HasStoragePermissionInParent(this));
-
-  AntiTrackingUtils::ComputeIsThirdPartyToTopWindow(this);
-
   static bool sRCWNInited = false;
   if (!sRCWNInited) {
     sRCWNInited = true;
@@ -6541,6 +6555,8 @@ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
     // from) Hence, we have to call UpdatePrivateBrowsing() here
     UpdatePrivateBrowsing();
   }
+
+  UpdateAntiTrackingInfo();
 
   if (WaitingForTailUnblock()) {
     // This channel is marked as Tail and is part of a request context
@@ -7589,12 +7605,10 @@ nsresult nsHttpChannel::ProcessCrossOriginEmbedderPolicyHeader() {
   }
 
   // https://mikewest.github.io/corpp/#abstract-opdef-process-navigation-response
-  RefPtr<WindowContext> ctx =
-      WindowContext::GetById(mLoadInfo->GetInnerWindowID());
-  if (ctx &&
-      mLoadInfo->GetExternalContentPolicyType() ==
+  if (mLoadInfo->GetExternalContentPolicyType() ==
           nsIContentPolicy::TYPE_SUBDOCUMENT &&
-      ctx->GetEmbedderPolicy() != nsILoadInfo::EMBEDDER_POLICY_NULL &&
+      mLoadInfo->GetLoadingEmbedderPolicy() !=
+          nsILoadInfo::EMBEDDER_POLICY_NULL &&
       resultPolicy != nsILoadInfo::EMBEDDER_POLICY_REQUIRE_CORP) {
     return NS_ERROR_BLOCKED_BY_POLICY;
   }
@@ -7632,13 +7646,10 @@ nsresult nsHttpChannel::ProcessCrossOriginResourcePolicyHeader() {
   // 3.2.1.6 If policy is null, and embedder policy is "require-corp", set
   // policy to "same-origin".
   if (StaticPrefs::browser_tabs_remote_useCrossOriginEmbedderPolicy()) {
-    RefPtr<WindowContext> ctx =
-        WindowContext::GetById(mLoadInfo->GetInnerWindowID());
-
     // Note that we treat invalid value as "cross-origin", which spec
     // indicates. We might want to make that stricter.
-    if (content.IsEmpty() && ctx &&
-        ctx->GetEmbedderPolicy() == nsILoadInfo::EMBEDDER_POLICY_REQUIRE_CORP) {
+    if (content.IsEmpty() && mLoadInfo->GetLoadingEmbedderPolicy() ==
+                                 nsILoadInfo::EMBEDDER_POLICY_REQUIRE_CORP) {
       content = NS_LITERAL_CSTRING("same-origin");
     }
   }

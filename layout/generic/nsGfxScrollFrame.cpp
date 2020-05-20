@@ -956,7 +956,7 @@ static void GetScrollableOverflowForPerspective(
     nsPoint aOffset, nsRect& aScrolledFrameOverflowArea) {
   // Iterate over all children except pop-ups.
   FrameChildListIDs skip = {nsIFrame::kSelectPopupList, nsIFrame::kPopupList};
-  for (const auto& [list, listID] : aCurrentFrame->GetChildLists()) {
+  for (const auto& [list, listID] : aCurrentFrame->ChildLists()) {
     if (skip.contains(listID)) {
       continue;
     }
@@ -2412,7 +2412,7 @@ static void AdjustViews(nsIFrame* aFrame) {
 
   // Call AdjustViews recursively for all child frames except the popup list as
   // the views for popups are not scrolled.
-  for (const auto& [list, listID] : aFrame->GetChildLists()) {
+  for (const auto& [list, listID] : aFrame->ChildLists()) {
     if (listID == nsIFrame::kPopupList) {
       continue;
     }
@@ -3881,7 +3881,18 @@ nsRect ScrollFrameHelper::RestrictToRootDisplayPort(
   bool hasDisplayPort =
       rootFrame->GetContent() &&
       nsLayoutUtils::GetDisplayPort(rootFrame->GetContent(), &rootDisplayPort);
-  if (!hasDisplayPort) {
+  if (hasDisplayPort) {
+    // The display port of the root frame already factors in it's callback
+    // transform, so subtract it out here, the GetCumulativeApzCallbackTransform
+    // call below will add it back.
+    if (nsIContent* content = rootFrame->GetContent()) {
+      if (void* property =
+              content->GetProperty(nsGkAtoms::apzCallbackTransform)) {
+        rootDisplayPort -=
+            CSSPoint::ToAppUnits(*static_cast<CSSPoint*>(property));
+      }
+    }
+  } else {
     // If we don't have a display port on the root frame let's fall back to
     // the root composition bounds instead.
     nsRect rootCompBounds =
@@ -6914,7 +6925,7 @@ static void CollectScrollPositionsForSnap(
     return;
   }
 
-  for (const auto& childList : aFrame->GetChildLists()) {
+  for (const auto& childList : aFrame->ChildLists()) {
     for (nsIFrame* f : childList.mList) {
       const nsStyleDisplay* styleDisplay = f->StyleDisplay();
       if (styleDisplay->mScrollSnapAlign.inline_ !=
@@ -7107,7 +7118,7 @@ static nsSliderFrame* GetSliderFrame(nsIFrame* aScrollbarFrame) {
     return nullptr;
   }
 
-  for (const auto& childList : aScrollbarFrame->GetChildLists()) {
+  for (const auto& childList : aScrollbarFrame->ChildLists()) {
     for (nsIFrame* frame : childList.mList) {
       if (nsSliderFrame* sliderFrame = do_QueryFrame(frame)) {
         return sliderFrame;

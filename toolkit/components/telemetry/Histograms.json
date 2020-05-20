@@ -9186,6 +9186,17 @@
     "n_buckets": 50,
     "description": "Time spent to display first page in PDF Viewer (ms)"
   },
+  "PDF_VIEWER_FALLBACK_REASON": {
+    "record_in_processes": ["main", "content"],
+    "products": ["firefox"],
+    "expires_in_version": "84",
+    "alert_emails": ["bdahl@mozilla.com"],
+    "releaseChannelCollection": "opt-out",
+    "bug_numbers": [1630844],
+    "kind": "categorical",
+    "labels": ["unknown", "forms", "javaScript", "smask", "shadingPattern", "font", "errorTilingPattern", "errorExtGState", "errorXObject", "errorFontLoadType3", "errorFontState", "errorFontMissing", "errorFontTranslate", "errorColorSpace", "errorOperatorList", "errorFontToUnicode", "errorFontLoadNative", "errorFontGetPath"],
+    "description": "The reason the fallback bar was shown."
+  },
   "PLUGINS_NOTIFICATION_SHOWN": {
     "record_in_processes": ["main", "content"],
     "products": ["firefox", "fennec", "geckoview"],
@@ -11597,13 +11608,6 @@
     "bug_numbers": [1602641, 1607765],
     "releaseChannelCollection": "opt-out",
     "alert_emails": ["dkeeler@mozilla.com", "jcj@mozilla.com", "seceng-telemetry@mozilla.com"]
-  },
-  "WEAVE_CONFIGURED_MASTER_PASSWORD": {
-    "record_in_processes": ["main", "content"],
-    "products": ["firefox", "fennec", "geckoview"],
-    "expires_in_version": "never",
-    "kind": "boolean",
-    "description": "If both Firefox Sync and Master Password are configured for this device"
   },
   "WEAVE_START_COUNT": {
     "record_in_processes": ["main", "content"],

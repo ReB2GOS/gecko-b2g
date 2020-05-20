@@ -65,11 +65,19 @@ XPCOMUtils.defineLazyServiceGetter(
 const PREF_PDFJS_ISDEFAULT_CACHE_STATE = "pdfjs.enabledCache.state";
 
 /**
+ * Fission-compatible JSProcess implementations.
+ * Each actor options object takes the form of a ProcessActorOptions dictionary.
+ * Detailed documentation of these options is in dom/docs/Fission.rst,
+ * available at https://firefox-source-docs.mozilla.org/dom/Fission.html#jsprocessactor
+ */
+let JSPROCESSACTORS = {};
+
+/**
  * Fission-compatible JSWindowActor implementations.
  * Detailed documentation of these is in dom/docs/Fission.rst,
  * available at https://firefox-source-docs.mozilla.org/dom/Fission.html#jswindowactor
  */
-let ACTORS = {
+let JSWINDOWACTORS = {
   AboutLogins: {
     parent: {
       moduleURI: "resource:///actors/AboutLoginsParent.jsm",
@@ -1176,7 +1184,8 @@ BrowserGlue.prototype = {
     os.addObserver(this, "handlersvc-store-initialized");
     os.addObserver(this, "shield-init-complete");
 
-    ActorManagerParent.addActors(ACTORS);
+    ActorManagerParent.addJSProcessActors(JSPROCESSACTORS);
+    ActorManagerParent.addJSWindowActors(JSWINDOWACTORS);
     ActorManagerParent.addLegacyActors(LEGACY_ACTORS);
     ActorManagerParent.flush();
 
@@ -1970,12 +1979,13 @@ BrowserGlue.prototype = {
 
     let exceptions = 0;
     for (let permission of Services.perms.all) {
-      let uri = permission.principal.URI;
       // We consider just permissions set for http, https and file URLs.
       if (
         permission.type == "cookie" &&
         permission.capability == Ci.nsICookiePermission.ACCESS_SESSION &&
-        (uri.scheme == "http" || uri.scheme == "https" || uri.scheme == "file")
+        ["http", "https", "file"].some(scheme =>
+          permission.principal.schemeIs(scheme)
+        )
       ) {
         exceptions++;
       }

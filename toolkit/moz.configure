@@ -964,15 +964,18 @@ set_config('ENABLE_MARIONETTE', marionette)
 # Turn off geckodriver for build configs we don't handle yet,
 # but allow --enable-geckodriver to override when compile environment is available.
 # --disable-tests implies disabling geckodriver.
+# Disable building in CI
 
-@depends('--enable-tests', target, cross_compiling, hazard_analysis, asan)
-def geckodriver_default(enable_tests, target, cross_compile, hazard, asan):
+@depends('--enable-tests', target, cross_compiling, hazard_analysis, asan, 'MOZ_AUTOMATION')
+def geckodriver_default(enable_tests, target, cross_compile, hazard, asan, automation):
     if not enable_tests:
         return False
     # geckodriver depends on winapi 0.2.8, which doesn't work with AArch64.
     if target.os == 'WINNT' and target.cpu == 'aarch64':
         return False
     if hazard or target.os == 'Android' or (asan and cross_compile):
+        return False
+    if automation:
         return False
     return True
 
@@ -1952,8 +1955,10 @@ wasm_sandboxing_config_defines()
 
 @depends(milestone)
 def new_xulstore(milestone):
-    if milestone.is_nightly:
-        return True
+    # On b2g even if we are on trunk we don't configure as nightly.
+    return True
+    # if milestone.is_nightly:
+    #    return True
 
 set_config('MOZ_NEW_XULSTORE', True, when=new_xulstore)
 set_define('MOZ_NEW_XULSTORE', True, when=new_xulstore)
@@ -1981,20 +1986,6 @@ def glean(milestone):
 
 set_config('MOZ_GLEAN', True, when=glean)
 set_define('MOZ_GLEAN', True, when=glean)
-
-
-# New WebExtension `storage.sync` implementation in Rust
-# ==============================================================
-
-@depends(milestone)
-def new_webext_storage(milestone):
-    return True
-    # We are not building b2g as a nightly even when tracking trunk.
-    # if milestone.is_nightly:
-    #  return True
-
-set_config('MOZ_NEW_WEBEXT_STORAGE', True, when=new_webext_storage)
-set_define('MOZ_NEW_WEBEXT_STORAGE', True, when=new_webext_storage)
 
 
 # dump_syms

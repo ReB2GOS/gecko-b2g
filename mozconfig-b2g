@@ -10,7 +10,7 @@ export RANLIB=$HOME/.mozbuild/clang/bin/llvm-ranlib
 
 # Build B2G
 ac_add_options --enable-application=b2g
-ac_add_options --target=arm-linux-androideabi
+ac_add_options --target=$TARGET_ARCH-linux-$ARCH_ABI
 ac_add_options --enable-linker=lld
 
 # Disable a bunch of non critical stuff
@@ -118,3 +118,4 @@ ac_add_options --with-binder-b2g-connectivity-so="$SYS_LIB/binder_b2g_connectivi
 ac_add_options --enable-forkserver
 
 ac_add_options --enable-b2g-ril
+ac_add_options --enable-b2g-fm

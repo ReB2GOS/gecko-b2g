@@ -16181,7 +16181,12 @@ nsICookieJarSettings* Document::CookieJarSettings() {
     mCookieJarSettings =
         inProcessParent
             ? net::CookieJarSettings::Create(
-                  inProcessParent->CookieJarSettings()->GetCookieBehavior())
+                  inProcessParent->CookieJarSettings()->GetCookieBehavior(),
+                  mozilla::net::CookieJarSettings::Cast(
+                      inProcessParent->CookieJarSettings())
+                      ->GetFirstPartyDomain(),
+                  inProcessParent->CookieJarSettings()
+                      ->GetIsFirstPartyIsolated())
             : net::CookieJarSettings::Create();
 
     if (auto* wgc = GetWindowGlobalChild()) {
@@ -16204,7 +16209,7 @@ bool Document::HasStoragePermission() {
   // it is set in the parent process, so we need to check the cache
   // to see if the permission is granted afterwards.
   nsPIDOMWindowInner* inner = GetInnerWindow();
-  if (ContentBlocking::HasStorageAccessGranted(inner)) {
+  if (inner && inner->HasStorageAccessGranted()) {
     return true;
   }
 
