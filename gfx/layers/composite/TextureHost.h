@@ -660,6 +660,14 @@ class TextureHost : public AtomicRefCountedWithFinalize<TextureHost> {
         "No CreateRenderTexture() implementation for this TextureHost type.");
   }
 
+  void EnsureRenderTexture(const wr::ExternalImageId& aExternalImageId);
+
+  // Destroy RenderTextureHost when it was created by the TextureHost.
+  // It is called in TextureHost::Finalize().
+  virtual void MaybeDestroyRenderTexture();
+
+  static void DestroyRenderTexture(const wr::ExternalImageId& aExternalImageId);
+
   /// Returns the number of actual textures that will be used to render this.
   /// For example in a lot of YUV cases it will be 3
   virtual uint32_t NumSubTextures() { return 1; }
@@ -742,6 +750,7 @@ class TextureHost : public AtomicRefCountedWithFinalize<TextureHost> {
   int mCompositableCount;
   uint64_t mFwdTransactionId;
   bool mReadLocked;
+  wr::MaybeExternalImageId mExternalImageId;
 
 #ifdef MOZ_WIDGET_GONK
   FenceHandle mReleaseFenceHandle;
@@ -753,6 +762,7 @@ class TextureHost : public AtomicRefCountedWithFinalize<TextureHost> {
   friend class TiledLayerBufferComposite;
   friend class TextureSourceProvider;
   friend class GPUVideoTextureHost;
+  friend class WebRenderTextureHost;
 };
 
 /**
@@ -820,8 +830,6 @@ class BufferTextureHost : public TextureHost {
 
   void CreateRenderTexture(
       const wr::ExternalImageId& aExternalImageId) override;
-
-  static void DestroyRenderTexture(const wr::ExternalImageId& aExternalImageId);
 
   uint32_t NumSubTextures() override;
 

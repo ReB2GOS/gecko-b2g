@@ -43,10 +43,10 @@ const VISIBILITY_TOGGLE_MAX_PW_AGE_MS = 2 * 60 * 1000; // 2 minutes
  * Constants for password prompt telemetry.
  */
 const PROMPT_DISPLAYED = 0;
-
 const PROMPT_ADD_OR_UPDATE = 1;
-const PROMPT_NOTNOW = 2;
+const PROMPT_NOTNOW_OR_DONTUPDATE = 2;
 const PROMPT_NEVER = 3;
+const PROMPT_DELETE = 3;
 
 /**
  * The minimum age of a doorhanger in ms before it will get removed after a locationchange
@@ -406,7 +406,7 @@ class LoginManagerPrompter {
           initialMsgNames.secondaryButtonAccessKey
         ),
         callback: () => {
-          histogram.add(PROMPT_NOTNOW);
+          histogram.add(PROMPT_NOTNOW_OR_DONTUPDATE);
           Services.obs.notifyObservers(
             null,
             "weave:telemetry:histogram",
@@ -430,6 +430,38 @@ class LoginManagerPrompter {
           );
           Services.logins.setLoginSavingEnabled(login.origin, false);
           browser.focus();
+        },
+      });
+    }
+
+    // Include a "Delete this login" button when updating an existing password
+    if (type == "password-change") {
+      secondaryActions.push({
+        label: this._getLocalizedString("updateLoginButtonDelete.label"),
+        accessKey: this._getLocalizedString(
+          "updateLoginButtonDelete.accesskey"
+        ),
+        callback: async () => {
+          histogram.add(PROMPT_DELETE);
+          Services.obs.notifyObservers(
+            null,
+            "weave:telemetry:histogram",
+            histogramName
+          );
+          const matchingLogins = await Services.logins.searchLoginsAsync({
+            guid: login.guid,
+            origin: login.origin,
+          });
+          Services.logins.removeLogin(matchingLogins[0]);
+          browser.focus();
+          // The "password-notification-icon" and "notification-icon-box" are hidden
+          // at this point, so approximate the location with the next closest,
+          // visible icon as the anchor.
+          const anchor = browser.ownerDocument.getElementById("identity-icon");
+          log.debug("Showing the ConfirmationHint");
+          anchor.ownerGlobal.ConfirmationHint.show(anchor, "loginRemoved", {
+            hideArrow: true,
+          });
         },
       });
     }
@@ -536,19 +568,20 @@ class LoginManagerPrompter {
                 break;
               }
               case "dismissed":
-                // Note that this can run after `showing` but before `shown`.
-                log.debug("dismissed");
+                // Note that this can run after `showing` but before `shown` upon tab switch.
                 this.wasDismissed = true;
               // Fall through.
               case "removed": {
+                // Note that this can run after `showing` and `shown` for the
+                // notification it's replacing.
+                log.debug(topic);
                 currentNotification = null;
+
                 let usernameField = chromeDoc.getElementById(
                   "password-notification-username"
                 );
                 usernameField.removeEventListener("input", onInput);
                 usernameField.removeEventListener("keyup", onKeyUp);
-                // Clear the field to ensure we never show stale values.
-                usernameField.value = "";
                 let passwordField = chromeDoc.getElementById(
                   "password-notification-password"
                 );
@@ -558,9 +591,6 @@ class LoginManagerPrompter {
                   "command",
                   onVisibilityToggle
                 );
-                // Don't leave traces of the password in memory unnecessarily.
-                // Clearing this also prevents false positives in tests.
-                passwordField.value = "";
                 break;
               }
             }

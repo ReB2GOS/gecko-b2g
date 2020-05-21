@@ -11,6 +11,7 @@
 #include "mozilla/ContentBlockingAllowList.h"
 #include "mozilla/LoadInfo.h"
 #include "mozilla/MozPromiseInlines.h"  // For MozPromise::FromDomPromise
+#include "mozilla/StaticPrefs_fission.h"
 #include "mozilla/StaticPrefs_security.h"
 #include "mozilla/dom/CanonicalBrowsingContext.h"
 #include "mozilla/dom/ClientChannelHelper.h"
@@ -19,6 +20,7 @@
 #include "mozilla/dom/WindowGlobalParent.h"
 #include "mozilla/dom/ipc/IdType.h"
 #include "mozilla/net/CookieJarSettings.h"
+#include "mozilla/dom/SessionHistoryEntry.h"
 #include "mozilla/net/HttpChannelParent.h"
 #include "mozilla/net/RedirectChannelRegistrar.h"
 #include "mozilla/net/UrlClassifierCommon.h"
@@ -51,6 +53,17 @@ using namespace mozilla::dom;
 
 namespace mozilla {
 namespace net {
+
+static void SetNeedToAddURIVisit(nsIChannel* aChannel,
+                                 bool aNeedToAddURIVisit) {
+  nsCOMPtr<nsIWritablePropertyBag2> props(do_QueryInterface(aChannel));
+  if (!props) {
+    return;
+  }
+
+  props->SetPropertyAsBool(NS_LITERAL_STRING("docshell.needToAddURIVisit"),
+                           aNeedToAddURIVisit);
+}
 
 /**
  * An extension to nsDocumentOpenInfo that we run in the parent process, so
@@ -117,7 +130,7 @@ class ParentProcessDocumentOpenInfo final : public nsDocumentOpenInfo,
     nsCOMPtr<nsIStreamConverterService> streamConvService =
         do_GetService(NS_STREAMCONVERTERSERVICE_CONTRACTID, &rv);
     nsAutoCString str;
-    rv = streamConvService->ConvertedType(mContentType, str);
+    rv = streamConvService->ConvertedType(mContentType, aChannel, str);
     NS_ENSURE_SUCCESS(rv, rv);
 
     // We only support passing data to the default content listener
@@ -262,12 +275,40 @@ DocumentLoadListener::~DocumentLoadListener() {
   LOG(("DocumentLoadListener dtor [this=%p]", this));
 }
 
-net::LastVisitInfo DocumentLoadListener::LastVisitInfo() const {
+void DocumentLoadListener::AddURIVisit(nsIChannel* aChannel,
+                                       uint32_t aLoadFlags) {
+  if (mLoadStateLoadType == LOAD_ERROR_PAGE ||
+      mLoadStateLoadType == LOAD_BYPASS_HISTORY) {
+    return;
+  }
+
+  nsCOMPtr<nsIURI> uri;
+  NS_GetFinalChannelURI(aChannel, getter_AddRefs(uri));
+
   nsCOMPtr<nsIURI> previousURI;
   uint32_t previousFlags = 0;
-  nsDocShell::ExtractLastVisit(mChannel, getter_AddRefs(previousURI),
-                               &previousFlags);
-  return net::LastVisitInfo{previousURI, previousFlags};
+  if (mLoadStateLoadType & nsIDocShell::LOAD_CMD_RELOAD) {
+    previousURI = uri;
+  } else {
+    nsDocShell::ExtractLastVisit(aChannel, getter_AddRefs(previousURI),
+                                 &previousFlags);
+  }
+
+  // Get the HTTP response code, if available.
+  uint32_t responseStatus = 0;
+  nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aChannel);
+  if (httpChannel) {
+    Unused << httpChannel->GetResponseStatus(&responseStatus);
+  }
+
+  RefPtr<CanonicalBrowsingContext> browsingContext =
+      mParentChannelListener->GetBrowsingContext();
+  nsCOMPtr<nsIWidget> widget =
+      browsingContext->GetParentProcessWidgetContaining();
+
+  nsDocShell::InternalAddURIVisit(uri, previousURI, previousFlags,
+                                  responseStatus, browsingContext, widget,
+                                  mLoadStateLoadType);
 }
 
 already_AddRefed<LoadInfo> DocumentLoadListener::CreateLoadInfo(
@@ -321,37 +362,6 @@ already_AddRefed<LoadInfo> DocumentLoadListener::CreateLoadInfo(
   return loadInfo.forget();
 }
 
-// parent-process implementation of
-// nsGlobalWindowOuter::GetTopExcludingExtensionAccessibleContentFrames
-already_AddRefed<WindowGlobalParent>
-GetTopWindowExcludingExtensionAccessibleContentFrames(
-    CanonicalBrowsingContext* aBrowsingContext, nsIURI* aURIBeingLoaded) {
-  CanonicalBrowsingContext* bc = aBrowsingContext;
-  RefPtr<WindowGlobalParent> prev;
-  while (RefPtr<WindowGlobalParent> parent = bc->GetParentWindowGlobal()) {
-    CanonicalBrowsingContext* parentBC = parent->BrowsingContext();
-
-    nsIPrincipal* parentPrincipal = parent->DocumentPrincipal();
-    nsIURI* uri = prev ? prev->GetDocumentURI() : aURIBeingLoaded;
-
-    // If the new parent has permission to load the current page, we're
-    // at a moz-extension:// frame which has a host permission that allows
-    // it to load the document that we've loaded.  In that case, stop at
-    // this frame and consider it the top-level frame.
-    if (uri &&
-        BasePrincipal::Cast(parentPrincipal)->AddonAllowsLoad(uri, true)) {
-      break;
-    }
-
-    bc = parentBC;
-    prev = parent;
-  }
-  if (!prev) {
-    prev = bc->GetCurrentWindowGlobal();
-  }
-  return prev.forget();
-}
-
 CanonicalBrowsingContext* DocumentLoadListener::GetBrowsingContext() {
   if (!mParentChannelListener) {
     return nullptr;
@@ -373,15 +383,8 @@ bool DocumentLoadListener::Open(
   OriginAttributes attrs;
   browsingContext->GetOriginAttributes(attrs);
 
-  RefPtr<WindowGlobalParent> embedderWGP =
-      browsingContext->GetParentWindowGlobal();
-  if (browsingContext->GetParent() && !embedderWGP) {
-    // this is a race, bug 1331295
-    NS_WARNING(
-        "We don't have an embedder WindowGlobalParent, probably because of a "
-        "race");
-    return false;
-  }
+  MOZ_DIAGNOSTIC_ASSERT_IF(browsingContext->GetParent(),
+                           browsingContext->GetParentWindowContext());
 
   // If this is a top-level load, then rebuild the LoadInfo from scratch,
   // since the goal is to be able to initiate loads in the parent, where the
@@ -419,7 +422,7 @@ bool DocumentLoadListener::Open(
           getter_AddRefs(cookieJarSettings));
       net::CookieJarSettings::Cast(cookieJarSettings)
           ->UpdateIsOnContentBlockingAllowList(mChannel);
-    } else if (RefPtr<WindowGlobalParent> topWindow =
+    } else if (RefPtr<WindowGlobalParent> topWindow = AntiTrackingUtils::
                    GetTopWindowExcludingExtensionAccessibleContentFrames(
                        browsingContext, uriBeingLoaded)) {
       nsCOMPtr<nsIPrincipal> topWindowPrincipal =
@@ -432,6 +435,7 @@ bool DocumentLoadListener::Open(
     httpBaseChannel->SetTopWindowURI(topWindowURI);
   }
 
+  // TODO: Remove this in Bug 1639140
   Unused << loadInfo->SetHasStoragePermission(
       AntiTrackingUtils::HasStoragePermissionInParent(mChannel));
 
@@ -480,7 +484,6 @@ bool DocumentLoadListener::Open(
   if (aLoadState->LoadType() != LOAD_ERROR_PAGE &&
       !(aLoadState->HasLoadFlags(
           nsDocShell::INTERNAL_LOAD_FLAGS_BYPASS_LOAD_URI_DELEGATE)) &&
-      browsingContext->IsTopContent() &&
       !(aLoadState->LoadType() & LOAD_HISTORY)) {
     nsCOMPtr<nsIWidget> widget =
         browsingContext->GetParentProcessWidgetContaining();
@@ -490,7 +493,7 @@ bool DocumentLoadListener::Open(
       promise = window->OnLoadRequest(
           aLoadState->URI(), nsIBrowserDOMWindow::OPEN_CURRENTWINDOW,
           aLoadState->LoadFlags(), aLoadState->TriggeringPrincipal(),
-          aHasGesture);
+          aHasGesture, browsingContext->IsTopContent());
     }
   }
 
@@ -529,6 +532,11 @@ bool DocumentLoadListener::Open(
   mTiming = aTiming;
   mSrcdocData = aLoadState->SrcdocData();
   mBaseURI = aLoadState->BaseURI();
+  if (StaticPrefs::fission_sessionHistoryInParent() &&
+      browsingContext->GetSessionHistory()) {
+    mSessionHistoryInfo =
+        browsingContext->CreateSessionHistoryEntryForLoad(aLoadState, mChannel);
+  }
 
   if (auto* ctx = GetBrowsingContext()) {
     ctx->StartDocumentLoad(this);
@@ -700,6 +708,8 @@ void DocumentLoadListener::Cancel(const nsresult& aStatusCode) {
       ("DocumentLoadListener Cancel [this=%p, "
        "aStatusCode=%" PRIx32 " ]",
        this, static_cast<uint32_t>(aStatusCode)));
+  mCancelled = true;
+
   if (mDoingProcessSwitch) {
     // If we've already initiated process-switching
     // then we can no longer be cancelled and we'll
@@ -785,7 +795,6 @@ void DocumentLoadListener::RedirectToRealChannelFinished(nsresult aRv) {
   // Ask redirected channel if verification can proceed.
   // ReadyToVerify will be invoked when redirected channel is ready.
   redirectingParent->ContinueVerification(this);
-  return;
 }
 
 NS_IMETHODIMP
@@ -1141,16 +1150,21 @@ void DocumentLoadListener::SerializeRedirectData(
     aArgs.contentDispositionFilename() = Some(contentDispositionFilenameTemp);
   }
 
+  SetNeedToAddURIVisit(mChannel, false);
+
   aArgs.newLoadFlags() = aLoadFlags;
   aArgs.redirectFlags() = aRedirectFlags;
-  aArgs.redirects() = mRedirects;
   aArgs.redirectIdentifier() = mCrossProcessRedirectIdentifier;
   aArgs.properties() = do_QueryObject(mChannel.get());
-  aArgs.lastVisitInfo() = LastVisitInfo();
   aArgs.srcdocData() = mSrcdocData;
   aArgs.baseUri() = mBaseURI;
   aArgs.loadStateLoadFlags() = mLoadStateLoadFlags;
   aArgs.loadStateLoadType() = mLoadStateLoadType;
+  if (mSessionHistoryInfo) {
+    aArgs.sessionHistoryInfo().emplace(
+        mSessionHistoryInfo->mId, MakeUnique<mozilla::dom::SessionHistoryInfo>(
+                                      *mSessionHistoryInfo->mInfo));
+  }
 }
 
 bool DocumentLoadListener::MaybeTriggerProcessSwitch() {
@@ -1181,6 +1195,7 @@ bool DocumentLoadListener::MaybeTriggerProcessSwitch() {
   // loaded within a browser tab.
   // FIXME: Ideally we won't do this in the future.
   nsCOMPtr<nsIBrowser> browser;
+  bool isPreloadSwitch = false;
   if (!browsingContext->GetParent()) {
     Element* browserElement = browsingContext->GetEmbedderElement();
     if (!browserElement) {
@@ -1197,6 +1212,25 @@ bool DocumentLoadListener::MaybeTriggerProcessSwitch() {
         !loadedInTab) {
       LOG(("Process Switch Abort: browser is not loaded in a tab"));
       return false;
+    }
+
+    // Leaving about:newtab from a used to be preloaded browser should run the
+    // process selecting algorithm again.
+    nsAutoString isPreloadBrowserStr;
+    if (browserElement->GetAttr(kNameSpaceID_None, nsGkAtoms::preloadedState,
+                                isPreloadBrowserStr)) {
+      if (isPreloadBrowserStr.EqualsLiteral("consumed")) {
+        nsCOMPtr<nsIURI> originalURI;
+        if (NS_SUCCEEDED(
+                mChannel->GetOriginalURI(getter_AddRefs(originalURI)))) {
+          if (!originalURI->GetSpecOrDefault().EqualsLiteral("about:newtab")) {
+            LOG(("Process Switch: leaving preloaded browser"));
+            isPreloadSwitch = true;
+            browserElement->UnsetAttr(kNameSpaceID_None,
+                                      nsGkAtoms::preloadedState, true);
+          }
+        }
+      }
     }
   }
 
@@ -1231,7 +1265,9 @@ bool DocumentLoadListener::MaybeTriggerProcessSwitch() {
   bool isCOOPSwitch = HasCrossOriginOpenerPolicyMismatch();
   nsILoadInfo::CrossOriginOpenerPolicy coop =
       nsILoadInfo::OPENER_POLICY_UNSAFE_NONE;
-  if (RefPtr<nsHttpChannel> httpChannel = do_QueryObject(mChannel)) {
+  if (!browsingContext->IsTop()) {
+    coop = browsingContext->Top()->GetOpenerPolicy();
+  } else if (RefPtr<nsHttpChannel> httpChannel = do_QueryObject(mChannel)) {
     MOZ_ALWAYS_SUCCEEDS(httpChannel->GetCrossOriginOpenerPolicy(&coop));
   }
 
@@ -1278,7 +1314,8 @@ bool DocumentLoadListener::MaybeTriggerProcessSwitch() {
   }
 
   // Check if a process switch is needed.
-  if (currentProcess->GetRemoteType() == remoteType && !isCOOPSwitch) {
+  if (currentProcess->GetRemoteType() == remoteType && !isCOOPSwitch &&
+      !isPreloadSwitch) {
     LOG(("Process Switch Abort: type (%s) is compatible",
          NS_ConvertUTF16toUTF8(remoteType).get()));
     return false;
@@ -1361,7 +1398,20 @@ DocumentLoadListener::RedirectToRealChannel(
     uint32_t aRedirectFlags, uint32_t aLoadFlags,
     const Maybe<uint64_t>& aDestinationProcess,
     nsTArray<ParentEndpoint>&& aStreamFilterEndpoints) {
-  LOG(("DocumentLoadListener RedirectToRealChannel [this=%p]", this));
+  LOG(
+      ("DocumentLoadListener RedirectToRealChannel [this=%p] "
+       "aRedirectFlags=%" PRIx32 ", aLoadFlags=%" PRIx32,
+       this, aRedirectFlags, aLoadFlags));
+
+  // TODO(djg): Add the last URI visit to history if success. Is there a better
+  // place to handle this? Need access to the updated aLoadFlags.
+  nsresult status = NS_OK;
+  mChannel->GetStatus(&status);
+  bool updateGHistory =
+      nsDocShell::ShouldUpdateGlobalHistory(mLoadStateLoadType);
+  if (NS_SUCCEEDED(status) && updateGHistory && !net::ChannelIsPost(mChannel)) {
+    AddURIVisit(mChannel, aLoadFlags);
+  }
 
   if (aDestinationProcess || OtherPid()) {
     // Register the new channel and obtain id for it
@@ -1396,11 +1446,12 @@ DocumentLoadListener::RedirectToRealChannel(
           CreateAndReject(ipc::ResponseRejectReason::SendError, __func__);
     }
 
-    nsresult rv;
-    nsCOMPtr<nsIPrincipal> triggeringPrincipal =
-        PrincipalInfoToPrincipal(loadInfo.ref().triggeringPrincipalInfo(), &rv);
+    auto triggeringPrincipalOrErr =
+        PrincipalInfoToPrincipal(loadInfo.ref().triggeringPrincipalInfo());
 
-    if (NS_SUCCEEDED(rv) && triggeringPrincipal) {
+    if (triggeringPrincipalOrErr.isOk()) {
+      nsCOMPtr<nsIPrincipal> triggeringPrincipal =
+          triggeringPrincipalOrErr.unwrap();
       cp->TransmitBlobDataIfBlobURL(args.uri(), triggeringPrincipal);
     }
 
@@ -1410,8 +1461,13 @@ DocumentLoadListener::RedirectToRealChannel(
 
   return EnsureBridge()->Then(
       GetCurrentThreadSerialEventTarget(), __func__,
-      [endpoints = std::move(aStreamFilterEndpoints), aRedirectFlags,
+      [self = RefPtr<DocumentLoadListener>(this),
+       endpoints = std::move(aStreamFilterEndpoints), aRedirectFlags,
        aLoadFlags](ADocumentChannelBridge* aBridge) mutable {
+        if (self->mCancelled) {
+          return PDocumentChannelParent::RedirectToRealChannelPromise::
+              CreateAndResolve(NS_BINDING_ABORTED, __func__);
+        }
         return aBridge->RedirectToRealChannel(std::move(endpoints),
                                               aRedirectFlags, aLoadFlags);
       },
@@ -1466,7 +1522,7 @@ void DocumentLoadListener::TriggerRedirectToRealChannel(
   // If there were redirect(s), then we want this switch to be recorded as a
   // real one, since we have a new URI.
   uint32_t redirectFlags = 0;
-  if (mRedirects.IsEmpty()) {
+  if (!mHaveVisibleRedirect) {
     redirectFlags = nsIChannelEventSink::REDIRECT_INTERNAL;
   }
 
@@ -1747,20 +1803,21 @@ DocumentLoadListener::AsyncOnChannelRedirect(
          this));
     aCallback->OnRedirectVerifyCallback(NS_OK);
     return NS_OK;
-  } else {
+  }
+
+  if (!net::ChannelIsPost(aOldChannel)) {
+    AddURIVisit(aOldChannel, 0);
+
     nsCOMPtr<nsIURI> oldURI;
     aOldChannel->GetURI(getter_AddRefs(oldURI));
-    uint32_t responseStatus = 0;
-    if (nsCOMPtr<nsIHttpChannel> httpChannel = do_QueryInterface(aOldChannel)) {
-      Unused << httpChannel->GetResponseStatus(&responseStatus);
-    }
-    mRedirects.AppendElement(DocumentChannelRedirect{
-        oldURI, aFlags, responseStatus, net::ChannelIsPost(aOldChannel)});
+    nsDocShell::SaveLastVisit(aNewChannel, oldURI, aFlags);
   }
+  mHaveVisibleRedirect |= true;
+
   LOG(
       ("DocumentLoadListener AsyncOnChannelRedirect [this=%p] "
-       "mRedirects=%" PRIx32,
-       this, uint32_t(mRedirects.Length())));
+       "mHaveVisibleRedirect=%c",
+       this, mHaveVisibleRedirect ? 'T' : 'F'));
 
   // If this is a cross-origin redirect, then we should no longer allow
   // mixed content. The destination docshell checks this in its redirect
@@ -1790,28 +1847,6 @@ DocumentLoadListener::AsyncOnChannelRedirect(
   // the new URI and set these again.
   mIParentChannelFunctions.Clear();
 
-  nsCOMPtr<nsILoadInfo> loadInfo = aOldChannel->LoadInfo();
-
-  nsCOMPtr<nsIURI> originalUri;
-  rv = aOldChannel->GetOriginalURI(getter_AddRefs(originalUri));
-  if (NS_FAILED(rv)) {
-    aOldChannel->Cancel(NS_ERROR_DOM_BAD_URI);
-    return rv;
-  }
-
-  nsCOMPtr<nsIURI> newUri;
-  rv = aNewChannel->GetURI(getter_AddRefs(newUri));
-  NS_ENSURE_SUCCESS(rv, rv);
-
-  Maybe<nsresult> cancelCode;
-  rv = CSPService::ConsultCSPForRedirect(originalUri, newUri, loadInfo,
-                                         cancelCode);
-
-  if (cancelCode) {
-    aOldChannel->Cancel(*cancelCode);
-  }
-  NS_ENSURE_SUCCESS(rv, rv);
-
 #ifdef MOZ_WIDGET_ANDROID
   nsCOMPtr<nsIURI> uriBeingLoaded =
       AntiTrackingUtils::MaybeGetDocumentURIBeingLoaded(mChannel);
@@ -1819,15 +1854,14 @@ DocumentLoadListener::AsyncOnChannelRedirect(
       mParentChannelListener->GetBrowsingContext();
 
   RefPtr<MozPromise<bool, bool, false>> promise;
-  if (bc->IsTopContent()) {
-    nsCOMPtr<nsIWidget> widget = bc->GetParentProcessWidgetContaining();
-    RefPtr<nsWindow> window = nsWindow::From(widget);
+  nsCOMPtr<nsIWidget> widget = bc->GetParentProcessWidgetContaining();
+  RefPtr<nsWindow> window = nsWindow::From(widget);
 
-    if (window) {
-      promise = window->OnLoadRequest(
-          uriBeingLoaded, nsIBrowserDOMWindow::OPEN_CURRENTWINDOW,
-          nsIWebNavigation::LOAD_FLAGS_IS_REDIRECT, nullptr, false);
-    }
+  if (window) {
+    promise = window->OnLoadRequest(uriBeingLoaded,
+                                    nsIBrowserDOMWindow::OPEN_CURRENTWINDOW,
+                                    nsIWebNavigation::LOAD_FLAGS_IS_REDIRECT,
+                                    nullptr, false, bc->IsTopContent());
   }
 
   if (promise) {

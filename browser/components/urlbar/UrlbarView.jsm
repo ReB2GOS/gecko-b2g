@@ -389,7 +389,7 @@ class UrlbarView {
       return false;
     }
 
-    if (!this.input.openViewOnFocus || !queryOptions.event) {
+    if (!queryOptions.event) {
       return false;
     }
 
@@ -400,6 +400,7 @@ class UrlbarView {
       if (
         // Do not show Top Sites in private windows.
         !this.input.isPrivate &&
+        this.input.openViewOnFocus &&
         !this.isOpen &&
         ["mousedown", "command"].includes(queryOptions.event.type)
       ) {
@@ -439,7 +440,13 @@ class UrlbarView {
     queryOptions.autofillIgnoresSelection = true;
     queryOptions.event.interactionType = "returned";
 
-    this._openPanel();
+    if (
+      this._queryContext &&
+      this._queryContext.results &&
+      this._queryContext.results.length
+    ) {
+      this._openPanel();
+    }
 
     // If we had cached results, this will just refresh them, avoiding results
     // flicker, otherwise there may be some noise.
@@ -450,6 +457,7 @@ class UrlbarView {
   // UrlbarController listener methods.
   onQueryStarted(queryContext) {
     this._queryWasCancelled = false;
+    this._queryUpdatedResults = false;
     this._startRemoveStaleRowsTimer();
   }
 
@@ -460,9 +468,16 @@ class UrlbarView {
 
   onQueryFinished(queryContext) {
     this._cancelRemoveStaleRowsTimer();
-    // If the query has not been canceled, remove stale rows immediately.
     if (!this._queryWasCancelled) {
-      this._removeStaleRows();
+      // If the query has not been canceled and returned some results, remove
+      // stale rows immediately. If no results were returned, just clear and
+      // close the view.
+      if (this._queryUpdatedResults) {
+        this._removeStaleRows();
+      } else {
+        this.clear();
+        this.close();
+      }
     }
   }
 
@@ -473,6 +488,7 @@ class UrlbarView {
     if (!this.isOpen) {
       this.clear();
     }
+    this._queryUpdatedResults = true;
     this._updateResults(queryContext);
 
     let firstResult = queryContext.results[0];
@@ -743,6 +759,24 @@ class UrlbarView {
     typeIcon.className = "urlbarView-type-icon";
     noWrap.appendChild(typeIcon);
 
+    let tailPrefix = this._createElement("span");
+    tailPrefix.className = "urlbarView-tail-prefix";
+    noWrap.appendChild(tailPrefix);
+    item._elements.set("tailPrefix", tailPrefix);
+    // tailPrefix holds text only for alignment purposes so it should never be
+    // read to screen readers.
+    tailPrefix.toggleAttribute("aria-hidden", true);
+
+    let tailPrefixStr = this._createElement("span");
+    tailPrefixStr.className = "urlbarView-tail-prefix-string";
+    tailPrefix.appendChild(tailPrefixStr);
+    item._elements.set("tailPrefixStr", tailPrefixStr);
+
+    let tailPrefixChar = this._createElement("span");
+    tailPrefixChar.className = "urlbarView-tail-prefix-char";
+    tailPrefix.appendChild(tailPrefixChar);
+    item._elements.set("tailPrefixChar", tailPrefixChar);
+
     let title = this._createElement("span");
     title.className = "urlbarView-title";
     noWrap.appendChild(title);
@@ -880,6 +914,16 @@ class UrlbarView {
       result.title,
       result.titleHighlights
     );
+
+    if (result.payload.tail && result.payload.tailOffsetIndex >= 0) {
+      this._fillTailSuggestionPrefix(item, result);
+      title.setAttribute("aria-label", result.payload.suggestion);
+      item.toggleAttribute("tail-suggestion", true);
+    } else {
+      item.removeAttribute("tail-suggestion");
+      title.removeAttribute("aria-label");
+    }
+
     title._tooltip = result.title;
     if (title.hasAttribute("overflow")) {
       title.setAttribute("title", title._tooltip);
@@ -1307,6 +1351,25 @@ class UrlbarView {
       }
       index = highlightIndex + highlightLength;
     }
+  }
+
+  /**
+   * Adds markup for a tail suggestion prefix to a row.
+   * @param {Node} item
+   *   The node for the result row.
+   * @param {UrlbarResult} result
+   *   A UrlbarResult representing a tail suggestion.
+   */
+  _fillTailSuggestionPrefix(item, result) {
+    let tailPrefixStrNode = item._elements.get("tailPrefixStr");
+    let tailPrefixStr = result.payload.suggestion.substring(
+      0,
+      result.payload.tailOffsetIndex
+    );
+    tailPrefixStrNode.textContent = tailPrefixStr;
+
+    let tailPrefixCharNode = item._elements.get("tailPrefixChar");
+    tailPrefixCharNode.textContent = result.payload.tailPrefix;
   }
 
   _enableOrDisableOneOffSearches(enable = true) {

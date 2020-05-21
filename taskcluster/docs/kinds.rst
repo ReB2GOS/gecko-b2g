@@ -270,15 +270,9 @@ Beetmover, takes source specific artifact checksums and pushes it to a location 
 of Taskcluster's task artifacts (archive.mozilla.org as one place) and in the
 process determines the final location and "pretty" names it (version product name)
 
-push-apk
+perftest
 --------
-PushApk publishes Android packages onto Google Play Store. Jobs of this kind take
-all the signed multi-locales (aka "multi") APKs for a given release and upload them
-all at once.
-
-push-apk-checks
----------------
-Runs the checks done in push-apk to ensure APKs are sane before submitting them
+Runs performance tests using mozperftest.
 
 release-balrog-submit-toplevel
 ------------------------------
@@ -679,11 +673,6 @@ generate-profile
 Tasks that take a build configured for PGO and run the binary against a sample
 set to generate profile data. This is the 2nd stage of the full 3-step PGO
 process.
-
-geckodriver-repack
-------------------
-Tasks to repackage the geckodriver binary from a build tasks's common
-test archive into it's own archive.
 
 geckodriver-signing
 -------------------

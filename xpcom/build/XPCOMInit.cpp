@@ -8,6 +8,7 @@
 
 #include "base/basictypes.h"
 
+#include "mozilla/AbstractThread.h"
 #include "mozilla/AppShutdown.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Poison.h"
@@ -148,6 +149,7 @@ nsresult nsLocalFileConstructor(nsISupports* aOuter, const nsIID& aIID,
 nsComponentManagerImpl* nsComponentManagerImpl::gComponentManager = nullptr;
 bool gXPCOMShuttingDown = false;
 bool gXPCOMThreadsShutDown = false;
+bool gXPCOMMainThreadEventsAreDoomed = false;
 char16_t* gGREBinPath = nullptr;
 
 static NS_DEFINE_CID(kINIParserFactoryCID, NS_INIPARSERFACTORY_CID);
@@ -653,27 +655,34 @@ nsresult ShutdownXPCOM(nsIServiceManager* aServMgr) {
 
     NS_ProcessPendingEvents(thread);
 
+    if (observerService) {
+      mozilla::KillClearOnShutdown(ShutdownPhase::ShutdownLoaders);
+      observerService->Shutdown();
+    }
+
+    // Free ClearOnShutdown()'ed smart pointers.  This needs to happen *after*
+    // we've finished notifying observers of XPCOM shutdown, because shutdown
+    // observers themselves might call ClearOnShutdown().
+    // Some destructors may fire extra runnables that will be processed below.
+    mozilla::KillClearOnShutdown(ShutdownPhase::ShutdownFinal);
+
     // Shutdown all remaining threads.  This method does not return until
     // all threads created using the thread manager (with the exception of
     // the main thread) have exited.
     nsThreadManager::get().Shutdown();
 
+    // Process our last round of events, and then mark that we've finished main
+    // thread event processing.
     NS_ProcessPendingEvents(thread);
+    gXPCOMMainThreadEventsAreDoomed = true;
 
     BackgroundHangMonitor().NotifyActivity();
 
     mozilla::dom::JSExecutionManager::Shutdown();
-
-    if (observerService) {
-      mozilla::KillClearOnShutdown(ShutdownPhase::ShutdownLoaders);
-      observerService->Shutdown();
-    }
   }
 
-  // Free ClearOnShutdown()'ed smart pointers.  This needs to happen *after*
-  // we've finished notifying observers of XPCOM shutdown, because shutdown
-  // observers themselves might call ClearOnShutdown().
-  mozilla::KillClearOnShutdown(ShutdownPhase::ShutdownFinal);
+  AbstractThread::ShutdownMainThread();
+
   mozilla::AppShutdown::MaybeFastShutdown(
       mozilla::ShutdownPhase::ShutdownFinal);
 
@@ -745,7 +754,7 @@ nsresult ShutdownXPCOM(nsIServiceManager* aServMgr) {
   // down, any remaining objects that could be holding NSS resources (should)
   // have been released, so we can safely shut down NSS.
   if (NSS_IsInitialized()) {
-    nsNSSComponent::ClearSSLExternalAndInternalSessionCacheNative();
+    nsNSSComponent::DoClearSSLExternalAndInternalSessionCache();
     if (NSS_Shutdown() != SECSuccess) {
       // If you're seeing this crash and/or warning, some NSS resources are
       // still in use (see bugs 1417680 and 1230312). Set the environment

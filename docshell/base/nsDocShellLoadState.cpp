@@ -6,15 +6,19 @@
 
 #include "nsDocShellLoadState.h"
 #include "nsIDocShell.h"
-#include "SHEntryParent.h"
-#include "SHEntryChild.h"
+#include "nsDocShell.h"
 #include "nsISHEntry.h"
+#include "nsIURIFixup.h"
 #include "nsIWebNavigation.h"
 #include "nsIChannel.h"
+#include "nsNetUtil.h"
+#include "nsQueryObject.h"
 #include "ReferrerInfo.h"
 #include "mozilla/BasePrincipal.h"
 #include "mozilla/ClearOnShutdown.h"
+#include "mozilla/Components.h"
 #include "mozilla/dom/BrowsingContext.h"
+#include "mozilla/dom/ContentChild.h"
 #include "mozilla/dom/LoadURIOptionsBinding.h"
 #include "mozilla/StaticPrefs_fission.h"
 
@@ -23,6 +27,9 @@
 #include "mozilla/StaticPtr.h"
 
 #include "mozilla/dom/PContent.h"
+
+using namespace mozilla;
+using namespace mozilla::dom;
 
 // Global reference to the URI fixup service.
 static mozilla::StaticRefPtr<nsIURIFixup> sURIFixup;
@@ -126,14 +133,6 @@ nsDocShellLoadState::nsDocShellLoadState(
   mHeadersStream = aLoadState.HeadersStream();
   mSrcdocData = aLoadState.SrcdocData();
   mLoadIdentifier = aLoadState.LoadIdentifier();
-  if (!aLoadState.SHEntry() || !StaticPrefs::fission_sessionHistoryInParent()) {
-    return;
-  }
-  if (XRE_IsParentProcess()) {
-    mSHEntry = static_cast<LegacySHEntry*>(aLoadState.SHEntry());
-  } else {
-    mSHEntry = static_cast<SHEntryChild*>(aLoadState.SHEntry());
-  }
 }
 
 nsDocShellLoadState::nsDocShellLoadState(const nsDocShellLoadState& aOther)
@@ -205,7 +204,7 @@ nsresult nsDocShellLoadState::CreateFromPendingChannel(
 }
 
 nsresult nsDocShellLoadState::CreateFromLoadURIOptions(
-    nsISupports* aConsumer, const nsAString& aURI,
+    BrowsingContext* aBrowsingContext, const nsAString& aURI,
     const LoadURIOptions& aLoadURIOptions, nsDocShellLoadState** aResult) {
   uint32_t loadFlags = aLoadURIOptions.mLoadFlags;
 
@@ -255,16 +254,8 @@ nsresult nsDocShellLoadState::CreateFromLoadURIOptions(
     if (!(fixupFlags & nsIURIFixup::FIXUP_FLAG_ALLOW_KEYWORD_LOOKUP)) {
       loadFlags &= ~nsIWebNavigation::LOAD_FLAGS_ALLOW_THIRD_PARTY_FIXUP;
     }
-    // The consumer is either a DocShell or an Element.
-    nsCOMPtr<nsILoadContext> loadContext = do_QueryInterface(aConsumer);
-    if (!loadContext) {
-      if (RefPtr<Element> element = do_QueryObject(aConsumer)) {
-        loadContext = do_QueryInterface(element->OwnerDoc()->GetDocShell());
-      }
-    }
     // Ensure URIFixup will use the right search engine in Private Browsing.
-    MOZ_ASSERT(loadContext, "We should always have a LoadContext here.");
-    if (loadContext && loadContext->UsePrivateBrowsing()) {
+    if (aBrowsingContext->UsePrivateBrowsing()) {
       fixupFlags |= nsIURIFixup::FIXUP_FLAG_PRIVATE_CONTEXT;
     }
 
@@ -275,7 +266,7 @@ nsresult nsDocShellLoadState::CreateFromLoadURIOptions(
       // We could fix the uri, clear NS_ERROR_MALFORMED_URI.
       rv = NS_OK;
       fixupInfo->GetPreferredURI(getter_AddRefs(uri));
-      fixupInfo->SetConsumer(aConsumer);
+      fixupInfo->SetConsumer(aBrowsingContext);
     }
 
     if (fixupStream) {
@@ -495,6 +486,20 @@ nsISHEntry* nsDocShellLoadState::SHEntry() const { return mSHEntry; }
 
 void nsDocShellLoadState::SetSHEntry(nsISHEntry* aSHEntry) {
   mSHEntry = aSHEntry;
+}
+
+void nsDocShellLoadState::SetSessionHistoryInfo(
+    const mozilla::dom::SessionHistoryInfoAndId& aIdAndInfo) {
+  mSessionHistoryInfo = aIdAndInfo;
+}
+
+uint64_t nsDocShellLoadState::GetSessionHistoryID() const {
+  return mSessionHistoryInfo.mId;
+}
+
+const mozilla::dom::SessionHistoryInfo&
+nsDocShellLoadState::GetSessionHistoryInfo() const {
+  return *mSessionHistoryInfo.mInfo;
 }
 
 const nsString& nsDocShellLoadState::Target() const { return mTarget; }
@@ -876,18 +881,5 @@ DocShellLoadStateInit nsDocShellLoadState::Serialize() {
   loadState.SrcdocData() = mSrcdocData;
   loadState.ResultPrincipalURI() = mResultPrincipalURI;
   loadState.LoadIdentifier() = mLoadIdentifier;
-  if (!mSHEntry || !StaticPrefs::fission_sessionHistoryInParent()) {
-    // Without the pref, we don't have an actor for shentry and thus
-    // we can't serialize it. We could write custom (de)serializers,
-    // but a session history rewrite is on the way anyway.
-    return loadState;
-  }
-  if (XRE_IsParentProcess()) {
-    loadState.SHEntry() = static_cast<CrossProcessSHEntry*>(
-        static_cast<LegacySHEntry*>(mSHEntry.get()));
-  } else {
-    loadState.SHEntry() = static_cast<CrossProcessSHEntry*>(
-        static_cast<SHEntryChild*>(mSHEntry.get()));
-  }
   return loadState;
 }

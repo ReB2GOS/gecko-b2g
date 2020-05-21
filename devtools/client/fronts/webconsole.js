@@ -78,7 +78,7 @@ class WebConsoleFront extends FrontClassWithSpec(webconsoleSpec) {
   _onNetworkEvent(packet) {
     const actor = packet.eventActor;
     const networkInfo = {
-      _type: "NetworkEvent",
+      type: "networkEvent",
       timeStamp: actor.timeStamp,
       node: null,
       actor: actor.actor,
@@ -101,6 +101,7 @@ class WebConsoleFront extends FrontClassWithSpec(webconsoleSpec) {
       isThirdPartyTrackingResource: actor.isThirdPartyTrackingResource,
       referrerPolicy: actor.referrerPolicy,
       blockedReason: actor.blockedReason,
+      blockingExtension: actor.blockingExtension,
       channelId: actor.channelId,
     };
     this._networkRequests.set(actor.actor, networkInfo);
@@ -290,22 +291,35 @@ class WebConsoleFront extends FrontClassWithSpec(webconsoleSpec) {
         this
       );
     }
+
+    if (packet?.pageError?.exception) {
+      packet.pageError.exception = getAdHocFrontOrPrimitiveGrip(
+        packet.pageError.exception,
+        this
+      );
+    }
     return packet;
   }
 
   async getCachedMessages(messageTypes) {
     const response = await super.getCachedMessages(messageTypes);
     if (Array.isArray(response.messages)) {
-      response.messages = response.messages.map(message => {
-        if (!message || !Array.isArray(message.arguments)) {
-          return message;
+      response.messages = response.messages.map(packet => {
+        if (Array.isArray(packet?.message?.arguments)) {
+          // We might need to create fronts for each of the message arguments.
+          packet.message.arguments = packet.message.arguments.map(arg =>
+            getAdHocFrontOrPrimitiveGrip(arg, this)
+          );
         }
 
-        // We might need to create fronts for each of the message arguments.
-        message.arguments = message.arguments.map(arg =>
-          getAdHocFrontOrPrimitiveGrip(arg, this)
-        );
-        return message;
+        if (packet.pageError?.exception) {
+          packet.pageError.exception = getAdHocFrontOrPrimitiveGrip(
+            packet.pageError.exception,
+            this
+          );
+        }
+
+        return packet;
       });
     }
     return response;

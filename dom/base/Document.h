@@ -57,6 +57,7 @@
 #include "mozilla/HashTable.h"
 #include "mozilla/LinkedList.h"
 #include "mozilla/NotNull.h"
+#include "mozilla/PreloadService.h"
 #include "mozilla/SegmentedVector.h"
 #include "mozilla/TimeStamp.h"
 #include "mozilla/UniquePtr.h"
@@ -581,7 +582,7 @@ class Document : public nsINode,
   // checks to ensure that the intrinsic storage principal should really be
   // used here.  It is only designed to be used in very specific circumstances,
   // such as when inheriting the document/storage principal.
-  nsIPrincipal* IntrinsicStoragePrincipal() const {
+  nsIPrincipal* IntrinsicStoragePrincipal() final {
     return mIntrinsicStoragePrincipal;
   }
 
@@ -1047,55 +1048,91 @@ class Document : public nsINode,
   /**
    * Get the has mixed active content loaded flag for this document.
    */
-  bool GetHasMixedActiveContentLoaded() { return mHasMixedActiveContentLoaded; }
+  bool GetHasMixedActiveContentLoaded() {
+    return mMixedContentFlags &
+           nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT;
+  }
 
   /**
    * Set the has mixed active content loaded flag for this document.
    */
   void SetHasMixedActiveContentLoaded(bool aHasMixedActiveContentLoaded) {
-    mHasMixedActiveContentLoaded = aHasMixedActiveContentLoaded;
+    if (aHasMixedActiveContentLoaded) {
+      mMixedContentFlags |=
+          nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT;
+    } else {
+      mMixedContentFlags &=
+          ~nsIWebProgressListener::STATE_LOADED_MIXED_ACTIVE_CONTENT;
+    }
   }
 
   /**
    * Get mixed active content blocked flag for this document.
    */
   bool GetHasMixedActiveContentBlocked() {
-    return mHasMixedActiveContentBlocked;
+    return mMixedContentFlags &
+           nsIWebProgressListener::STATE_BLOCKED_MIXED_ACTIVE_CONTENT;
   }
 
   /**
    * Set the mixed active content blocked flag for this document.
    */
   void SetHasMixedActiveContentBlocked(bool aHasMixedActiveContentBlocked) {
-    mHasMixedActiveContentBlocked = aHasMixedActiveContentBlocked;
+    if (aHasMixedActiveContentBlocked) {
+      mMixedContentFlags |=
+          nsIWebProgressListener::STATE_BLOCKED_MIXED_ACTIVE_CONTENT;
+    } else {
+      mMixedContentFlags &=
+          ~nsIWebProgressListener::STATE_BLOCKED_MIXED_ACTIVE_CONTENT;
+    }
   }
 
   /**
    * Get the has mixed display content loaded flag for this document.
    */
   bool GetHasMixedDisplayContentLoaded() {
-    return mHasMixedDisplayContentLoaded;
+    return mMixedContentFlags &
+           nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT;
   }
 
   /**
    * Set the has mixed display content loaded flag for this document.
    */
   void SetHasMixedDisplayContentLoaded(bool aHasMixedDisplayContentLoaded) {
-    mHasMixedDisplayContentLoaded = aHasMixedDisplayContentLoaded;
+    if (aHasMixedDisplayContentLoaded) {
+      mMixedContentFlags |=
+          nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT;
+    } else {
+      mMixedContentFlags &=
+          ~nsIWebProgressListener::STATE_LOADED_MIXED_DISPLAY_CONTENT;
+    }
   }
 
   /**
    * Get mixed display content blocked flag for this document.
    */
   bool GetHasMixedDisplayContentBlocked() {
-    return mHasMixedDisplayContentBlocked;
+    return mMixedContentFlags &
+           nsIWebProgressListener::STATE_BLOCKED_MIXED_DISPLAY_CONTENT;
   }
 
   /**
    * Set the mixed display content blocked flag for this document.
    */
   void SetHasMixedDisplayContentBlocked(bool aHasMixedDisplayContentBlocked) {
-    mHasMixedDisplayContentBlocked = aHasMixedDisplayContentBlocked;
+    if (aHasMixedDisplayContentBlocked) {
+      mMixedContentFlags |=
+          nsIWebProgressListener::STATE_BLOCKED_MIXED_DISPLAY_CONTENT;
+    } else {
+      mMixedContentFlags &=
+          ~nsIWebProgressListener::STATE_BLOCKED_MIXED_DISPLAY_CONTENT;
+    }
+  }
+
+  uint32_t GetMixedContentFlags() const { return mMixedContentFlags; }
+
+  void AddMixedContentFlags(uint32_t aMixedContentFlags) {
+    mMixedContentFlags |= aMixedContentFlags;
   }
 
   /**
@@ -1137,6 +1174,11 @@ class Document : public nsINode,
    * @see nsSandboxFlags.h for the possible flags
    */
   uint32_t GetSandboxFlags() const { return mSandboxFlags; }
+
+  Maybe<nsILoadInfo::CrossOriginEmbedderPolicy> GetEmbedderPolicyFromHTTP()
+      const {
+    return mEmbedderPolicyFromHTTP;
+  }
 
   /**
    * Get string representation of sandbox flags (null if no flags are set)
@@ -1433,7 +1475,7 @@ class Document : public nsINode,
   nsICookieJarSettings* CookieJarSettings();
 
   // Returns whether this document has the storage permission.
-  bool HasStoragePermission() { return mHasStoragePermission; }
+  bool HasStoragePermission();
 
   // Increments the document generation.
   inline void Changed() { ++mGeneration; }
@@ -1522,10 +1564,13 @@ class Document : public nsINode,
   // parser inserted form control element.
   int32_t GetNextControlNumber() { return mNextControlNumber++; }
 
+  PreloadService& Preloads() { return mPreloadService; }
+
  protected:
   friend class nsUnblockOnloadEvent;
 
   nsresult InitCSP(nsIChannel* aChannel);
+  nsresult InitCOEP(nsIChannel* aChannel);
 
   nsresult InitFeaturePolicy(nsIChannel* aChannel);
 
@@ -1894,6 +1939,13 @@ class Document : public nsINode,
   void RequestFullscreen(UniquePtr<FullscreenRequest> aRequest,
                          bool applyFullScreenDirectly = false);
 
+ private:
+  void RequestFullscreenInContentProcess(UniquePtr<FullscreenRequest> aRequest,
+                                         bool applyFullScreenDirectly);
+  void RequestFullscreenInParentProcess(UniquePtr<FullscreenRequest> aRequest,
+                                        bool applyFullScreenDirectly);
+
+ public:
   // Removes all the elements with fullscreen flag set from the top layer, and
   // clears their fullscreen flag.
   void CleanupFullscreenState();
@@ -2897,7 +2949,11 @@ class Document : public nsINode,
    * when this image is for loading <picture> or <img srcset> images.
    */
   void MaybePreLoadImage(nsIURI* uri, const nsAString& aCrossOriginAttr,
-                         ReferrerPolicyEnum aReferrerPolicy, bool aIsImgSet);
+                         ReferrerPolicyEnum aReferrerPolicy, bool aIsImgSet,
+                         bool aLinkPreload);
+  void PreLoadImage(nsIURI* uri, const nsAString& aCrossOriginAttr,
+                    ReferrerPolicyEnum aReferrerPolicy, bool aIsImgSet,
+                    bool aLinkPreload);
 
   /**
    * Called by images to forget an image preload when they start doing
@@ -3715,19 +3771,19 @@ class Document : public nsINode,
    * the document element.
    * In XUL it happens at `DoneWalking`, during
    * `MozBeforeInitialXULLayout`.
-   *
-   * It triggers the initial translation of the
-   * document.
    */
-  void TriggerInitialDocumentTranslation();
+  void OnParsingCompleted();
 
   /**
    * This method is called when the initial translation
    * of the document is completed.
    *
    * It unblocks the load event if translation was blocking it.
+   *
+   * If the `aL10nCached` is set to `true`, and the document has
+   * a prototype, it will set the `isL10nCached` flag on it.
    */
-  void InitialDocumentTranslationCompleted();
+  void InitialTranslationCompleted(bool aL10nCached);
 
   /**
    * Returns whether the document allows localization.
@@ -3747,7 +3803,7 @@ class Document : public nsINode,
  private:
   bool IsErrorPage() const;
 
-  void InitializeLocalization(Sequence<nsString>& aResourceIds);
+  void EnsureL10n();
 
   // Takes the bits from mStyleUseCounters if appropriate, and sets them in
   // mUseCounters.
@@ -3772,8 +3828,6 @@ class Document : public nsINode,
   already_AddRefed<mozilla::dom::FeaturePolicy> GetParentFeaturePolicy();
 
   FlashClassification DocumentFlashClassificationInternal();
-
-  Sequence<nsString> mL10nResources;
 
   // The application cache that this document is associated with, if
   // any.  This can change during the lifetime of the document.
@@ -4200,10 +4254,6 @@ class Document : public nsINode,
   MOZ_MUST_USE RefPtr<AutomaticStorageAccessGrantPromise>
   AutomaticStorageAccessCanBeGranted();
 
-  // This should *ONLY* be used in GetCookie/SetCookie.
-  already_AddRefed<nsIChannel> CreateDummyChannelForCookies(
-      nsIURI* aContentURI);
-
   static void AddToplevelLoadingDocument(Document* aDoc);
   static void RemoveToplevelLoadingDocument(Document* aDoc);
   static AutoTArray<Document*, 8>* sLoadingForegroundTopLevelContentDocument;
@@ -4333,6 +4383,8 @@ class Document : public nsINode,
   // GetPermissionDelegateHandler
   RefPtr<PermissionDelegateHandler> mPermissionDelegateHandler;
 
+  uint32_t mMixedContentFlags = 0;
+
   // True if BIDI is enabled.
   bool mBidiEnabled : 1;
   // True if we may need to recompute the language prefs for this document.
@@ -4425,22 +4477,6 @@ class Document : public nsINode,
   // True if an nsIAnimationObserver is perhaps attached to a node in the
   // document.
   bool mMayHaveAnimationObservers : 1;
-
-  // True if a document has loaded Mixed Active Script (see
-  // nsMixedContentBlocker.cpp)
-  bool mHasMixedActiveContentLoaded : 1;
-
-  // True if a document has blocked Mixed Active Script (see
-  // nsMixedContentBlocker.cpp)
-  bool mHasMixedActiveContentBlocked : 1;
-
-  // True if a document has loaded Mixed Display/Passive Content (see
-  // nsMixedContentBlocker.cpp)
-  bool mHasMixedDisplayContentLoaded : 1;
-
-  // True if a document has blocked Mixed Display/Passive Content (see
-  // nsMixedContentBlocker.cpp)
-  bool mHasMixedDisplayContentBlocked : 1;
 
   // True if a document load has a CSP attached.
   bool mHasCSP : 1;
@@ -4699,6 +4735,9 @@ class Document : public nsINode,
   // These are set at load time and are immutable - see nsSandboxFlags.h for the
   // possible flags.
   uint32_t mSandboxFlags;
+
+  // The embedder policy obtained from parsing the HTTP response header.
+  Maybe<nsILoadInfo::CrossOriginEmbedderPolicy> mEmbedderPolicyFromHTTP;
 
   nsCString mContentLanguage;
 
@@ -5064,8 +5103,6 @@ class Document : public nsINode,
   // Pres shell resolution saved before creating a MobileViewportManager.
   float mSavedResolutionBeforeMVM;
 
-  bool mPendingInitialTranslation;
-
   nsCOMPtr<nsICookieJarSettings> mCookieJarSettings;
 
   bool mHasStoragePermission;
@@ -5092,11 +5129,14 @@ class Document : public nsINode,
   int32_t mNextFormNumber;
   int32_t mNextControlNumber;
 
+  // Scope preloads per document.  This is used by speculative loading as well.
+  PreloadService mPreloadService;
+
  public:
   // Needs to be public because the bindings code pokes at it.
   js::ExpandoAndGeneration mExpandoAndGeneration;
 
-  bool HasPendingInitialTranslation() { return mPendingInitialTranslation; }
+  bool HasPendingInitialTranslation();
 
   nsRefPtrHashtable<nsRefPtrHashKey<Element>, nsXULPrototypeElement>
       mL10nProtoElements;

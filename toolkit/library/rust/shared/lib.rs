@@ -15,6 +15,7 @@ extern crate authenticator;
 extern crate bitsdownload;
 #[cfg(feature = "moz_places")]
 extern crate bookmark_sync;
+extern crate cascade_bloom_filter;
 #[cfg(feature = "new_cert_storage")]
 extern crate cert_storage;
 extern crate chardetng_c;
@@ -25,6 +26,12 @@ extern crate cubeb_coreaudio;
 extern crate cubeb_pulse;
 extern crate encoding_glue;
 extern crate env_logger;
+
+// Enable on Gonk since we didn't disable FxA.
+// This should rather be gated by a proper feature
+// rather than rely on the OS value.
+// #[cfg(not(target_os = "android"))]
+extern crate firefox_accounts_bridge;
 #[cfg(feature = "glean")]
 extern crate fog;
 extern crate gkrust_utils;
@@ -52,7 +59,6 @@ extern crate xulstore;
 
 extern crate audio_thread_priority;
 
-#[cfg(feature = "new_webext_storage")]
 extern crate webext_storage_bridge;
 
 #[cfg(feature = "webrtc")]
@@ -75,22 +81,28 @@ extern crate fluent_ffi;
 
 extern crate rusqlite;
 
-#[cfg(feature = "services_sync")]
-extern crate golden_gate;
+extern crate viaduct;
 
 #[cfg(feature = "remote")]
 extern crate remote;
 
+extern crate gecko_logger;
+
 #[cfg(target_os = "android")]
 use log::Level;
+
 #[cfg(not(target_os = "android"))]
 use log::Log;
 use std::boxed::Box;
+use std::cmp;
 use std::env;
 use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 #[cfg(target_os = "android")]
 use std::os::raw::c_int;
+
+#[cfg(not(target_os = "android"))]
+use gecko_logger::log_to_gecko;
 
 extern "C" {
     fn gfx_critical_note(msg: *const c_char);
@@ -121,7 +133,10 @@ impl GeckoLogger {
     fn init() -> Result<(), log::SetLoggerError> {
         let gecko_logger = Self::new();
 
-        log::set_max_level(gecko_logger.logger.filter());
+        // The max level may have already been set by gecko_logger. Don't
+        // set it to a lower level.
+        let level = cmp::max(log::max_level(), gecko_logger.logger.filter());
+        log::set_max_level(level);
         log::set_boxed_logger(Box::new(gecko_logger))
     }
 
@@ -144,7 +159,9 @@ impl GeckoLogger {
 
     #[cfg(not(target_os = "android"))]
     fn log_out(&self, record: &log::Record) {
-        self.logger.log(record);
+        if !log_to_gecko(record) {
+            self.logger.log(record);
+        }
     }
 
     #[cfg(target_os = "android")]

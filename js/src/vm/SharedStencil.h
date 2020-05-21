@@ -13,9 +13,9 @@
 #include <stdint.h>  // uint32_t
 
 #include "frontend/SourceNotes.h"  // js::SrcNote
-#include "js/CompileOptions.h"  // JS::{ReadOnlyCompileOptions,TransitiveCompileOptions}
-#include "js/TypeDecls.h"  // JSContext,jsbytecode
-#include "js/UniquePtr.h"  // js::UniquePtr
+#include "js/TypeDecls.h"          // JSContext,jsbytecode
+#include "js/UniquePtr.h"          // js::UniquePtr
+#include "util/TrailingArray.h"    // js::TrailingArray
 #include "vm/StencilEnums.h"  // js::{TryNoteKind,ImmutableScriptFlagsEnum,MutableScriptFlagsEnum}
 
 //
@@ -130,30 +130,6 @@ class ImmutableScriptFlags : public ScriptFlagBase<ImmutableScriptFlagsEnum> {
   using ScriptFlagBase<ImmutableScriptFlagsEnum>::ScriptFlagBase;
 
   void operator=(uint32_t flag) { flags_ = flag; }
-
-  static ImmutableScriptFlags fromCompileOptions(
-      const JS::ReadOnlyCompileOptions& options) {
-    ImmutableScriptFlags isf;
-    isf.setFlag(ImmutableScriptFlagsEnum::NoScriptRval, options.noScriptRval);
-    isf.setFlag(ImmutableScriptFlagsEnum::SelfHosted, options.selfHostingMode);
-    isf.setFlag(ImmutableScriptFlagsEnum::TreatAsRunOnce, options.isRunOnce);
-    isf.setFlag(ImmutableScriptFlagsEnum::ForceStrict,
-                options.forceStrictMode());
-    return isf;
-  };
-
-  static ImmutableScriptFlags fromCompileOptions(
-      const JS::TransitiveCompileOptions& options) {
-    ImmutableScriptFlags isf;
-    isf.setFlag(ImmutableScriptFlagsEnum::NoScriptRval,
-                /* noScriptRval (non-transitive compile option) = */ false);
-    isf.setFlag(ImmutableScriptFlagsEnum::SelfHosted, options.selfHostingMode);
-    isf.setFlag(ImmutableScriptFlagsEnum::TreatAsRunOnce,
-                /* isRunOnce (non-transitive compile option) = */ false);
-    isf.setFlag(ImmutableScriptFlagsEnum::ForceStrict,
-                options.forceStrictMode());
-    return isf;
-  };
 };
 
 class MutableScriptFlags : public ScriptFlagBase<MutableScriptFlagsEnum> {
@@ -221,11 +197,8 @@ class MutableScriptFlags : public ScriptFlagBase<MutableScriptFlagsEnum> {
 // In general, the length of each array is computed from subtracting the start
 // offset of the array from the start offset of the subsequent array. The
 // notable exception is that bytecode length is stored explicitly.
-class alignas(uint32_t) ImmutableScriptData final {
+class alignas(uint32_t) ImmutableScriptData final : public TrailingArray {
  private:
-  // Offsets are measured in bytes relative to 'this'.
-  using Offset = uint32_t;
-
   Offset optArrayOffset_ = 0;
 
   // Length of bytecode
@@ -269,10 +242,10 @@ class alignas(uint32_t) ImmutableScriptData final {
   // Offsets (in bytes) from 'this' to each component array. The delta between
   // each offset and the next offset is the size of each array and is defined
   // even if an array is empty.
-  size_t flagOffset() const { return offsetOfCode() - sizeof(Flags); }
-  size_t codeOffset() const { return offsetOfCode(); }
-  size_t noteOffset() const { return offsetOfCode() + codeLength_; }
-  size_t optionalOffsetsOffset() const {
+  Offset flagOffset() const { return offsetOfCode() - sizeof(Flags); }
+  Offset codeOffset() const { return offsetOfCode(); }
+  Offset noteOffset() const { return offsetOfCode() + codeLength_; }
+  Offset optionalOffsetsOffset() const {
     // Determine the location to beginning of optional-offsets array by looking
     // at index for try-notes.
     //
@@ -288,35 +261,19 @@ class alignas(uint32_t) ImmutableScriptData final {
 
     return optArrayOffset_ - (numOffsets * sizeof(Offset));
   }
-  size_t resumeOffsetsOffset() const { return optArrayOffset_; }
-  size_t scopeNotesOffset() const {
+  Offset resumeOffsetsOffset() const { return optArrayOffset_; }
+  Offset scopeNotesOffset() const {
     return getOptionalOffset(flags().resumeOffsetsEndIndex);
   }
-  size_t tryNotesOffset() const {
+  Offset tryNotesOffset() const {
     return getOptionalOffset(flags().scopeNotesEndIndex);
   }
-  size_t endOffset() const {
+  Offset endOffset() const {
     return getOptionalOffset(flags().tryNotesEndIndex);
   }
 
-  // Size to allocate
-  static size_t AllocationSize(uint32_t codeLength, uint32_t noteLength,
-                               uint32_t numResumeOffsets,
-                               uint32_t numScopeNotes, uint32_t numTryNotes);
-
-  // Translate an offset into a concrete pointer.
-  template <typename T>
-  T* offsetToPointer(size_t offset) {
-    uintptr_t base = reinterpret_cast<uintptr_t>(this);
-    return reinterpret_cast<T*>(base + offset);
-  }
-
-  template <typename T>
-  void initElements(size_t offset, size_t length);
-
-  void initOptionalArrays(size_t* cursor, Flags* flags,
-                          uint32_t numResumeOffsets, uint32_t numScopeNotes,
-                          uint32_t numTryNotes);
+  void initOptionalArrays(Offset* cursor, uint32_t numResumeOffsets,
+                          uint32_t numScopeNotes, uint32_t numTryNotes);
 
   // Initialize to GC-safe state
   ImmutableScriptData(uint32_t codeLength, uint32_t noteLength,
@@ -386,7 +343,9 @@ class alignas(uint32_t) ImmutableScriptData final {
   jsbytecode* code() { return offsetToPointer<jsbytecode>(codeOffset()); }
   mozilla::Span<jsbytecode> codeSpan() { return {code(), codeLength()}; }
 
-  uint32_t noteLength() const { return optionalOffsetsOffset() - noteOffset(); }
+  uint32_t noteLength() const {
+    return numElements<SrcNote>(noteOffset(), optionalOffsetsOffset());
+  }
   SrcNote* notes() { return offsetToPointer<SrcNote>(noteOffset()); }
   mozilla::Span<SrcNote> notesSpan() { return {notes(), noteLength()}; }
 
@@ -410,6 +369,8 @@ class alignas(uint32_t) ImmutableScriptData final {
   static constexpr size_t offsetOfResumeOffsetsOffset() {
     // Resume-offsets are the first optional array if they exist. Locate the
     // array with the 'optArrayOffset_' field.
+    static_assert(sizeof(Offset) == sizeof(uint32_t),
+                  "JIT expect Offset to be uint32_t");
     return offsetof(ImmutableScriptData, optArrayOffset_);
   }
   static constexpr size_t offsetOfNfixed() {

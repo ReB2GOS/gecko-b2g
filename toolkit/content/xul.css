@@ -226,16 +226,6 @@ panel {
 }
 
 menupopup,
-panel:not([type="arrow"]) {
-  /* This should be in popup.css, but the stylesheet loads after the custom
-     element initializes which is too late for widget code. */
-%ifdef XP_WIN
-  background: Menu;
-  border: 1px solid ThreeDShadow;
-%endif
-}
-
-menupopup,
 panel,
 tooltip {
   display: -moz-popup;
@@ -249,7 +239,10 @@ tooltip {
   margin-top: 21px;
 }
 
+% excluding Android here to work around bug 1637975:
+%ifndef ANDROID
 @supports -moz-bool-pref("xul.panel-animations.enabled") {
+@media (prefers-reduced-motion: no-preference) {
 %ifdef MOZ_WIDGET_COCOA
   /* On Mac, use the properties "-moz-window-transform" and "-moz-window-opacity"
      instead of "transform" and "opacity" for these animations.
@@ -313,6 +306,12 @@ tooltip {
     transform: none;
   }
 %endif
+}
+}
+%endif
+
+panel[type="arrow"][animating] {
+  pointer-events: none;
 }
 
 /******** grid **********/

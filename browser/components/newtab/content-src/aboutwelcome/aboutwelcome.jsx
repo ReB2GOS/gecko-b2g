@@ -4,6 +4,7 @@
 
 import React from "react";
 import ReactDOM from "react-dom";
+import { MultiStageAboutWelcome } from "./components/MultiStageAboutWelcome";
 import { HeroText } from "./components/HeroText";
 import { FxCards } from "./components/FxCards";
 import { Localized } from "./components/MSLocalized";
@@ -19,6 +20,7 @@ class AboutWelcome extends React.PureComponent {
     this.state = { metricsFlowUri: null };
     this.fetchFxAFlowUri = this.fetchFxAFlowUri.bind(this);
     this.handleStartBtnClick = this.handleStartBtnClick.bind(this);
+    this.messageId = "ABOUT_WELCOME";
   }
 
   async fetchFxAFlowUri() {
@@ -26,26 +28,30 @@ class AboutWelcome extends React.PureComponent {
   }
 
   componentDidMount() {
-    let messageId =
-      this.props.experiment && this.props.branchId
-        ? `SIMPLIFIED_ABOUT_WELCOME_${this.props.experiment}_${this.props.branchId}`.toUpperCase()
-        : "SIMPLIFIED_ABOUT_WELCOME";
-
+    if (this.props.experiment && this.props.branchId) {
+      this.messageId = `ABOUT_WELCOME_${this.props.experiment}_${this.props.branchId}`.toUpperCase();
+    } else if (this.props.id && this.props.screens) {
+      this.messageId = this.props.id;
+    }
     this.fetchFxAFlowUri();
     window.AWSendEventTelemetry({
       event: "IMPRESSION",
-      message_id: messageId,
+      message_id: this.messageId,
     });
     // Captures user has seen about:welcome by setting
-    // firstrun.didSeeAboutWelcome pref to true
-    window.AWSendToParent("SET_WELCOME_MESSAGE_SEEN");
+    // firstrun.didSeeAboutWelcome pref to true and capturing welcome UI unique messageId
+    window.AWSendToParent("SET_WELCOME_MESSAGE_SEEN", this.messageId);
   }
 
   handleStartBtnClick() {
     AboutWelcomeUtils.handleUserAction(this.props.startButton.action);
     const ping = {
       event: "CLICK_BUTTON",
-      message_id: this.props.startButton.message_id,
+      event_context: {
+        source: this.props.startButton.message_id,
+        page: "about:welcome",
+      },
+      message_id: this.messageId,
       id: "ABOUT_WELCOME",
     };
     window.AWSendEventTelemetry(ping);
@@ -53,6 +59,14 @@ class AboutWelcome extends React.PureComponent {
 
   render() {
     const { props } = this;
+    // TBD: Refactor to redirect based off template value
+    // inside props.template
+    // Create SimpleAboutWelcome that renders default about welcome
+    // See Bug 1638087
+    if (props.screens) {
+      return <MultiStageAboutWelcome screens={props.screens} />;
+    }
+
     let UTMTerm =
       this.props.experiment && this.props.branchId
         ? `${this.props.experiment}-${this.props.branchId}`
@@ -85,7 +99,12 @@ AboutWelcome.defaultProps = DEFAULT_WELCOME_CONTENT;
 
 async function mount() {
   const { slug, branch } = await window.AWGetStartupData();
-  const settings = branch && branch.value ? branch.value : {};
+  let settings = branch && branch.value ? branch.value : {};
+
+  if (!(branch && branch.value)) {
+    // Check for override content in pref browser.aboutwelcome.overrideContent
+    settings = await window.AWGetMultiStageScreens();
+  }
 
   ReactDOM.render(
     <AboutWelcome

@@ -34,13 +34,13 @@
  */
 
 #ifndef V4L2_CTRL_CLASS_FM_RX
-#define V4L2_CTRL_CLASS_FM_RX 0x00a10000
-#define V4L2_CID_FM_RX_CLASS_BASE (V4L2_CTRL_CLASS_FM_RX | 0x900)
-#define V4L2_CID_TUNE_DEEMPHASIS  (V4L2_CID_FM_RX_CLASS_BASE + 1)
-#define V4L2_DEEMPHASIS_DISABLED  0
-#define V4L2_DEEMPHASIS_50_uS     1
-#define V4L2_DEEMPHASIS_75_uS     2
-#define V4L2_CID_RDS_RECEPTION    (V4L2_CID_FM_RX_CLASS_BASE + 2)
+#  define V4L2_CTRL_CLASS_FM_RX 0x00a10000
+#  define V4L2_CID_FM_RX_CLASS_BASE (V4L2_CTRL_CLASS_FM_RX | 0x900)
+#  define V4L2_CID_TUNE_DEEMPHASIS (V4L2_CID_FM_RX_CLASS_BASE + 1)
+#  define V4L2_DEEMPHASIS_DISABLED 0
+#  define V4L2_DEEMPHASIS_50_uS 1
+#  define V4L2_DEEMPHASIS_75_uS 2
+#  define V4L2_CID_RDS_RECEPTION (V4L2_CID_FM_RX_CLASS_BASE + 2)
 #endif
 
 #ifndef V4L2_RDS_BLOCK_MSK
@@ -48,30 +48,30 @@ struct v4l2_rds_data {
   uint8_t lsb;
   uint8_t msb;
   uint8_t block;
-} __attribute__ ((packed));
-#define V4L2_RDS_BLOCK_MSK 0x7
-#define V4L2_RDS_BLOCK_A 0
-#define V4L2_RDS_BLOCK_B 1
-#define V4L2_RDS_BLOCK_C 2
-#define V4L2_RDS_BLOCK_D 3
-#define V4L2_RDS_BLOCK_C_ALT 4
-#define V4L2_RDS_BLOCK_INVALID 7
-#define V4L2_RDS_BLOCK_CORRECTED 0x40
-#define V4L2_RDS_BLOCK_ERROR 0x80
+} __attribute__((packed));
+#  define V4L2_RDS_BLOCK_MSK 0x7
+#  define V4L2_RDS_BLOCK_A 0
+#  define V4L2_RDS_BLOCK_B 1
+#  define V4L2_RDS_BLOCK_C 2
+#  define V4L2_RDS_BLOCK_D 3
+#  define V4L2_RDS_BLOCK_C_ALT 4
+#  define V4L2_RDS_BLOCK_INVALID 7
+#  define V4L2_RDS_BLOCK_CORRECTED 0x40
+#  define V4L2_RDS_BLOCK_ERROR 0x80
 #endif
 
 #ifndef VIDIOC_S_HW_FREQ_SEEK
 struct v4l2_hw_freq_seek {
- __u32 tuner;
- __u32 type;
- __u32 seek_upward;
- __u32 wrap_around;
- __u32 spacing;
- __u32 rangelow;
- __u32 rangehigh;
- __u32 reserved[5];
+  __u32 tuner;
+  __u32 type;
+  __u32 seek_upward;
+  __u32 wrap_around;
+  __u32 spacing;
+  __u32 rangelow;
+  __u32 rangehigh;
+  __u32 reserved[5];
 };
-#define VIDIOC_S_HW_FREQ_SEEK _IOW('V', 82, struct v4l2_hw_freq_seek)
+#  define VIDIOC_S_HW_FREQ_SEEK _IOW('V', 82, struct v4l2_hw_freq_seek)
 #endif
 
 namespace mozilla {
@@ -85,13 +85,10 @@ static bool sRDSEnabled;
 static pthread_t sRadioThread;
 static pthread_t sRDSThread;
 static hal::FMRadioSettings sRadioSettings;
-static int sMsmFMVersion;
 static bool sMsmFMMode;
 static bool sRDSSupported;
 
-static int
-setControl(uint32_t id, int32_t value)
-{
+static int setControl(uint32_t id, int32_t value) {
   struct v4l2_control control = {0};
   control.id = id;
   control.value = value;
@@ -101,11 +98,10 @@ setControl(uint32_t id, int32_t value)
 class RadioUpdate : public Runnable {
   hal::FMRadioOperation mOp;
   hal::FMRadioOperationStatus mStatus;
-public:
+
+ public:
   RadioUpdate(hal::FMRadioOperation op, hal::FMRadioOperationStatus status)
-    : mOp(op)
-    , mStatus(status)
-  {}
+      : Runnable("hal::RadioUpdate"), mOp(op), mStatus(status) {}
 
   NS_IMETHOD Run() override {
     hal::FMRadioOperationInformation info;
@@ -118,19 +114,14 @@ public:
 };
 
 /* Runs on the radio thread */
-static void
-initMsmFMRadio(hal::FMRadioSettings &aInfo)
-{
+static void initMsmFMRadio(hal::FMRadioSettings& aInfo) {
   mozilla::ScopedClose fd(sRadioFD);
-  char version[64];
-  int rc;
-  snprintf(version, sizeof(version), "%d", sMsmFMVersion);
-  property_set("hw.fm.version", version);
 
   /* Set the mode for soc downloader */
-  property_set("hw.fm.mode", "normal");
-  /* start fm_dl service */
-  property_set("ctl.start", "fm_dl");
+  property_set("vendor.hw.fm.mode", "normal");
+  /* Need to clear the hw.fm.init firstly */
+  property_set("vendor.hw.fm.init", "0");
+  property_set("ctl.start", "vendor.fm");
 
   /*
    * Fix bug 800263. Wait until the FM radio chips initialization is done
@@ -141,13 +132,13 @@ initMsmFMRadio(hal::FMRadioSettings &aInfo)
   for (int i = 0; i < 4; ++i) {
     sleep(1);
     char value[PROPERTY_VALUE_MAX];
-    property_get("hw.fm.init", value, "0");
+    property_get("vendor.hw.fm.init", value, "0");
     if (!strcmp(value, "1")) {
       break;
     }
   }
 
-  rc = setControl(V4L2_CID_PRIVATE_TAVARUA_STATE, FM_RECV);
+  int rc = setControl(V4L2_CID_PRIVATE_TAVARUA_STATE, FM_RECV);
   if (rc < 0) {
     HAL_LOG("Unable to turn on radio |%s|", strerror(errno));
     return;
@@ -168,18 +159,18 @@ initMsmFMRadio(hal::FMRadioSettings &aInfo)
 
   int spacing;
   switch (aInfo.spaceType()) {
-  case 50:
-    spacing = FM_CH_SPACE_50KHZ;
-    break;
-  case 100:
-    spacing = FM_CH_SPACE_100KHZ;
-    break;
-  case 200:
-    spacing = FM_CH_SPACE_200KHZ;
-    break;
-  default:
-    HAL_LOG("Unsupported space value - %d", aInfo.spaceType());
-    return;
+    case 50:
+      spacing = FM_CH_SPACE_50KHZ;
+      break;
+    case 100:
+      spacing = FM_CH_SPACE_100KHZ;
+      break;
+    case 200:
+      spacing = FM_CH_SPACE_200KHZ;
+      break;
+    default:
+      HAL_LOG("Unsupported space value - %d", aInfo.spaceType());
+      return;
   }
 
   rc = setControl(V4L2_CID_PRIVATE_TAVARUA_SPACING, spacing);
@@ -212,35 +203,15 @@ initMsmFMRadio(hal::FMRadioSettings &aInfo)
     return;
   }
 
-  // Some devices do not support analog audio routing. This should be
-  // indicated by the 'ro.moz.fm.noAnalog' property at build time.
   char propval[PROPERTY_VALUE_MAX];
-  property_get("ro.moz.fm.noAnalog", propval, "");
-  bool noAnalog = !strcmp(propval, "true");
+  property_get("ro.fm.analogpath.supported", propval, "");
+  bool supportAnalog = !strcmp(propval, "true");
 
   rc = setControl(V4L2_CID_PRIVATE_TAVARUA_SET_AUDIO_PATH,
-                  noAnalog ? FM_DIGITAL_PATH : FM_ANALOG_PATH);
+                  supportAnalog ? FM_ANALOG_PATH : FM_DIGITAL_PATH);
   if (rc < 0) {
     HAL_LOG("Unable to set audio path");
     return;
-  }
-
-  if (!noAnalog) {
-    /* Set the mode for soc downloader */
-    property_set("hw.fm.mode", "config_dac");
-    /* Use analog mode FM */
-    property_set("hw.fm.isAnalog", "true");
-    /* start fm_dl service */
-    property_set("ctl.start", "fm_dl");
-
-    for (int i = 0; i < 4; ++i) {
-      sleep(1);
-      char value[PROPERTY_VALUE_MAX];
-      property_get("hw.fm.init", value, "0");
-      if (!strcmp(value, "1")) {
-        break;
-      }
-    }
   }
 
   fd.forget();
@@ -248,13 +219,11 @@ initMsmFMRadio(hal::FMRadioSettings &aInfo)
 }
 
 /* Runs on the radio thread */
-static void *
-runMsmFMRadio(void *)
-{
+static void* runMsmFMRadio(void*) {
   initMsmFMRadio(sRadioSettings);
   if (!sRadioEnabled) {
-    NS_DispatchToMainThread(new RadioUpdate(hal::FM_RADIO_OPERATION_ENABLE,
-                                            hal::FM_RADIO_OPERATION_STATUS_FAIL));
+    NS_DispatchToMainThread(new RadioUpdate(
+        hal::FM_RADIO_OPERATION_ENABLE, hal::FM_RADIO_OPERATION_STATUS_FAIL));
     return nullptr;
   }
 
@@ -267,8 +236,7 @@ runMsmFMRadio(void *)
 
   while (sRadioEnabled) {
     if (ioctl(sRadioFD, VIDIOC_DQBUF, &buffer) < 0) {
-      if (errno == EINTR)
-        continue;
+      if (errno == EINTR) continue;
       break;
     }
 
@@ -276,25 +244,28 @@ runMsmFMRadio(void *)
      * In those cases, the status update comes from this thread. */
     for (unsigned int i = 0; i < buffer.bytesused; i++) {
       switch (buf[i]) {
-      case TAVARUA_EVT_RADIO_READY:
-        // The driver sends RADIO_READY both when we turn the radio on and when we turn
-        // the radio off.
-        if (sRadioEnabled) {
-          NS_DispatchToMainThread(new RadioUpdate(hal::FM_RADIO_OPERATION_ENABLE,
-                                                  hal::FM_RADIO_OPERATION_STATUS_SUCCESS));
-        }
-        break;
+        case TAVARUA_EVT_RADIO_READY:
+          // The driver sends RADIO_READY both when we turn the radio on and
+          // when we turn the radio off.
+          if (sRadioEnabled) {
+            NS_DispatchToMainThread(
+                new RadioUpdate(hal::FM_RADIO_OPERATION_ENABLE,
+                                hal::FM_RADIO_OPERATION_STATUS_SUCCESS));
+          }
+          break;
 
-      case TAVARUA_EVT_SEEK_COMPLETE:
-        NS_DispatchToMainThread(new RadioUpdate(hal::FM_RADIO_OPERATION_SEEK,
-                                                hal::FM_RADIO_OPERATION_STATUS_SUCCESS));
-        break;
-      case TAVARUA_EVT_TUNE_SUCC:
-        NS_DispatchToMainThread(new RadioUpdate(hal::FM_RADIO_OPERATION_TUNE,
-                                                hal::FM_RADIO_OPERATION_STATUS_SUCCESS));
-        break;
-      default:
-        break;
+        case TAVARUA_EVT_SEEK_COMPLETE:
+          NS_DispatchToMainThread(
+              new RadioUpdate(hal::FM_RADIO_OPERATION_SEEK,
+                              hal::FM_RADIO_OPERATION_STATUS_SUCCESS));
+          break;
+        case TAVARUA_EVT_TUNE_SUCC:
+          NS_DispatchToMainThread(
+              new RadioUpdate(hal::FM_RADIO_OPERATION_TUNE,
+                              hal::FM_RADIO_OPERATION_STATUS_SUCCESS));
+          break;
+        default:
+          break;
       }
     }
   }
@@ -304,9 +275,7 @@ runMsmFMRadio(void *)
 
 /* This runs on the main thread but most of the
  * initialization is pushed to the radio thread. */
-void
-EnableFMRadio(const hal::FMRadioSettings& aInfo)
-{
+void EnableFMRadio(const hal::FMRadioSettings& aInfo) {
   if (sRadioEnabled) {
     HAL_LOG("Radio already enabled!");
     return;
@@ -331,8 +300,8 @@ EnableFMRadio(const hal::FMRadioSettings& aInfo)
     return;
   }
 
-  sMsmFMMode = !strcmp((char *)cap.driver, "radio-tavarua") ||
-      !strcmp((char *)cap.driver, "radio-iris");
+  sMsmFMMode = !strcmp((char*)cap.driver, "radio-tavarua") ||
+               !strcmp((char*)cap.driver, "radio-iris");
   HAL_LOG("Radio: %s (%s)\n", cap.driver, cap.card);
 
   if (!(cap.capabilities & V4L2_CAP_RADIO)) {
@@ -352,7 +321,6 @@ EnableFMRadio(const hal::FMRadioSettings& aInfo)
 
   if (sMsmFMMode) {
     sRadioFD = fd.forget();
-    sMsmFMVersion = cap.version;
     if (pthread_create(&sRadioThread, nullptr, runMsmFMRadio, nullptr)) {
       HAL_LOG("Couldn't create radio thread");
       hal::NotifyFMRadioStatus(info);
@@ -372,18 +340,18 @@ EnableFMRadio(const hal::FMRadioSettings& aInfo)
 
   int emphasis;
   switch (aInfo.preEmphasis()) {
-  case 0:
-    emphasis = V4L2_DEEMPHASIS_DISABLED;
-    break;
-  case 50:
-    emphasis = V4L2_DEEMPHASIS_50_uS;
-    break;
-  case 75:
-    emphasis = V4L2_DEEMPHASIS_75_uS;
-    break;
-  default:
-    MOZ_CRASH("Invalid preemphasis setting");
-    break;
+    case 0:
+      emphasis = V4L2_DEEMPHASIS_DISABLED;
+      break;
+    case 50:
+      emphasis = V4L2_DEEMPHASIS_50_uS;
+      break;
+    case 75:
+      emphasis = V4L2_DEEMPHASIS_75_uS;
+      break;
+    default:
+      MOZ_CRASH("Invalid preemphasis setting");
+      break;
   }
   rc = setControl(V4L2_CID_TUNE_DEEMPHASIS, emphasis);
   if (rc < 0) {
@@ -397,14 +365,10 @@ EnableFMRadio(const hal::FMRadioSettings& aInfo)
   hal::NotifyFMRadioStatus(info);
 }
 
-void
-DisableFMRadio()
-{
-  if (!sRadioEnabled)
-    return;
+void DisableFMRadio() {
+  if (!sRadioEnabled) return;
 
-  if (sRDSEnabled)
-    hal::DisableRDS();
+  if (sRDSEnabled) hal::DisableRDS();
 
   sRadioEnabled = false;
 
@@ -425,12 +389,11 @@ DisableFMRadio()
   hal::NotifyFMRadioStatus(info);
 }
 
-void
-FMRadioSeek(const hal::FMRadioSeekDirection& aDirection)
-{
+void FMRadioSeek(const hal::FMRadioSeekDirection& aDirection) {
   struct v4l2_hw_freq_seek seek = {0};
   seek.type = V4L2_TUNER_RADIO;
-  seek.seek_upward = aDirection == hal::FMRadioSeekDirection::FM_RADIO_SEEK_DIRECTION_UP;
+  seek.seek_upward =
+      aDirection == hal::FMRadioSeekDirection::FM_RADIO_SEEK_DIRECTION_UP;
 
   /* ICS and older don't have the spacing field */
 #if ANDROID_VERSION == 15
@@ -440,26 +403,23 @@ FMRadioSeek(const hal::FMRadioSeekDirection& aDirection)
 #endif
 
   int rc = ioctl(sRadioFD, VIDIOC_S_HW_FREQ_SEEK, &seek);
-  if (sMsmFMMode && rc >= 0)
-    return;
+  if (sMsmFMMode && rc >= 0) return;
 
-  NS_DispatchToMainThread(new RadioUpdate(hal::FM_RADIO_OPERATION_SEEK,
-                                          rc < 0 ?
-                                          hal::FM_RADIO_OPERATION_STATUS_FAIL :
-                                          hal::FM_RADIO_OPERATION_STATUS_SUCCESS));
+  NS_DispatchToMainThread(
+      new RadioUpdate(hal::FM_RADIO_OPERATION_SEEK,
+                      rc < 0 ? hal::FM_RADIO_OPERATION_STATUS_FAIL
+                             : hal::FM_RADIO_OPERATION_STATUS_SUCCESS));
 
   if (rc < 0) {
     HAL_LOG("Could not initiate hardware seek");
     return;
   }
 
-  NS_DispatchToMainThread(new RadioUpdate(hal::FM_RADIO_OPERATION_TUNE,
-                                          hal::FM_RADIO_OPERATION_STATUS_SUCCESS));
+  NS_DispatchToMainThread(new RadioUpdate(
+      hal::FM_RADIO_OPERATION_TUNE, hal::FM_RADIO_OPERATION_STATUS_SUCCESS));
 }
 
-void
-GetFMRadioSettings(hal::FMRadioSettings* aInfo)
-{
+void GetFMRadioSettings(hal::FMRadioSettings* aInfo) {
   if (!sRadioEnabled) {
     return;
   }
@@ -475,31 +435,24 @@ GetFMRadioSettings(hal::FMRadioSettings* aInfo)
   aInfo->lowerLimit() = (tuner.rangelow * 625) / 10000;
 }
 
-void
-SetFMRadioFrequency(const uint32_t frequency)
-{
+void SetFMRadioFrequency(const uint32_t frequency) {
   struct v4l2_frequency freq = {0};
   freq.type = V4L2_TUNER_RADIO;
   freq.frequency = (frequency * 10000) / 625;
 
   int rc = ioctl(sRadioFD, VIDIOC_S_FREQUENCY, &freq);
-  if (rc < 0)
-    HAL_LOG("Could not set radio frequency");
+  if (rc < 0) HAL_LOG("Could not set radio frequency");
 
-  if (sMsmFMMode && rc >= 0)
-    return;
+  if (sMsmFMMode && rc >= 0) return;
 
-  NS_DispatchToMainThread(new RadioUpdate(hal::FM_RADIO_OPERATION_TUNE,
-                                          rc < 0 ?
-                                          hal::FM_RADIO_OPERATION_STATUS_FAIL :
-                                          hal::FM_RADIO_OPERATION_STATUS_SUCCESS));
+  NS_DispatchToMainThread(
+      new RadioUpdate(hal::FM_RADIO_OPERATION_TUNE,
+                      rc < 0 ? hal::FM_RADIO_OPERATION_STATUS_FAIL
+                             : hal::FM_RADIO_OPERATION_STATUS_SUCCESS));
 }
 
-uint32_t
-GetFMRadioFrequency()
-{
-  if (!sRadioEnabled)
-    return 0;
+uint32_t GetFMRadioFrequency() {
+  if (!sRadioEnabled) return 0;
 
   struct v4l2_frequency freq = {0};
   int rc = ioctl(sRadioFD, VIDIOC_G_FREQUENCY, &freq);
@@ -511,15 +464,9 @@ GetFMRadioFrequency()
   return (freq.frequency * 625) / 10000;
 }
 
-bool
-IsFMRadioOn()
-{
-  return sRadioEnabled;
-}
+bool IsFMRadioOn() { return sRadioEnabled; }
 
-uint32_t
-GetFMRadioSignalStrength()
-{
+uint32_t GetFMRadioSignalStrength() {
   struct v4l2_tuner tuner = {0};
   int rc = ioctl(sRadioFD, VIDIOC_G_TUNER, &tuner);
   if (rc < 0) {
@@ -530,18 +477,17 @@ GetFMRadioSignalStrength()
   return tuner.signal;
 }
 
-void
-CancelFMRadioSeek()
-{}
+void CancelFMRadioSeek() {}
 
 /* Runs on the rds thread */
-static void*
-readRDSDataThread(void* data)
-{
+static void* readRDSDataThread(void* data) {
   v4l2_rds_data rdsblocks[16];
   uint16_t blocks[4];
 
-  ScopedClose pipefd((int)data);
+  // Explicitely force cast to (int)(unsigned long) to avoid Clang error:
+  // error: cast from pointer to smaller type 'int' loses information
+  // due to 64-bits pointer to 32-bits int with just casting (int)
+  ScopedClose pipefd((int)(unsigned long)data);
 
   ScopedClose epollfd(epoll_create(2));
   if (epollfd < 0) {
@@ -549,10 +495,7 @@ readRDSDataThread(void* data)
     return nullptr;
   }
 
-  epoll_event event = {
-    EPOLLIN,
-    { 0 }
-  };
+  epoll_event event = {EPOLLIN, {0}};
 
   event.data.fd = pipefd;
   if (epoll_ctl(epollfd, EPOLL_CTL_ADD, pipefd, &event) < 0) {
@@ -566,7 +509,7 @@ readRDSDataThread(void* data)
     return nullptr;
   }
 
-  epoll_event events[2] = {{ 0 }};
+  epoll_event events[2] = {{0}};
   int event_count;
   uint32_t block_bitmap = 0;
   while ((event_count = epoll_wait(epollfd, events, 2, -1)) > 0 ||
@@ -574,8 +517,7 @@ readRDSDataThread(void* data)
     bool RDSDataAvailable = false;
     for (int i = 0; i < event_count; i++) {
       if (events[i].data.fd == pipefd) {
-        if (!sRDSEnabled)
-          return nullptr;
+        if (!sRDSEnabled) return nullptr;
         char tmp[32];
         TEMP_FAILURE_RETRY(read(pipefd, tmp, sizeof(tmp)));
       } else if (events[i].data.fd == sRadioFD) {
@@ -583,11 +525,10 @@ readRDSDataThread(void* data)
       }
     }
 
-    if (!RDSDataAvailable)
-      continue;
+    if (!RDSDataAvailable) continue;
 
     ssize_t len =
-      TEMP_FAILURE_RETRY(read(sRadioFD, rdsblocks, sizeof(rdsblocks)));
+        TEMP_FAILURE_RETRY(read(sRadioFD, rdsblocks, sizeof(rdsblocks)));
     if (len < 0) {
       HAL_LOG("Unexpected error while reading RDS data %d", errno);
       return nullptr;
@@ -596,7 +537,7 @@ readRDSDataThread(void* data)
     int blockcount = len / sizeof(rdsblocks[0]);
     for (int i = 0; i < blockcount; i++) {
       if ((rdsblocks[i].block & V4L2_RDS_BLOCK_MSK) == V4L2_RDS_BLOCK_INVALID ||
-           rdsblocks[i].block & V4L2_RDS_BLOCK_ERROR) {
+          rdsblocks[i].block & V4L2_RDS_BLOCK_ERROR) {
         block_bitmap |= 1 << V4L2_RDS_BLOCK_INVALID;
         continue;
       }
@@ -608,16 +549,14 @@ readRDSDataThread(void* data)
       // Block C' always stores the PI code, so receivers can find the PI
       // code more quickly/reliably.
       // However, we only process whole RDS groups, so it doesn't matter here.
-      if (blocknum == V4L2_RDS_BLOCK_C_ALT)
-        blocknum = V4L2_RDS_BLOCK_C;
+      if (blocknum == V4L2_RDS_BLOCK_C_ALT) blocknum = V4L2_RDS_BLOCK_C;
       if (blocknum > V4L2_RDS_BLOCK_D) {
         HAL_LOG("Unexpected RDS block number %d. This is a driver bug.",
                 blocknum);
         continue;
       }
 
-      if (blocknum == V4L2_RDS_BLOCK_A)
-        block_bitmap = 0;
+      if (blocknum == V4L2_RDS_BLOCK_A) block_bitmap = 0;
 
       // Skip the group if we skipped a block.
       // This stops us from processing blocks sent out of order.
@@ -631,8 +570,7 @@ readRDSDataThread(void* data)
       blocks[blocknum] = (rdsblocks[i].msb << 8) | rdsblocks[i].lsb;
 
       // Make sure we have all 4 blocks and that they're valid
-      if (block_bitmap != 0x0F)
-        continue;
+      if (block_bitmap != 0x0F) continue;
 
       hal::FMRadioRDSGroup group;
       group.blockA() = blocks[V4L2_RDS_BLOCK_A];
@@ -648,17 +586,12 @@ readRDSDataThread(void* data)
 
 static int sRDSPipeFD;
 
-bool
-EnableRDS(uint32_t aMask)
-{
-  if (!sRadioEnabled || !sRDSSupported)
-    return false;
+bool EnableRDS(uint32_t aMask) {
+  if (!sRadioEnabled || !sRDSSupported) return false;
 
-  if (sMsmFMMode)
-    setControl(V4L2_CID_PRIVATE_TAVARUA_RDSGROUP_MASK, aMask);
+  if (sMsmFMMode) setControl(V4L2_CID_PRIVATE_TAVARUA_RDSGROUP_MASK, aMask);
 
-  if (sRDSEnabled)
-    return true;
+  if (sRDSEnabled) return true;
 
   int pipefd[2];
   int rc = pipe2(pipefd, O_NONBLOCK);
@@ -680,8 +613,8 @@ EnableRDS(uint32_t aMask)
 
   sRDSEnabled = true;
 
-  rc = pthread_create(&sRDSThread, nullptr,
-                      readRDSDataThread, (void*)pipefd[0]);
+  rc =
+      pthread_create(&sRDSThread, nullptr, readRDSDataThread, (void*)pipefd[0]);
   if (rc) {
     HAL_LOG("Could not start RDS reception thread (%d)", rc);
     setControl(V4L2_CID_RDS_RECEPTION, false);
@@ -694,11 +627,8 @@ EnableRDS(uint32_t aMask)
   return true;
 }
 
-void
-DisableRDS()
-{
-  if (!sRadioEnabled || !sRDSEnabled)
-    return;
+void DisableRDS() {
+  if (!sRadioEnabled || !sRDSEnabled) return;
 
   int rc = setControl(V4L2_CID_RDS_RECEPTION, false);
   if (rc < 0) {
@@ -714,5 +644,5 @@ DisableRDS()
   close(sRDSPipeFD);
 }
 
-} // hal_impl
-} // namespace mozilla
+}  // namespace hal_impl
+}  // namespace mozilla

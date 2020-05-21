@@ -394,6 +394,8 @@ TextureHost::~TextureHost() {
 }
 
 void TextureHost::Finalize() {
+  MaybeDestroyRenderTexture();
+
   if (!(GetFlags() & TextureFlags::DEALLOCATE_CLIENT)) {
     DeallocateSharedData();
     DeallocateDeviceData();
@@ -453,6 +455,28 @@ void TextureHost::CallNotifyNotUsed() {
     return;
   }
   static_cast<TextureParent*>(mActor)->NotifyNotUsed(mFwdTransactionId);
+}
+
+void TextureHost::MaybeDestroyRenderTexture() {
+  if (mExternalImageId.isNothing()) {
+    // RenderTextureHost was not created
+    return;
+  }
+  // When TextureHost created RenderTextureHost, delete it here.
+  TextureHost::DestroyRenderTexture(mExternalImageId.ref());
+}
+
+void TextureHost::DestroyRenderTexture(
+    const wr::ExternalImageId& aExternalImageId) {
+  wr::RenderThread::Get()->UnregisterExternalImage(
+      wr::AsUint64(aExternalImageId));
+}
+
+void TextureHost::EnsureRenderTexture(
+    const wr::ExternalImageId& aExternalImageId) {
+  MOZ_ASSERT(mExternalImageId.isNothing());
+  mExternalImageId = Some(aExternalImageId);
+  CreateRenderTexture(aExternalImageId);
 }
 
 void TextureHost::PrintInfo(std::stringstream& aStream, const char* aPrefix) {
@@ -604,12 +628,6 @@ void BufferTextureHost::CreateRenderTexture(
 
   wr::RenderThread::Get()->RegisterExternalImage(wr::AsUint64(aExternalImageId),
                                                  texture.forget());
-}
-
-void BufferTextureHost::DestroyRenderTexture(
-    const wr::ExternalImageId& aExternalImageId) {
-  wr::RenderThread::Get()->UnregisterExternalImage(
-      wr::AsUint64(aExternalImageId));
 }
 
 uint32_t BufferTextureHost::NumSubTextures() {

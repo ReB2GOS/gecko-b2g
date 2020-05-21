@@ -986,6 +986,7 @@ static bool EvaluateInEnv(JSContext* cx, Handle<Env*> env,
     scopeKind = ScopeKind::Global;
   } else {
     scopeKind = ScopeKind::NonSyntactic;
+    options.setNonSyntacticScope(true);
   }
 
   if (frame) {
@@ -997,14 +998,15 @@ static bool EvaluateInEnv(JSContext* cx, Handle<Env*> env,
     }
 
     LifoAllocScope allocScope(&cx->tempLifoAlloc());
-    frontend::CompilationInfo compilationInfo(cx, allocScope, options);
+    frontend::CompilationInfo compilationInfo(cx, allocScope, options, scope,
+                                              env);
     if (!compilationInfo.init(cx)) {
       return false;
     }
 
-    frontend::EvalSharedContext evalsc(cx, env, compilationInfo, scope,
+    frontend::EvalSharedContext evalsc(cx, compilationInfo, scope,
                                        compilationInfo.directives, extent);
-    script = frontend::CompileEvalScript(compilationInfo, evalsc, env, srcBuf);
+    script = frontend::CompileEvalScript(compilationInfo, evalsc, srcBuf);
     if (!script) {
       return false;
     }
@@ -1031,7 +1033,10 @@ static bool EvaluateInEnv(JSContext* cx, Handle<Env*> env,
     }
   }
 
-  return ExecuteKernel(cx, script, *env, NullValue(), frame, rval.address());
+  // Note: pass NullHandleValue for newTarget because the parser doesn't accept
+  // new.target in debugger eval frames (bug 1169076). Once that changes we need
+  // to compute newTarget here based on |frame|.
+  return ExecuteKernel(cx, script, env, NullHandleValue, frame, rval);
 }
 
 Result<Completion> js::DebuggerGenericEval(

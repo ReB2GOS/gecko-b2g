@@ -7,6 +7,7 @@
 
 #include "nsIGfxInfo.h"
 #include "nsTArray.h"
+#include "nsUnicharUtils.h"
 
 using namespace mozilla::widget;
 
@@ -487,13 +488,55 @@ const GfxDeviceFamily* GfxDriverInfo::GetDeviceFamily(DeviceFamily id) {
       APPEND_DEVICE(0x0a1b);
       APPEND_DEVICE(0x0a1e);
 
+      // gen7.5 gt3
+      APPEND_DEVICE(0x0422);
+      APPEND_DEVICE(0x0426);
+      APPEND_DEVICE(0x042a);
+      APPEND_DEVICE(0x042b);
+      APPEND_DEVICE(0x042e);
+      APPEND_DEVICE(0x0a22);
+      APPEND_DEVICE(0x0a26);
+      APPEND_DEVICE(0x0a0a);
+      APPEND_DEVICE(0x0a1a);
+      APPEND_DEVICE(0x0a2a);
+      APPEND_DEVICE(0x0a2b);
+      APPEND_DEVICE(0x0a2e);
+      APPEND_DEVICE(0x0c22);
+      APPEND_DEVICE(0x0c26);
+      APPEND_DEVICE(0x0c2c);
+      APPEND_DEVICE(0x0c2b);
+      APPEND_DEVICE(0x0c2e);
+      APPEND_DEVICE(0x0d22);
+      APPEND_DEVICE(0x0d26);
+      APPEND_DEVICE(0x0d2b);
+      APPEND_DEVICE(0x0d2e);
+
       // Gen7 gt2
       APPEND_DEVICE(0x0162);
       APPEND_DEVICE(0x0166);
       APPEND_DEVICE(0x016a);
+
+      // gen6 gt2
+      APPEND_DEVICE(0x0112);
+      APPEND_DEVICE(0x0116);
+      APPEND_DEVICE(0x0122);
+      APPEND_DEVICE(0x0126);
 #endif
       [[fallthrough]];
     case DeviceFamily::IntelModernRolloutWebRender:
+#ifdef NIGHTLY_BUILD
+      // broxton (apollolake)
+      APPEND_DEVICE(0x0a84);
+      APPEND_DEVICE(0x1a84);
+      APPEND_DEVICE(0x1a85);
+      APPEND_DEVICE(0x5a84);
+      APPEND_DEVICE(0x5a85);
+
+      // geminilake
+      APPEND_DEVICE(0x3184);
+      APPEND_DEVICE(0x3185);
+#endif
+
       // skylake gt1
       APPEND_DEVICE(0x1902);
       APPEND_DEVICE(0x1906);
@@ -596,6 +639,17 @@ const GfxDeviceFamily* GfxDriverInfo::GetDeviceFamily(DeviceFamily id) {
       // Raven
       APPEND_DEVICE(0x15dd);
       APPEND_DEVICE(0x15d8);
+
+#if defined(NIGHTLY_BUILD)
+      // Evergreen
+      APPEND_RANGE(0x6840, 0x684b);
+      APPEND_RANGE(0x6850, 0x685f);
+      APPEND_RANGE(0x6880, 0x68ff);
+      APPEND_RANGE(0x9800, 0x980a);
+      APPEND_RANGE(0x9640, 0x964f);
+      APPEND_RANGE(0x6720, 0x677f);
+#endif
+
       break;
     // This should never happen, but we get a warning if we don't handle this.
     case DeviceFamily::Max:

@@ -1327,14 +1327,6 @@ JS_FRIEND_API void js::SetXrayJitInfo(XrayJitInfo* info) {
 
 XrayJitInfo* js::GetXrayJitInfo() { return gXrayJitInfo; }
 
-bool js::detail::IdMatchesAtom(jsid id, JSAtom* atom) {
-  return id == INTERNED_STRING_TO_JSID(nullptr, atom);
-}
-
-bool js::detail::IdMatchesAtom(jsid id, JSString* atom) {
-  return id == INTERNED_STRING_TO_JSID(nullptr, atom);
-}
-
 JS_FRIEND_API void js::PrepareScriptEnvironmentAndInvoke(
     JSContext* cx, HandleObject global,
     ScriptEnvironmentPreparer::Closure& closure) {
@@ -1539,7 +1531,11 @@ bool js::AddMozDateTimeFormatConstructor(JSContext* cx, JS::HandleObject intl) {
   return IntlNotEnabled(cx);
 }
 
-bool js::AddListFormatConstructor(JSContext* cx, JS::HandleObject intl) {
+bool js::AddMozDisplayNamesConstructor(JSContext* cx, JS::HandleObject intl) {
+  return IntlNotEnabled(cx);
+}
+
+bool js::AddDisplayNamesConstructor(JSContext* cx, JS::HandleObject intl) {
   return IntlNotEnabled(cx);
 }
 

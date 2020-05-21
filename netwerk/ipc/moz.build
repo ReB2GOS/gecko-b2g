@@ -19,6 +19,9 @@ EXPORTS.mozilla.net += [
     'NeckoParent.h',
     'NeckoTargetHolder.h',
     'ParentProcessDocumentChannel.h',
+    'ProxyConfigLookup.h',
+    'ProxyConfigLookupChild.h',
+    'ProxyConfigLookupParent.h',
     'SocketProcessBridgeChild.h',
     'SocketProcessBridgeParent.h',
     'SocketProcessChild.h',
@@ -36,10 +39,12 @@ UNIFIED_SOURCES += [
     'InputChannelThrottleQueueChild.cpp',
     'InputChannelThrottleQueueParent.cpp',
     'NeckoChild.cpp',
-    'NeckoCommon.cpp',
     'NeckoParent.cpp',
     'NeckoTargetHolder.cpp',
     'ParentProcessDocumentChannel.cpp',
+    'ProxyConfigLookup.cpp',
+    'ProxyConfigLookupChild.cpp',
+    'ProxyConfigLookupParent.cpp',
     'SocketProcessBridgeChild.cpp',
     'SocketProcessBridgeParent.cpp',
     'SocketProcessChild.cpp',
@@ -56,6 +61,7 @@ IPDL_SOURCES = [
     'PFileChannel.ipdl',
     'PInputChannelThrottleQueue.ipdl',
     'PNecko.ipdl',
+    'PProxyConfigLookup.ipdl',
     'PSimpleChannel.ipdl',
     'PSocketProcess.ipdl',
     'PSocketProcessBridge.ipdl'
@@ -85,6 +91,7 @@ LOCAL_INCLUDES += [
     '/modules/libjar',
     '/netwerk/base',
     '/netwerk/protocol/http',
+    '/security/manager/ssl',
     '/xpcom/threads'
 ]
 

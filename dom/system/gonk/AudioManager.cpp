@@ -58,11 +58,11 @@
 #include "mozilla/dom/ToJSValue.h"
 #include "nsXULAppAPI.h"
 
+using namespace mozilla;
 using namespace mozilla::dom;
 using namespace mozilla::dom::gonk;
-// using namespace android;
-using namespace mozilla;
 using namespace mozilla::dom::bluetooth;
+using android::AudioSystem;
 
 #undef LOG
 #define LOG(args...) \
@@ -195,7 +195,7 @@ static const VolumeData gVolumeData[] = {
 //   return lock.forget();
 // }
 
-class GonkAudioPortCallback : public android::AudioSystem::AudioPortCallback {
+class GonkAudioPortCallback : public AudioSystem::AudioPortCallback {
  public:
   virtual void onAudioPortListUpdate() {
     nsCOMPtr<nsIRunnable> runnable = NS_NewRunnableFunction(
@@ -210,6 +210,26 @@ class GonkAudioPortCallback : public android::AudioSystem::AudioPortCallback {
   }
   virtual void onAudioPatchListUpdate() {}
   virtual void onServiceDied() {}
+};
+
+// We need to store GonkAudioPortCallback instance in AudioManager class, but
+// we don't want to expose android::sp in the header, so add a holder to hide
+// it. If there are more similar cases in the future, we need a private
+// AudioManager class instead.
+class AudioPortCallbackHolder {
+ public:
+  NS_INLINE_DECL_THREADSAFE_REFCOUNTING(AudioPortCallbackHolder);
+
+  android::sp<AudioSystem::AudioPortCallback> Callback() {
+    if (!mCallback) {
+      mCallback = new GonkAudioPortCallback();
+    }
+    return mCallback;
+  }
+
+ private:
+  ~AudioPortCallbackHolder(){};
+  android::sp<AudioSystem::AudioPortCallback> mCallback;
 };
 
 void AudioManager::HandleAudioFlingerDied() {
@@ -230,16 +250,16 @@ void AudioManager::HandleAudioFlingerDied() {
 
   // Indicate to audio HAL that we start the reconfiguration phase after a media
   // server crash
-  android::AudioSystem::setParameters(0, android::String8("restarting=true"));
+  SetParameters("restarting=true");
 
   // Restore device connection states
   SetAllDeviceConnectionStates();
 
   // Restore call state
-  android::AudioSystem::setPhoneState(static_cast<audio_mode_t>(mPhoneState));
+  AudioSystem::setPhoneState(static_cast<audio_mode_t>(mPhoneState));
 
   // Restore master volume
-  android::AudioSystem::setMasterVolume(1.0);
+  AudioSystem::setMasterVolume(1.0);
 
   // Restore stream volumes
   for (uint32_t streamType = 0; streamType < AUDIO_STREAM_CNT; ++streamType) {
@@ -248,14 +268,17 @@ void AudioManager::HandleAudioFlingerDied() {
   }
 
   // Indicate the end of reconfiguration phase to audio HAL
-  android::AudioSystem::setParameters(0, android::String8("restarting=true"));
+  SetParameters("restarting=true");
 
   // Enable volume change notification
   mIsVolumeInited = true;
   MaybeUpdateVolumeSettingToDatabase(true);
+
+  AudioSystem::setAssistantUid(AUDIO_UID_INVALID);
 }
 
-// class VolumeInitCallback final : public nsISettingsServiceCallback //TODO FIXME
+// TODO FIXME
+// class VolumeInitCallback final : public nsISettingsServiceCallback
 // {
 // public:
 //   NS_DECL_ISUPPORTS
@@ -356,26 +379,17 @@ static void BinderDeadCallback(android::status_t aErr) {
   NS_DispatchToMainThread(runnable);
 }
 
-static nsresult SetAudioSystemParameters(
-    audio_io_handle_t ioHandle, const android::String8& keyValuePairs) {
-  android::status_t audioStatus =
-      android::AudioSystem::setParameters(0, keyValuePairs);
-  if (audioStatus != android::NO_ERROR) {
-    LOG("Failed to set parameter: %s, error status: %d", keyValuePairs.string(),
-        audioStatus);
-    return NS_ERROR_FAILURE;
-  }
-  return NS_OK;
-}
-
 bool AudioManager::IsFmOutConnected() {
-#if defined(PRODUCT_MANUFACTURER_SPRD)
+#if defined(PRODUCT_MANUFACTURER_QUALCOMM)
+  return GetParameters("fm_status") == NS_LITERAL_CSTRING("fm_status=1");
+#elif defined(PRODUCT_MANUFACTURER_SPRD)
   return mConnectedDevices.Get(AUDIO_DEVICE_OUT_FM_HEADSET, nullptr) ||
          mConnectedDevices.Get(AUDIO_DEVICE_OUT_FM_SPEAKER, nullptr);
 #elif defined(PRODUCT_MANUFACTURER_MTK)
   return mConnectedDevices.Get(AUDIO_DEVICE_IN_FM_TUNER, nullptr);
 #else
-  return mConnectedDevices.Get(AUDIO_DEVICE_OUT_FM, nullptr);
+  // MOZ_CRASH("FM radio not supported");
+  return false;
 #endif
 }
 
@@ -421,8 +435,8 @@ void AudioManager::UpdateHeadsetConnectionState(hal::SwitchState aState) {
 static void setDeviceConnectionStateInternal(audio_devices_t device,
                                              audio_policy_dev_state_t state,
                                              const char* device_address) {
-  android::AudioSystem::setDeviceConnectionState(device, state, device_address,
-                                                 "", AUDIO_FORMAT_DEFAULT);
+  AudioSystem::setDeviceConnectionState(device, state, device_address, "",
+                                        AUDIO_FORMAT_DEFAULT);
 }
 
 uint32_t AudioManager::GetSpecificVolumeCount() {
@@ -467,106 +481,89 @@ void AudioManager::SetAllDeviceConnectionStates() {
 
 void AudioManager::HandleBluetoothStatusChanged(nsISupports* aSubject,
                                                 const char* aTopic,
-                                                const nsCString aAddress){
+                                                const nsCString aAddress) {
 #ifdef MOZ_B2G_BT
-bool isConnected = false;
-if (!strcmp(aTopic, BLUETOOTH_SCO_STATUS_CHANGED_ID)) {
-  BluetoothHfpManagerBase* hfp =
-    static_cast<BluetoothHfpManagerBase*>(aSubject);
-  isConnected = hfp->IsScoConnected();
-} else {
-  BluetoothProfileManagerBase* profile =
-    static_cast<BluetoothProfileManagerBase*>(aSubject);
-  isConnected = profile->IsConnected();
-}
-
-if (!strcmp(aTopic, BLUETOOTH_SCO_STATUS_CHANGED_ID)) {
-  if (isConnected) {
+  bool isConnected = false;
+  if (!strcmp(aTopic, BLUETOOTH_SCO_STATUS_CHANGED_ID)) {
     BluetoothHfpManagerBase* hfp =
-      static_cast<BluetoothHfpManagerBase*>(aSubject);
-    int btSampleRate = hfp->IsWbsEnabled() ? kBtWideBandSampleRate
-                                           : kBtSampleRate;
-    android::String8 cmd;
-    cmd.appendFormat("bt_samplerate=%d", btSampleRate);
-    android::AudioSystem::setParameters(0, cmd);
-    SetForceForUse(nsIAudioManager::USE_COMMUNICATION,
-    nsIAudioManager::FORCE_BT_SCO);
+        static_cast<BluetoothHfpManagerBase*>(aSubject);
+    isConnected = hfp->IsScoConnected();
   } else {
-    int32_t force;
-    GetForceForUse(nsIAudioManager::USE_COMMUNICATION, &force);
-    if (force == nsIAudioManager::FORCE_BT_SCO) {
+    BluetoothProfileManagerBase* profile =
+        static_cast<BluetoothProfileManagerBase*>(aSubject);
+    isConnected = profile->IsConnected();
+  }
+
+  if (!strcmp(aTopic, BLUETOOTH_SCO_STATUS_CHANGED_ID)) {
+    if (isConnected) {
+      BluetoothHfpManagerBase* hfp =
+          static_cast<BluetoothHfpManagerBase*>(aSubject);
+      int btSampleRate =
+          hfp->IsWbsEnabled() ? kBtWideBandSampleRate : kBtSampleRate;
+      SetParameters("bt_samplerate=%d", btSampleRate);
       SetForceForUse(nsIAudioManager::USE_COMMUNICATION,
-      nsIAudioManager::FORCE_NONE);
+                     nsIAudioManager::FORCE_BT_SCO);
+    } else {
+      int32_t force;
+      GetForceForUse(nsIAudioManager::USE_COMMUNICATION, &force);
+      if (force == nsIAudioManager::FORCE_BT_SCO) {
+        SetForceForUse(nsIAudioManager::USE_COMMUNICATION,
+                       nsIAudioManager::FORCE_NONE);
+      }
+    }
+  } else if (!strcmp(aTopic, BLUETOOTH_A2DP_STATUS_CHANGED_ID)) {
+    if (!isConnected && mA2dpSwitchDone) {
+      RefPtr<AudioManager> self = this;
+      nsCOMPtr<nsIRunnable> runnable = NS_NewRunnableFunction(
+          "AudioManager::HandleBluetoothStatusChanged",
+          [self, isConnected, aAddress]() {
+            if (self->mA2dpSwitchDone) {
+              return;
+            }
+            self->UpdateDeviceConnectionState(
+                isConnected, AUDIO_DEVICE_OUT_BLUETOOTH_A2DP, aAddress);
+            self->SetParameters("bluetooth_enabled=false");
+            self->SetParameters("A2dpSuspended=true");
+            self->mA2dpSwitchDone = true;
+          });
+      MessageLoop::current()->PostDelayedTask(runnable.forget(), 1000);
+
+      mA2dpSwitchDone = false;
+    } else {
+      UpdateDeviceConnectionState(isConnected, AUDIO_DEVICE_OUT_BLUETOOTH_A2DP,
+                                  aAddress);
+      SetParameters("bluetooth_enabled=true");
+      SetParameters("A2dpSuspended=false");
+      mA2dpSwitchDone = true;
+      if (AudioSystem::getForceUse(AUDIO_POLICY_FORCE_FOR_MEDIA) ==
+          AUDIO_POLICY_FORCE_NO_BT_A2DP) {
+        SetForceForUse(AUDIO_POLICY_FORCE_FOR_MEDIA, AUDIO_POLICY_FORCE_NONE);
+      }
+    }
+    mBluetoothA2dpEnabled = isConnected;
+  } else if (!strcmp(aTopic, BLUETOOTH_HFP_STATUS_CHANGED_ID)) {
+    UpdateDeviceConnectionState(
+        isConnected, AUDIO_DEVICE_OUT_BLUETOOTH_SCO_HEADSET, aAddress);
+    UpdateDeviceConnectionState(
+        isConnected, AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET, aAddress);
+  } else if (!strcmp(aTopic, BLUETOOTH_HFP_NREC_STATUS_CHANGED_ID)) {
+    BluetoothHfpManagerBase* hfp =
+        static_cast<BluetoothHfpManagerBase*>(aSubject);
+    if (hfp->IsNrecEnabled()) {
+      // TODO: (Bug 880785) Replace <unknown> with remote Bluetooth device name
+      SetParameters("bt_headset_name=<unknown>;bt_headset_nrec=on");
+    } else {
+      SetParameters("bt_headset_name=<unknown>;bt_headset_nrec=off");
+    }
+  } else if (!strcmp(aTopic, BLUETOOTH_HFP_WBS_STATUS_CHANGED_ID)) {
+    BluetoothHfpManagerBase* hfp =
+        static_cast<BluetoothHfpManagerBase*>(aSubject);
+    if (hfp->IsWbsEnabled()) {
+      SetParameters("bt_wbs=on");
+    } else {
+      SetParameters("bt_wbs=off");
     }
   }
-} else if (!strcmp(aTopic, BLUETOOTH_A2DP_STATUS_CHANGED_ID)) {
-  if (!isConnected && mA2dpSwitchDone) {
-    RefPtr<AudioManager> self = this;
-    nsCOMPtr<nsIRunnable> runnable =
-      NS_NewRunnableFunction("AudioManager::HandleBluetoothStatusChanged",
-      [self, isConnected, aAddress]() {
-        if (self->mA2dpSwitchDone) {
-          return;
-        }
-        self->UpdateDeviceConnectionState(isConnected,
-                                          AUDIO_DEVICE_OUT_BLUETOOTH_A2DP,
-                                          aAddress);
-
-        android::String8 cmd("bluetooth_enabled=false");
-        android::AudioSystem::setParameters(0, cmd);
-        cmd.setTo("A2dpSuspended=true");
-        android::AudioSystem::setParameters(0, cmd);
-        self->mA2dpSwitchDone = true;
-      });
-    MessageLoop::current()->PostDelayedTask(runnable.forget(), 1000);
-
-    mA2dpSwitchDone = false;
-  } else {
-    UpdateDeviceConnectionState(isConnected,
-                                AUDIO_DEVICE_OUT_BLUETOOTH_A2DP,
-                                aAddress);
-    android::String8 cmd("bluetooth_enabled=true");
-    android::AudioSystem::setParameters(0, cmd);
-    cmd.setTo("A2dpSuspended=false");
-    android::AudioSystem::setParameters(0, cmd);
-    mA2dpSwitchDone = true;
-    if (android::AudioSystem::getForceUse(AUDIO_POLICY_FORCE_FOR_MEDIA) ==
-    AUDIO_POLICY_FORCE_NO_BT_A2DP) {
-      SetForceForUse(AUDIO_POLICY_FORCE_FOR_MEDIA, AUDIO_POLICY_FORCE_NONE);
-    }
-  }
-  mBluetoothA2dpEnabled = isConnected;
-} else if (!strcmp(aTopic, BLUETOOTH_HFP_STATUS_CHANGED_ID)) {
-  UpdateDeviceConnectionState(isConnected,
-                              AUDIO_DEVICE_OUT_BLUETOOTH_SCO_HEADSET,
-                              aAddress);
-  UpdateDeviceConnectionState(isConnected,
-                              AUDIO_DEVICE_IN_BLUETOOTH_SCO_HEADSET,
-                              aAddress);
-} else if (!strcmp(aTopic, BLUETOOTH_HFP_NREC_STATUS_CHANGED_ID)) {
-  android::String8 cmd;
-  BluetoothHfpManagerBase* hfp =
-    static_cast<BluetoothHfpManagerBase*>(aSubject);
-  if (hfp->IsNrecEnabled()) {
-    // TODO: (Bug 880785) Replace <unknown> with remote Bluetooth device name
-    cmd.setTo("bt_headset_name=<unknown>;bt_headset_nrec=on");
-    android::AudioSystem::setParameters(0, cmd);
-  } else {
-    cmd.setTo("bt_headset_name=<unknown>;bt_headset_nrec=off");
-    android::AudioSystem::setParameters(0, cmd);
-  }
-} else if (!strcmp(aTopic, BLUETOOTH_HFP_WBS_STATUS_CHANGED_ID)) {
-  android::String8 cmd;
-  BluetoothHfpManagerBase* hfp =
-    static_cast<BluetoothHfpManagerBase*>(aSubject);
-  if (hfp->IsWbsEnabled()) {
-    cmd.setTo("bt_wbs=on");
-    android::AudioSystem::setParameters(0, cmd);
-  } else {
-    cmd.setTo("bt_wbs=off");
-    android::AudioSystem::setParameters(0, cmd);
-  }
-}
 #endif
 }
 
@@ -614,13 +611,11 @@ nsresult AudioManager::Observe(nsISupports* aSubject, const char* aTopic,
 #ifdef PRODUCT_MANUFACTURER_MTK
   // Notify screen state to audio HAL in order to save power when screen is off.
   else if (!strcmp(aTopic, SCREEN_STATE_CHANGED)) {
-    android::String8 cmd;
     if (NS_LITERAL_STRING("on").Equals(aData)) {
-      cmd.setTo("screen_state=on");
+      SetParameters("screen_state=on");
     } else {
-      cmd.setTo("screen_state=off");
+      SetParameters("screen_state=off");
     }
-    SetAudioSystemParameters(0, cmd);
     return NS_OK;
   }
 #endif
@@ -737,20 +732,8 @@ void AudioManager::ReleaseWakeLock() {
 static StaticRefPtr<AudioManager> sAudioManager;
 
 AudioManager::AudioManager()
-    : mPhoneState(PHONE_STATE_CURRENT),
-      mIsVolumeInited(false),
-      mSwitchDone(true),
-      mBluetoothA2dpEnabled(false)
-#ifdef MOZ_B2G_BT
-      , mA2dpSwitchDone(true)
-#endif
-      ,
-      mObserver(new HeadphoneSwitchObserver())
-#ifdef MOZ_B2G_RIL
-      ,
-      mMuteCallToRIL(false)
-#endif
-{
+    : mObserver(new HeadphoneSwitchObserver()),
+      mAudioPortCallbackHolder(new AudioPortCallbackHolder()) {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!sAudioManager);
 
@@ -758,9 +741,8 @@ AudioManager::AudioManager()
     mAudioDeviceTableIdMaps.Put(kAudioDeviceInfos[idx].value, idx);
   }
 
-  android::AudioSystem::setErrorCallback(BinderDeadCallback);
-  // android::sp<GonkAudioPortCallback> callback = new GonkAudioPortCallback();
-  // android::AudioSystem::addAudioPortCallback(callback);
+  AudioSystem::setErrorCallback(BinderDeadCallback);
+  AudioSystem::addAudioPortCallback(mAudioPortCallbackHolder->Callback());
 
   // Create VolumeStreamStates
   for (uint32_t loop = 0; loop < AUDIO_STREAM_CNT; ++loop) {
@@ -775,13 +757,13 @@ AudioManager::AudioManager()
   }
   UpdateCachedActiveDevicesForStreams();
 
-  RegisterSwitchObserver(hal::SWITCH_HEADPHONES, mObserver);
+  RegisterSwitchObserver(hal::SWITCH_HEADPHONES, mObserver.get());
   // Initialize headhone/heaset status
   UpdateHeadsetConnectionState(
       hal::GetCurrentSwitchState(hal::SWITCH_HEADPHONES));
   NotifyHeadphonesStatus(hal::GetCurrentSwitchState(hal::SWITCH_HEADPHONES));
 
-  RegisterSwitchObserver(hal::SWITCH_LINEOUT, mObserver);
+  RegisterSwitchObserver(hal::SWITCH_LINEOUT, mObserver.get());
   // Initialize lineout status
   UpdateHeadsetConnectionState(hal::GetCurrentSwitchState(hal::SWITCH_LINEOUT));
   NotifyHeadphonesStatus(hal::GetCurrentSwitchState(hal::SWITCH_LINEOUT));
@@ -791,31 +773,32 @@ AudioManager::AudioManager()
 
   // Gecko only control stream volume not master so set to default value
   // directly.
-  android::AudioSystem::setMasterVolume(1.0);
+  AudioSystem::setMasterVolume(1.0);
 
   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
   NS_ENSURE_TRUE_VOID(obs);
-  if (NS_FAILED(obs->AddObserver(this, BLUETOOTH_SCO_STATUS_CHANGED_ID,
-  false))) {
+  if (NS_FAILED(
+          obs->AddObserver(this, BLUETOOTH_SCO_STATUS_CHANGED_ID, false))) {
     NS_WARNING("Failed to add bluetooth sco status changed observer!");
   }
-  if (NS_FAILED(obs->AddObserver(this, BLUETOOTH_A2DP_STATUS_CHANGED_ID,
-  false))) {
+  if (NS_FAILED(
+          obs->AddObserver(this, BLUETOOTH_A2DP_STATUS_CHANGED_ID, false))) {
     NS_WARNING("Failed to add bluetooth a2dp status changed observer!");
   }
-  if (NS_FAILED(obs->AddObserver(this, BLUETOOTH_HFP_STATUS_CHANGED_ID,
-  false))) {
+  if (NS_FAILED(
+          obs->AddObserver(this, BLUETOOTH_HFP_STATUS_CHANGED_ID, false))) {
     NS_WARNING("Failed to add bluetooth hfp status changed observer!");
   }
   if (NS_FAILED(obs->AddObserver(this, BLUETOOTH_HFP_NREC_STATUS_CHANGED_ID,
-  false))) {
+                                 false))) {
     NS_WARNING("Failed to add bluetooth hfp NREC status changed observer!");
   }
-  if (NS_FAILED(obs->AddObserver(this, BLUETOOTH_HFP_WBS_STATUS_CHANGED_ID,
-  false))) {
+  if (NS_FAILED(
+          obs->AddObserver(this, BLUETOOTH_HFP_WBS_STATUS_CHANGED_ID, false))) {
     NS_WARNING("Failed to add bluetooth hfp WBS status changed observer!");
   }
-  // if (NS_FAILED(obs->AddObserver(this, MOZ_SETTINGS_CHANGE_ID, false))) { //TODO FIXME
+  // TODO FIXME
+  // if (NS_FAILED(obs->AddObserver(this, MOZ_SETTINGS_CHANGE_ID, false))) {
   //  NS_WARNING("Failed to add mozsettings-changed observer!");
   // }
 #ifdef PRODUCT_MANUFACTURER_MTK
@@ -836,37 +819,34 @@ AudioManager::AudioManager()
   // prevent AudioPolicyService from treating us as assistant app and
   // incorrectly muting our audio input because we don't meet some criteria of
   // assistant app.
-  android::AudioSystem::setAssistantUid(AUDIO_UID_INVALID);
+  AudioSystem::setAssistantUid(AUDIO_UID_INVALID);
 }
 
 AudioManager::~AudioManager() {
   MOZ_ASSERT(!sAudioManager);
 
-  android::AudioSystem::setErrorCallback(nullptr);
-  android::AudioSystem::removeAudioPortCallback(nullptr);
-  hal::UnregisterSwitchObserver(hal::SWITCH_HEADPHONES, mObserver);
-  hal::UnregisterSwitchObserver(hal::SWITCH_LINEOUT, mObserver);
+  AudioSystem::setErrorCallback(nullptr);
+  AudioSystem::removeAudioPortCallback(mAudioPortCallbackHolder->Callback());
+  hal::UnregisterSwitchObserver(hal::SWITCH_HEADPHONES, mObserver.get());
+  hal::UnregisterSwitchObserver(hal::SWITCH_LINEOUT, mObserver.get());
 
   nsCOMPtr<nsIObserverService> obs = services::GetObserverService();
   NS_ENSURE_TRUE_VOID(obs);
-  if (NS_FAILED(obs->RemoveObserver(this, BLUETOOTH_SCO_STATUS_CHANGED_ID)))
-  {
+  if (NS_FAILED(obs->RemoveObserver(this, BLUETOOTH_SCO_STATUS_CHANGED_ID))) {
     NS_WARNING("Failed to remove bluetooth sco status changed observer!");
   }
-  if (NS_FAILED(obs->RemoveObserver(this, BLUETOOTH_A2DP_STATUS_CHANGED_ID)))
-  {
+  if (NS_FAILED(obs->RemoveObserver(this, BLUETOOTH_A2DP_STATUS_CHANGED_ID))) {
     NS_WARNING("Failed to remove bluetooth a2dp status changed observer!");
   }
-  if (NS_FAILED(obs->RemoveObserver(this, BLUETOOTH_HFP_STATUS_CHANGED_ID)))
-  {
+  if (NS_FAILED(obs->RemoveObserver(this, BLUETOOTH_HFP_STATUS_CHANGED_ID))) {
     NS_WARNING("Failed to remove bluetooth hfp status changed observer!");
   }
-  if (NS_FAILED(obs->RemoveObserver(this,
-  BLUETOOTH_HFP_NREC_STATUS_CHANGED_ID))) {
+  if (NS_FAILED(
+          obs->RemoveObserver(this, BLUETOOTH_HFP_NREC_STATUS_CHANGED_ID))) {
     NS_WARNING("Failed to remove bluetooth hfp NREC status changed observer!");
   }
-  if (NS_FAILED(obs->RemoveObserver(this,
-  BLUETOOTH_HFP_WBS_STATUS_CHANGED_ID))) {
+  if (NS_FAILED(
+          obs->RemoveObserver(this, BLUETOOTH_HFP_WBS_STATUS_CHANGED_ID))) {
     NS_WARNING("Failed to remove bluetooth hfp WBS status changed observer!");
   }
   if (NS_FAILED(obs->RemoveObserver(this, MOZ_SETTINGS_CHANGE_ID))) {
@@ -907,7 +887,7 @@ AudioManager::GetMicrophoneMuted(bool* aMicrophoneMuted) {
   }
 #endif
 
-  if (android::AudioSystem::isMicrophoneMuted(aMicrophoneMuted)) {
+  if (AudioSystem::isMicrophoneMuted(aMicrophoneMuted)) {
     return NS_ERROR_FAILURE;
   }
   return NS_OK;
@@ -926,10 +906,10 @@ AudioManager::SetMicrophoneMuted(bool aMicrophoneMuted) {
   }
 #endif
 
-  android::AudioSystem::muteMicrophone(aMicrophoneMuted);
+  AudioSystem::muteMicrophone(aMicrophoneMuted);
 
   bool micMuted;
-  android::AudioSystem::isMicrophoneMuted(&micMuted);
+  AudioSystem::isMicrophoneMuted(&micMuted);
   if (micMuted != aMicrophoneMuted) {
     return NS_ERROR_FAILURE;
   }
@@ -955,7 +935,7 @@ AudioManager::SetPhoneState(int32_t aState) {
     obs->NotifyObservers(nullptr, "phone-state-changed", state.get());
   }
 
-  if (android::AudioSystem::setPhoneState(static_cast<audio_mode_t>(aState))) {
+  if (AudioSystem::setPhoneState(static_cast<audio_mode_t>(aState))) {
     return NS_ERROR_FAILURE;
   }
 
@@ -983,59 +963,38 @@ AudioManager::GetHeadsetState(int32_t* aHeadsetState) {
 
 NS_IMETHODIMP
 AudioManager::SetTtyMode(uint16_t aTtyMode) {
-  android::String8 cmd;
   if (aTtyMode == nsIAudioManager::TTY_MODE_FULL) {
-    cmd.setTo("tty_mode=tty_full");
+    SetParameters("tty_mode=tty_full");
   } else if (aTtyMode == nsIAudioManager::TTY_MODE_HCO) {
-    cmd.setTo("tty_mode=tty_hco");
+    SetParameters("tty_mode=tty_hco");
   } else if (aTtyMode == nsIAudioManager::TTY_MODE_VCO) {
-    cmd.setTo("tty_mode=tty_vco");
+    SetParameters("tty_mode=tty_vco");
   } else {
-    cmd.setTo("tty_mode=tty_off");
+    SetParameters("tty_mode=tty_off");
   }
-
-  SetAudioSystemParameters(0, cmd);
-
   return NS_OK;
 }
 
 NS_IMETHODIMP
 AudioManager::SetForceForUse(int32_t aUsage, int32_t aForce) {
-  android::status_t status = android::AudioSystem::setForceUse(
+  android::status_t status = AudioSystem::setForceUse(
       (audio_policy_force_use_t)aUsage, (audio_policy_forced_cfg_t)aForce);
-#ifdef PRODUCT_MANUFACTURER_SPRD
-  // Sync force use between MEDIA and FM
-  if (aUsage == USE_MEDIA && status == NO_ERROR) {
-    // Mute FM when switching output paths. This can avoid pop noise caused
-    // by applying incorrect volume index, which is from the original path,
-    // to the new path.
-    SetVendorFmVolumeIndex(true);
-    status = android::AudioSystem::setForceUse(
-        AUDIO_POLICY_FORCE_FOR_FM, (audio_policy_forced_cfg_t)aForce);
-  }
-#elif defined(PRODUCT_MANUFACTURER_MTK)
-  // Sync force use between MEDIA and FM
-  if (aUsage == USE_MEDIA && status == NO_ERROR) {
-    status = android::AudioSystem::setForceUse(
-        AUDIO_POLICY_FORCE_FOR_PROPRIETARY, (audio_policy_forced_cfg_t)aForce);
-  }
-#endif
 
-  bool enableRadio = false;
-  GetFmRadioAudioEnabled(&enableRadio);
-  // AudioPortListUpdate will trigger only when there is a device change(adding
-  // or removing) SetForcespeaker() only switch between devices (ex: FM switch
-  // to speaker) so still have to manually call it.
-  if (enableRadio == true && aUsage == AUDIO_POLICY_FORCE_FOR_MEDIA) {
-    android::sp<GonkAudioPortCallback> callback = new GonkAudioPortCallback();
-    callback->onAudioPortListUpdate();
+  // AudioPortListUpdate may not be triggered after setting force use, so
+  // manually update cached devices here, and make sure this is done before
+  // SetFmRouting().
+  UpdateCachedActiveDevicesForStreams();
+  MaybeUpdateVolumeSettingToDatabase();
+
+  if (aUsage == USE_MEDIA) {
+    SetFmRouting();
   }
-  return status ? NS_ERROR_FAILURE : NS_OK;
+  return status == android::OK ? NS_OK : NS_ERROR_FAILURE;
 }
 
 NS_IMETHODIMP
 AudioManager::GetForceForUse(int32_t aUsage, int32_t* aForce) {
-  *aForce = android::AudioSystem::getForceUse((audio_policy_force_use_t)aUsage);
+  *aForce = AudioSystem::getForceUse((audio_policy_force_use_t)aUsage);
   return NS_OK;
 }
 
@@ -1045,21 +1004,91 @@ AudioManager::GetFmRadioAudioEnabled(bool* aFmRadioAudioEnabled) {
   return NS_OK;
 }
 
-void AudioManager::SetVendorFmVolumeIndex(bool aMute) {
-#if defined(PRODUCT_MANUFACTURER_SPRD)
-  uint32_t device = GetDeviceForSprdFm();
-  uint32_t volIndex =
-      aMute ? 0 : mStreamStates[AUDIO_STREAM_MUSIC]->GetVolumeIndex(device);
-  android::String8 cmd;
-  cmd.appendFormat("FM_Volume=%d", volIndex);
-  LOG("At %d, cmd %s", __LINE__, cmd.string());
-  SetAudioSystemParameters(0, cmd);
+void AudioManager::SetFmRouting() {
+  // Mute FM when switching output paths. This can avoid pop noise caused by the
+  // time gap between setting new path and setting the volume of the new path.
+  if (IsFmOutConnected()) {
+    SetFmMuted(true);
+  }
+#if defined(PRODUCT_MANUFACTURER_QUALCOMM)
+  // Setting "fm_routing" restarts FM audio path, so only do it when FM audio is
+  // already enabled.
+  if (IsFmOutConnected()) {
+    SetParameters("fm_routing=%d", GetDeviceForFm() | AUDIO_DEVICE_OUT_FM);
+  }
+#elif defined(PRODUCT_MANUFACTURER_SPRD)
+  // Sync force use between MEDIA and FM
+  auto force = AudioSystem::getForceUse(AUDIO_POLICY_FORCE_FOR_MEDIA);
+  AudioSystem::setForceUse(AUDIO_POLICY_FORCE_FOR_FM, force);
+#elif defined(PRODUCT_MANUFACTURER_MTK)
+  /* FIXME
+  // Sync force use between MEDIA and FM
+  auto force = AudioSystem::getForceUse(AUDIO_POLICY_FORCE_FOR_MEDIA);
+  AudioSystem::setForceUse(AUDIO_POLICY_FORCE_FOR_PROPRIETARY, force);
+  */
+#else
+  MOZ_CRASH("FM radio not supported");
 #endif
+  if (IsFmOutConnected()) {
+    SetFmMuted(false);
+  }
+}
+
+void AudioManager::UpdateFmVolume() {
+#if defined(PRODUCT_MANUFACTURER_QUALCOMM)
+  uint32_t device = GetDeviceForFm();
+  uint32_t volIndex = mStreamStates[AUDIO_STREAM_MUSIC]->GetVolumeIndex(device);
+  float volDb =
+      AudioSystem::getStreamVolumeDB(AUDIO_STREAM_MUSIC, volIndex, device);
+  // decibel to amplitude
+  float volume = (float)exp(volDb * 0.115129);
+  SetParameters("fm_volume=%f", volume);
+#elif defined(PRODUCT_MANUFACTURER_SPRD)
+  uint32_t device = GetDeviceForFm();
+  uint32_t volIndex = mStreamStates[AUDIO_STREAM_MUSIC]->GetVolumeIndex(device);
+  SetParameters("FM_Volume=%d", volIndex);
+#endif
+}
+
+void AudioManager::SetFmMuted(bool aMuted) {
+#if defined(PRODUCT_MANUFACTURER_QUALCOMM)
+  // Update FM volume before unmuted.
+  if (!aMuted) {
+    UpdateFmVolume();
+  }
+  SetParameters("fm_mute=%d", aMuted);
+#elif defined(PRODUCT_MANUFACTURER_SPRD)
+  if (aMuted) {
+    // Is there a mute command?
+    SetParameters("FM_Volume=0");
+  } else {
+    UpdateFmVolume();
+  }
+#endif
+  // MTK platform handles FM volume internally, so no need to set muted here.
 }
 
 NS_IMETHODIMP
 AudioManager::SetFmRadioAudioEnabled(bool aFmRadioAudioEnabled) {
-#if defined(PRODUCT_MANUFACTURER_SPRD)
+  // Mute FM audio first, and unmute it after the correct routing and volume are
+  // set.
+  if (aFmRadioAudioEnabled) {
+    SetFmMuted(true);
+  }
+#if defined(PRODUCT_MANUFACTURER_QUALCOMM)
+  if (aFmRadioAudioEnabled) {
+    if (IsFmOutConnected()) {
+      // Stop FM audio and start it again with correct routing.
+      SetFmRouting();
+    } else {
+      // Just start FM audio with correct routing.
+      SetParameters("handle_fm=%d", GetDeviceForFm() | AUDIO_DEVICE_OUT_FM);
+    }
+  } else {
+    // Remove AUDIO_DEVICE_OUT_FM to stop FM audio. The device cannot be 0.
+    SetParameters("handle_fm=%d", GetDeviceForFm());
+  }
+#elif defined(PRODUCT_MANUFACTURER_SPRD)
   UpdateDeviceConnectionState(aFmRadioAudioEnabled, AUDIO_DEVICE_OUT_FM_HEADSET,
                               NS_LITERAL_CSTRING(""));
 
@@ -1069,14 +1098,11 @@ AudioManager::SetFmRadioAudioEnabled(bool aFmRadioAudioEnabled) {
   UpdateDeviceConnectionState(aFmRadioAudioEnabled, AUDIO_DEVICE_IN_FM_TUNER,
                               NS_LITERAL_CSTRING(""));
 #else
-  UpdateDeviceConnectionState(aFmRadioAudioEnabled, AUDIO_DEVICE_OUT_FM,
-                              NS_LITERAL_CSTRING(""));
+  MOZ_CRASH("FM radio not supported");
 #endif
-
   if (aFmRadioAudioEnabled) {
-    SetVendorFmVolumeIndex(false);
+    SetFmMuted(false);
   }
-
   return NS_OK;
 }
 
@@ -1147,22 +1173,14 @@ nsresult AudioManager::SetStreamVolumeIndex(int32_t aStream, uint32_t aIndex) {
   }
 
   int32_t streamAlias = sStreamVolumeAliasTbl[aStream];
-
-  nsresult rv;
   for (int32_t streamType = 0; streamType < AUDIO_STREAM_CNT; streamType++) {
     if (streamAlias == sStreamVolumeAliasTbl[streamType]) {
-      rv = mStreamStates[streamType]->SetVolumeIndexToActiveDevices(aIndex);
+      nsresult rv = mStreamStates[streamType]->SetVolumeIndexToActiveDevices(aIndex);
       if (NS_WARN_IF(NS_FAILED(rv))) {
         return rv;
       }
     }
   }
-
-  // Bug 17613, Sync FM volume with MUSIC volume for SPRD.
-  if (streamAlias == AUDIO_STREAM_MUSIC && IsFmOutConnected()) {
-    SetVendorFmVolumeIndex(false);
-  }
-
   MaybeUpdateVolumeSettingToDatabase();
   return NS_OK;
 }
@@ -1250,7 +1268,8 @@ void AudioManager::MaybeUpdateVolumeSettingToDatabase(bool aForce) {
     return;
   }
 
-  // nsCOMPtr<nsISettingsServiceLock> lock = GetSettingServiceLock(); //TODO FIXME
+  // TODO FIXME
+  // nsCOMPtr<nsISettingsServiceLock> lock = GetSettingServiceLock();
   // if (NS_WARN_IF(!lock)) {
   //   return;
   // }
@@ -1329,7 +1348,7 @@ uint32_t AudioManager::GetDevicesForStream(int32_t aStream, bool aFromCache) {
     return mStreamStates[aStream]->GetLastDevices();
   }
 
-  audio_devices_t devices = android::AudioSystem::getDevicesForStream(
+  audio_devices_t devices = AudioSystem::getDevicesForStream(
       static_cast<audio_stream_type_t>(aStream));
 
   return static_cast<uint32_t>(devices);
@@ -1342,32 +1361,34 @@ uint32_t AudioManager::GetDeviceForStream(int32_t aStream) {
   return device;
 }
 
-#ifdef PRODUCT_MANUFACTURER_SPRD
-uint32_t AudioManager::GetDeviceForSprdFm() {
-  uint32_t device = AUDIO_POLICY_FORCE_SPEAKER;
-
-  int32_t force = android::AudioSystem::getForceUse(AUDIO_POLICY_FORCE_FOR_FM);
+uint32_t AudioManager::GetDeviceForFm() {
+#if defined(PRODUCT_MANUFACTURER_SPRD)
+  // On SPRD devices, FM radio only supports speaker or headphone path, so
+  // manually decide its routing.
+  auto force = AudioSystem::getForceUse(AUDIO_POLICY_FORCE_FOR_FM);
   if (force == AUDIO_POLICY_FORCE_SPEAKER) {
-    device = AUDIO_DEVICE_OUT_SPEAKER;
-  } else {
-    if (mConnectedDevices.Get(AUDIO_DEVICE_OUT_WIRED_HEADSET, nullptr)) {
-      device = AUDIO_DEVICE_OUT_WIRED_HEADSET;
-    } else if (mConnectedDevices.Get(AUDIO_DEVICE_OUT_WIRED_HEADPHONE,
-                                     nullptr)) {
-      device = AUDIO_DEVICE_OUT_WIRED_HEADPHONE;
-    }
+    return AUDIO_DEVICE_OUT_SPEAKER;
   }
-
-  return device;
-}
+  if (mConnectedDevices.Get(AUDIO_DEVICE_OUT_WIRED_HEADSET, nullptr)) {
+    return AUDIO_DEVICE_OUT_WIRED_HEADSET;
+  }
+  if (mConnectedDevices.Get(AUDIO_DEVICE_OUT_WIRED_HEADPHONE, nullptr)) {
+    return AUDIO_DEVICE_OUT_WIRED_HEADPHONE;
+  }
+  // No headset/headphone plugged in. No force speaker.
+  return AUDIO_DEVICE_OUT_SPEAKER;
+#else
+  // Assume that FM radio supports the same routing of music stream.
+  return GetDeviceForStream(AUDIO_STREAM_MUSIC);
 #endif
+}
 
-/* static */ uint32_t AudioManager::SelectDeviceFromDevices(
-    uint32_t aOutDevices) {
+/* static */
+uint32_t AudioManager::SelectDeviceFromDevices(uint32_t aOutDevices) {
   uint32_t device = aOutDevices;
 
   // Consider force use speaker case.
-  int32_t force = android::AudioSystem::getForceUse(
+  int32_t force = AudioSystem::getForceUse(
       (audio_policy_force_use_t)nsIAudioManager::USE_MEDIA);
   if (force == nsIAudioManager::FORCE_SPEAKER) {
     device = AUDIO_DEVICE_OUT_SPEAKER;
@@ -1393,14 +1414,10 @@ uint32_t AudioManager::GetDeviceForSprdFm() {
   MOZ_ASSERT(audio_is_output_device(device));
   return device;
 }
+
 AudioManager::VolumeStreamState::VolumeStreamState(AudioManager& aManager,
                                                    int32_t aStreamType)
-    : mManager(aManager),
-      mStreamType(aStreamType),
-      mLastDevices(0),
-      mDevicesWithVolumeChange(0),
-      mIsDevicesChanged(true),
-      mIsDeviceSpecificVolume(true) {
+    : mManager(aManager), mStreamType(aStreamType) {
   switch (mStreamType) {
     case AUDIO_STREAM_SYSTEM:
     case AUDIO_STREAM_RING:
@@ -1438,8 +1455,8 @@ uint32_t AudioManager::VolumeStreamState::GetDevicesWithVolumeChange() {
 }
 
 void AudioManager::VolumeStreamState::InitStreamVolume() {
-  android::AudioSystem::initStreamVolume(
-      static_cast<audio_stream_type_t>(mStreamType), 0, GetMaxIndex());
+  AudioSystem::initStreamVolume(static_cast<audio_stream_type_t>(mStreamType),
+                                0, GetMaxIndex());
 }
 
 uint32_t AudioManager::VolumeStreamState::GetMaxIndex() {
@@ -1551,12 +1568,12 @@ nsresult AudioManager::VolumeStreamState::SetVolumeIndex(uint32_t aIndex,
     mDevicesWithVolumeChange |= aDevice;
   }
 
-  rv = android::AudioSystem::setStreamVolumeIndex(
+  rv = AudioSystem::setStreamVolumeIndex(
       static_cast<audio_stream_type_t>(mStreamType), aIndex, aDevice);
 
   // when changing music volume,  also set FMradio volume.Just for SPRD FMradio.
   if ((AUDIO_STREAM_MUSIC == mStreamType) && mManager.IsFmOutConnected()) {
-    mManager.SetVendorFmVolumeIndex(false);
+    mManager.UpdateFmVolume();
   }
 
   return rv ? NS_ERROR_FAILURE : NS_OK;
@@ -1572,23 +1589,50 @@ void AudioManager::VolumeStreamState::RestoreVolumeIndexToAllDevices() {
 
 NS_IMETHODIMP
 AudioManager::SetHacMode(bool aHacMode) {
-  android::String8 cmd;
   if (aHacMode) {
-    cmd.setTo("HACSetting=ON");
+    SetParameters("HACSetting=ON");
   } else {
-    cmd.setTo("HACSetting=OFF");
+    SetParameters("HACSetting=OFF");
   }
+  return NS_OK;
+}
 
-  SetAudioSystemParameters(0, cmd);
-
+static nsresult SetAudioSystemParameters(
+    audio_io_handle_t aIoHandle, const android::String8& aKeyValuePairs) {
+  LOG("Set audio system parameter: %s", aKeyValuePairs.string());
+  android::status_t status =
+      AudioSystem::setParameters(aIoHandle, aKeyValuePairs);
+  if (status != android::OK) {
+    LOG("Failed to set parameter: %s, error status: %d",
+        aKeyValuePairs.string(), status);
+    return NS_ERROR_FAILURE;
+  }
   return NS_OK;
 }
 
 NS_IMETHODIMP
-AudioManager::SetParameters(const nsACString& keyValuePairs) {
-  LOG("Set parameter: %s", ToNewCString(keyValuePairs));
-  android::String8 cmd(ToNewCString(keyValuePairs));
+AudioManager::SetParameters(const nsACString& aKeyValuePairs) {
+  android::String8 cmd(aKeyValuePairs.Data(), aKeyValuePairs.Length());
   return SetAudioSystemParameters(0, cmd);
+}
+
+nsresult AudioManager::SetParameters(const char* aFormat, ...) {
+  va_list args;
+  va_start(args, aFormat);
+  android::String8 cmd;
+  android::status_t status = cmd.appendFormatV(aFormat, args);
+  va_end(args);
+
+  if (status != android::OK) {
+    LOG("Invalid parameter, error status: %d", status);
+    return NS_ERROR_FAILURE;
+  }
+  return SetAudioSystemParameters(0, cmd);
+}
+
+nsAutoCString AudioManager::GetParameters(const char* aKeys) {
+  auto keyValuePairs = AudioSystem::getParameters(0, android::String8(aKeys));
+  return nsAutoCString(keyValuePairs.string());
 }
 
 } /* namespace gonk */

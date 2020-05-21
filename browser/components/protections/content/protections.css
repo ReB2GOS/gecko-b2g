@@ -27,6 +27,12 @@
   /* Colors for the loading indicator */
   --protection-report-loader-color-stop: #AEAEAE3D;
   --protection-report-loader-gradient-opacity: 0.95;
+
+  --grey-70: #38383D;
+  --grey-90-a60: rgba(12, 12, 13, 0.6);
+
+  --gear-icon-fill: var(--grey-90-a60);
+  --hover-grey-link: var(--grey-70);
 }
 
 body {
@@ -65,7 +71,15 @@ h2 {
 #report-title {
   font-size: 20px;
   font-weight: 300;
-  margin-block-end: 22px;
+  margin-block-end: 20px;
+}
+
+#report-summary {
+  color: var(--in-content-deemphasized-text);
+  line-height: 26px;
+  font-size: 16px;
+  margin: 0;
+  margin-bottom: 15px;
 }
 
 #report-content {
@@ -81,8 +95,9 @@ h2 {
 
 #manage-protections,
 .card-header > button,
+#save-passwords-button,
 #get-proxy-extension-link,
-#open-about-logins-button,
+#manage-passwords-button,
 #sign-up-for-monitor-link {
   grid-area: 1 / 5 / 1 / -1;
   margin: 0;
@@ -91,6 +106,10 @@ h2 {
   padding: 10px;
   text-align: center;
   line-height: initial;
+}
+
+.lockwise-card.has-logins .wrapper div:nth-child(1) {
+  grid-area: 1 / 1 / 1 / 6;
 }
 
 .card:not(.has-logins) .wrapper div:nth-child(1),
@@ -110,7 +129,7 @@ h2 {
 /* We want to hide certain components depending on its state. */
 .no-logins .monitor-scanned-wrapper,
 .etp-card.custom-not-blocking .card-body,
-.etp-card.custom-not-blocking #protection-details,
+.etp-card.custom-not-blocking #protection-settings,
 #manage-protections,
 .etp-card .icon.dark,
 a.hidden,
@@ -118,13 +137,16 @@ a.hidden,
 .lockwise-card.hidden,
 #lockwise-body-content .has-logins.hidden,
 #lockwise-body-content .no-logins.hidden,
+.lockwise-card.no-logins #lockwise-how-it-works,
+.lockwise-card.no-logins .lockwise-scanned-wrapper,
+.lockwise-card.no-logins #manage-passwords-button,
+.lockwise-card.has-logins #save-passwords-button,
 .monitor-card.hidden,
 .monitor-card.no-logins .card-body,
 .monitor-card.no-logins #monitor-header-content a,
 .monitor-card.no-logins .monitor-scanned-text,
 .monitor-card.no-logins .icon-small,
 .monitor-card.has-logins #sign-up-for-monitor-link,
-#monitor-body-content .monitor-breached-passwords.hidden,
 .loading a,
 .loading button,
 .loading .wrapper,
@@ -150,6 +172,9 @@ a.hidden,
     --tracker-highlight-color: #39E1BC;
     --fingerprinter-highlight-color: #FFB65E;
     --cryptominer-highlight-color: #BEBECA;
+
+    --gear-icon-fill: rgba(249, 249, 250, 0.60);
+    --hover-grey-link: var(--grey-30)
   }
 
   .etp-card .icon.dark {
@@ -229,36 +254,39 @@ a.hidden,
   display: initial;
 }
 
-#protection-details {
-  margin-block: 24px 0;
-  padding-inline: 24px 3px;
+#protection-settings {
   -moz-context-properties: fill;
-  fill: currentColor;
-  background: url("chrome://global/skin/icons/settings.svg") no-repeat 3px;
+  fill: var(--gear-icon-fill);
+  background: url("chrome://global/skin/icons/settings.svg") no-repeat 0px;
   font-size: 0.75em;
   cursor: default;
   width: max-content;
+  color: var(--in-content-deemphasized-text);
+  margin-block: 6px 0px;
+  font-size: 12px;
+  padding-block: 4px;
+  padding-inline: 24px 4px;
 }
 
-#protection-details:dir(rtl) {
-  background-position-x: right 3px;
+#protection-settings:dir(rtl) {
+  background-position-x: right 0px;
 }
 
-#protection-details:hover,
-#protection-details:focus {
-  background-color: var(--in-content-button-background);
+#protection-settings:hover,
+#protection-settings:focus {
+  text-decoration: underline;
+  color: var(--hover-grey-link);
+  fill: var(--hover-grey-link);
 }
 
-#protection-details:hover:active {
-  background-color: var(--in-content-button-background-hover);
+#protection-settings:hover:active {
+  text-decoration: none;
+  color: var(--in-content-text-color);
+  fill: var(--in-content-text-color);
 }
 
-#protection-details:-moz-focusring {
+#protection-settings:-moz-focusring {
   outline: none;
-}
-
-#protection-details span {
-  font-weight: bold;
 }
 
 .card .card-body {
@@ -570,6 +598,7 @@ label[for="tab-cryptominer"]:hover ~ #highlight-hover {
 }
 
 .etp-card {
+  margin-top: 31px;
   grid-template-rows: 20% auto auto;
 }
 
@@ -605,12 +634,6 @@ label[for="tab-cryptominer"]:hover ~ #highlight-hover {
   display: block;
 }
 
-.passwords-stored-text,
-.synced-devices-text {
-  width: max-content;
-  padding-inline-start: 4px;
-}
-
 .block {
   background-color: var(--grey-60);
   border-radius: 4px;
@@ -626,21 +649,28 @@ label[for="tab-cryptominer"]:hover ~ #highlight-hover {
   margin-inline-start: 10px;
 }
 
-/* Monitor card */
-
-#monitor-body-content .monitor-breached-passwords {
-  grid: 1fr / repeat(7, 1fr);
-  grid-row: 3;
-  grid-column: 1 / -1;
+.lockwise-scanned-wrapper {
   display: grid;
-  align-items: center;
-  font-size: 0.85em;
-  border-block-start: 1px solid var(--in-content-border-color);
-  padding-block-start: 20px;
-  line-height: 18px;
-  margin-block-end: 20px;
+  grid-template-columns: 7% auto;
+  margin-block-start: 24px;
+  grid-area: 2 / 1 / 2 / 5;
+  padding-bottom: 1.7em;
 }
 
+#lockwise-scanned-text {
+  margin-inline-end: 15px;
+}
+
+#lockwise-scanned-icon {
+  margin-top: 7px;
+}
+
+#manage-passwords-button {
+  grid-area: 2 / 5 / 2 / 7;
+  margin-inline-end: 15px;
+}
+
+/* Monitor card */
 .monitor-info-wrapper {
   display: grid;
   grid: 1fr / 1fr 1fr 1fr;
@@ -654,6 +684,7 @@ label[for="tab-cryptominer"]:hover ~ #highlight-hover {
   display: block;
 }
 
+.lockwise-card #lockwise-header-content > a,
 .monitor-card #monitor-header-content > a {
   display: block;
   margin-block-start: 5px;
@@ -670,10 +701,17 @@ label[for="tab-cryptominer"]:hover ~ #highlight-hover {
   display: flex;
   flex-direction: column;
   border-radius: 4px;
-  color: #FFFFFF;
   text-align: center;
-  padding: 19px 10px;
   margin-inline-end: 15px;
+}
+
+.monitor-block a {
+  color: #FFFFFF;
+  padding: 19px 0px;
+}
+
+.monitor-block a:hover {
+  text-decoration: none;
 }
 
 .email {
@@ -726,7 +764,8 @@ label[for="tab-cryptominer"]:hover ~ #highlight-hover {
 .info-text {
   font-size: 0.75em;
   line-height: 13px;
-  margin-block-start: 5px;
+  margin: 0 10px;
+  display: inline-block;
 }
 
 .number-of-breaches.block {
@@ -736,10 +775,6 @@ label[for="tab-cryptominer"]:hover ~ #highlight-hover {
   grid-column: 1 / 2;
   width: 70px;
   height: 48px;
-}
-
-#password-warning {
-  grid-column: 2 / -1;
 }
 
 #manage-protections,

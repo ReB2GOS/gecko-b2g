@@ -11,19 +11,15 @@
 # shell because `''':'`, `':'` and `:` are all equivalent, and `:` is a no-op.
 ''':'
 py2commands="
-    analyze
     android
-    android-emulator
     awsy-test
     browsertime
-    cargo
     check-spidermonkey
     clang-format
     cppunittest
     cramtest
     crashtest
     devtools-css-db
-    file-info
     firefox-ui-functional
     geckodriver
     geckodriver-test
@@ -31,7 +27,6 @@ py2commands="
     gradle
     gtest
     hazards
-    ide
     jsapi-tests
     jsshell-bench
     jstestbrowser
@@ -49,10 +44,7 @@ py2commands="
     raptor-test
     reftest
     release
-    release-history
-    remote
     repackage
-    robocop
     rusttests
     static-analysis
     talos-test
@@ -63,7 +55,6 @@ py2commands="
     test
     test-info
     tps-build
-    try
     valgrind-test
     visualmetrics
     web-platform-tests

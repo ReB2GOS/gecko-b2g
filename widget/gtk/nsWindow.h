@@ -19,7 +19,7 @@
 #  include "base/thread.h"
 #  include "WaylandVsyncSource.h"
 #endif
-#include "mozcontainer.h"
+#include "MozContainer.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/UniquePtr.h"
 #include "nsIDragService.h"
@@ -432,6 +432,7 @@ class nsWindow final : public nsBaseWidget {
   };
   virtual void FlushPreferredPopupRect() override {
     mPreferredPopupRect = nsRect(0, 0, 0, 0);
+    mPreferredPopupRectFlushed = true;
   };
 #endif
   bool IsRemoteContent() { return HasRemoteContent(); }
@@ -701,6 +702,7 @@ class nsWindow final : public nsBaseWidget {
   GtkWindow* GetTopmostWindow();
   bool IsWidgetOverflowWindow();
   nsRect mPreferredPopupRect;
+  bool mPreferredPopupRectFlushed;
   bool mWaitingForMoveToRectCB;
   LayoutDeviceIntRect mPendingSizeRect;
 

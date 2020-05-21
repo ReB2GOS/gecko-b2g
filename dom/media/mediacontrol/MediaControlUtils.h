@@ -65,6 +65,26 @@ ConvertMediaControlKeysTestEventToMediaControlKeysEvent(
   }
 }
 
+inline const char* ToMediaSessionActionStr(MediaSessionAction aAction) {
+  switch (aAction) {
+    case MediaSessionAction::Play:
+      return "play";
+    case MediaSessionAction::Pause:
+      return "pause";
+    case MediaSessionAction::Seekbackward:
+      return "seek backward";
+    case MediaSessionAction::Seekforward:
+      return "seek forward";
+    case MediaSessionAction::Previoustrack:
+      return "previous track";
+    case MediaSessionAction::Nexttrack:
+      return "next track";
+    default:
+      MOZ_ASSERT(aAction == MediaSessionAction::Stop);
+      return "stop";
+  }
+}
+
 inline MediaSessionPlaybackTestState ConvertToMediaSessionPlaybackTestState(
     MediaSessionPlaybackState aState) {
   switch (aState) {
@@ -90,6 +110,18 @@ inline const char* ToMediaPlaybackStateStr(MediaPlaybackState aState) {
       return "stopped";
     default:
       MOZ_ASSERT_UNREACHABLE("Invalid media state.");
+      return "Unknown";
+  }
+}
+
+inline const char* ToMediaAudibleStateStr(MediaAudibleState aState) {
+  switch (aState) {
+    case MediaAudibleState::eInaudible:
+      return "inaudible";
+    case MediaAudibleState::eAudible:
+      return "audible";
+    default:
+      MOZ_ASSERT_UNREACHABLE("Invalid audible state.");
       return "Unknown";
   }
 }

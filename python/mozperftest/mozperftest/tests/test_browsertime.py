@@ -4,7 +4,7 @@ import mozunit
 import mock
 import shutil
 
-from mozperftest.tests.support import get_running_env
+from mozperftest.tests.support import get_running_env, EXAMPLE_TEST
 from mozperftest.environment import BROWSER
 from mozperftest.browser.browsertime import add_options
 from mozperftest.utils import silence
@@ -17,6 +17,7 @@ def fetch(self, url):
     return os.path.join(HERE, "fetched_artifact.zip")
 
 
+@mock.patch("mozperftest.browser.browsertime.runner.install_package")
 @mock.patch(
     "mozperftest.browser.noderunner.NodeRunner.verify_node_install", new=lambda x: True
 )
@@ -25,10 +26,10 @@ def fetch(self, url):
     "mozperftest.browser.browsertime.runner.BrowsertimeRunner._setup_node_packages",
     new=lambda x, y: None,
 )
-def test_browser():
-    mach_cmd, metadata, env = get_running_env()
+def test_browser(*mocked):
+    mach_cmd, metadata, env = get_running_env(browsertime_geckodriver="GECKODRIVER")
     browser = env.layers[BROWSER]
-    env.set_arg("tests", [os.path.join(HERE, "example.js")])
+    env.set_arg("tests", [EXAMPLE_TEST])
 
     try:
         with browser as b, silence():
@@ -38,7 +39,14 @@ def test_browser():
 
     assert mach_cmd.run_process.call_count == 1
     # XXX more checks
-    assert mach_cmd.run_process.call_args[0][-1][-1] == os.path.join(HERE, "example.js")
+    assert mach_cmd.run_process.call_args[0][-1][-1] == EXAMPLE_TEST
+    cmd = " ".join(mach_cmd.run_process.call_args[0][0])
+    assert "--firefox.geckodriverPath GECKODRIVER" in cmd
+
+    results = metadata.get_results()
+    assert len(results) == 1
+    assert set(list(results[0].keys())) - set(["name", "results"]) == set()
+    assert results[0]["name"] == "Example"
 
 
 def test_add_options():

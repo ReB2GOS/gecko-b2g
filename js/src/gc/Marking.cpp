@@ -24,7 +24,7 @@
 #include "debugger/DebugAPI.h"
 #include "gc/GCInternals.h"
 #include "gc/Policy.h"
-#include "jit/IonCode.h"
+#include "jit/JitCode.h"
 #include "js/GCTypeMacros.h"  // JS_FOR_EACH_PUBLIC_{,TAGGED_}GC_POINTER_TYPE
 #include "js/SliceBudget.h"
 #include "util/DiagnosticAssertions.h"
@@ -88,46 +88,43 @@ using mozilla::PodCopy;
 // internals.
 //
 /* clang-format off */
-//                                                                                              //
-//   .---------.    .---------.    .--------------------------.       .----------.              //
-//   |TraceEdge|    |TraceRoot|    |TraceManuallyBarrieredEdge|  ...  |TraceRange|   ... etc.   //
-//   '---------'    '---------'    '--------------------------'       '----------'              //
-//        \              \                        /                        /                    //
-//         \              \  .-----------------. /                        /                     //
-//          o------------->o-|TraceEdgeInternal|-o<----------------------o                      //
-//                           '-----------------'                                                //
-//                              /          \                                                    //
-//                             /            \                                                   //
-//                       .---------.   .----------.         .-----------------.                 //
-//                       |DoMarking|   |DoCallback|-------> |<JSTraceCallback>|----------->     //
-//                       '---------'   '----------'         '-----------------'                 //
-//                            |                                                                 //
-//                            |                                                                 //
-//                     .-----------.                                                            //
-//      o------------->|traverse(T)| .                                                          //
-//     /_\             '-----------'   ' .                                                      //
-//      |                   .       .      ' .                                                  //
-//      |                   .         .        ' .                                              //
-//      |                   .           .          ' .                                          //
-//      |          .--------------.  .--------------.  ' .     .-----------------------.        //
-//      |          |markAndScan(T)|  |markAndPush(T)|      ' - |markAndTraceChildren(T)|        //
-//      |          '--------------'  '--------------'          '-----------------------'        //
-//      |                   |                  \                               |                //
-//      |                   |                   \                              |                //
-//      |       .----------------------.     .----------------.         .------------------.    //
-//      |       |eagerlyMarkChildren(T)|     |pushMarkStackTop|<===Oo   |T::traceChildren()|--> //
-//      |       '----------------------'     '----------------'    ||   '------------------'    //
-//      |                  |                         ||            ||                           //
-//      |                  |                         ||            ||                           //
-//      |                  |                         ||            ||                           //
-//      o<-----------------o<========================OO============Oo                           //
-//                                                                                              //
-//                                                                                              //
-//   Legend:                                                                                    //
-//     ------  Direct calls                                                                     //
-//     . . .   Static dispatch                                                                  //
-//     ======  Dispatch through a manual stack.                                                 //
-//                                                                                              //
+//
+//  +----------------------+                             ...................
+//  |                      |                             :                 :
+//  |                      v                             v                 :
+//  |      TraceRoot   TraceEdge   TraceRange        GCMarker::            :
+//  |          |           |           |         processMarkStackTop   +---+---+
+//  |          +-----------+-----------+                 |             |       |
+//  |                      |                             |             | Mark  |
+//  |                      v                             |             | Stack |
+//  |              TraceEdgeInternal                     |             |       |
+//  |                      |                             |             +---+---+
+//  |                      |                             |                 ^
+//  |       +--------------+---------------+             +<----------+     :
+//  |       |              |               |             |           |     :
+//  |       v              v               v             v           |     :
+//  |  DoCallback   TenuringTracer::   DoMarking    traverseEdge     |     :
+//  |       |          traverse            |             |           |     :
+//  |       |                              +------+------+           |     :
+//  |       |                                     |                  |     :
+//  |       v                                     v                  |     :
+//  |  CallbackTracer::                   GCMarker::traverse         |     :
+//  |  dispatchToOnEdge                           |                  |     :
+//  |                                             |                  |     :
+//  |             +-------------------+-----------+------+           |     :
+//  |             |                   |                  |           |     :
+//  |             v                   v                  v           |     :
+//  |    markAndTraceChildren    markAndPush    eagerlyMarkChildren  |     :
+//  |             |                   :                  |           |     :
+//  |             v                   :                  +-----------+     :
+//  |      T::traceChildren           :                                    :
+//  |             |                   :                                    :
+//  +-------------+                   ......................................
+//
+//   Legend:
+//     ------- Direct calls
+//     ....... Data flow
+//
 /* clang-format on */
 
 /*** Tracing Invariants *****************************************************/
@@ -1156,10 +1153,6 @@ void BaseScript::traceChildren(JSTracer* trc) {
     data_->trace(trc);
   }
 
-  if (sharedData_) {
-    sharedData_->traceChildren(trc);
-  }
-
   // Scripts with bytecode may have optional data stored in per-runtime or
   // per-zone maps. Note that a failed compilation must not have entries since
   // the script itself will not be marked as having bytecode.
@@ -1421,7 +1414,9 @@ inline void js::GCMarker::eagerlyMarkChildren(Scope* scope) {
     switch (scope->kind()) {
       case ScopeKind::Function: {
         FunctionScope::Data& data = scope->as<FunctionScope>().data();
-        traverseObjectEdge(scope, data.canonicalFunction);
+        if (data.canonicalFunction) {
+          traverseObjectEdge(scope, data.canonicalFunction);
+        }
         names = &data.trailingNames;
         length = data.length;
         break;
@@ -1750,7 +1745,8 @@ GCMarker::MarkQueueProgress GCMarker::processMarkQueue() {
         }
       } else if (js::StringEqualsLiteral(str, "drain")) {
         auto unlimited = SliceBudget::unlimited();
-        MOZ_RELEASE_ASSERT(markUntilBudgetExhausted(unlimited));
+        MOZ_RELEASE_ASSERT(
+            markUntilBudgetExhausted(unlimited, DontReportMarkTime));
       } else if (js::StringEqualsLiteral(str, "set-color-gray")) {
         queueMarkColor = mozilla::Some(MarkColor::Gray);
         if (gcrt.state() != State::Sweep) {
@@ -1772,7 +1768,21 @@ GCMarker::MarkQueueProgress GCMarker::processMarkQueue() {
   return QueueComplete;
 }
 
-bool GCMarker::markUntilBudgetExhausted(SliceBudget& budget) {
+static gcstats::PhaseKind GrayMarkingPhaseForCurrentPhase(
+    const gcstats::Statistics& stats) {
+  using namespace gcstats;
+  switch (stats.currentPhaseKind()) {
+    case PhaseKind::SWEEP_MARK:
+      return PhaseKind::SWEEP_MARK_GRAY;
+    case PhaseKind::SWEEP_MARK_WEAK:
+      return PhaseKind::SWEEP_MARK_GRAY_WEAK;
+    default:
+      MOZ_CRASH("Unexpected current phase");
+  }
+}
+
+bool GCMarker::markUntilBudgetExhausted(SliceBudget& budget,
+                                        ShouldReportMarkTime reportTime) {
 #ifdef DEBUG
   MOZ_ASSERT(!strictCompartmentChecking);
   strictCompartmentChecking = true;
@@ -1800,6 +1810,12 @@ bool GCMarker::markUntilBudgetExhausted(SliceBudget& budget) {
     }
 
     if (hasGrayEntries()) {
+      mozilla::Maybe<gcstats::AutoPhase> ap;
+      if (reportTime) {
+        auto& stats = runtime()->gc.stats();
+        ap.emplace(stats, GrayMarkingPhaseForCurrentPhase(stats));
+      }
+
       AutoSetMarkColor autoSetGray(*this, MarkColor::Gray);
       do {
         processMarkStackTop(budget);
@@ -2573,7 +2589,6 @@ GCMarker::GCMarker(JSRuntime* rt)
     : JSTracer(rt, JSTracer::TracerKindTag::Marking, ExpandWeakMaps),
       stack(),
       auxStack(),
-      color(MarkColor::Black),
       mainStackColor(MarkColor::Black),
       delayedMarkingList(nullptr),
       delayedMarkingWorkAdded(false),
@@ -2588,6 +2603,7 @@ GCMarker::GCMarker(JSRuntime* rt)
       queuePos(0)
 #endif
 {
+  setMarkColorUnchecked(MarkColor::Black);
   setTraceWeakEdges(false);
 }
 
@@ -2665,34 +2681,22 @@ void GCMarker::reset() {
 }
 
 void GCMarker::setMarkColor(gc::MarkColor newColor) {
-  if (color == newColor) {
-    return;
-  }
-  if (newColor == gc::MarkColor::Black) {
-    setMarkColorBlack();
-  } else {
-    setMarkColorGray();
+  if (color != newColor) {
+    MOZ_ASSERT(runtime()->gc.state() == State::Sweep);
+    setMarkColorUnchecked(newColor);
   }
 }
 
-void GCMarker::setMarkColorGray() {
-  MOZ_ASSERT(color == gc::MarkColor::Black);
-  MOZ_ASSERT(runtime()->gc.state() == State::Sweep);
-
-  color = gc::MarkColor::Gray;
-}
-
-void GCMarker::setMarkColorBlack() {
-  MOZ_ASSERT(color == gc::MarkColor::Gray);
-  MOZ_ASSERT(runtime()->gc.state() == State::Sweep);
-
-  color = gc::MarkColor::Black;
+void GCMarker::setMarkColorUnchecked(gc::MarkColor newColor) {
+  color = newColor;
+  currentStackPtr = &getStack(color);
 }
 
 void GCMarker::setMainStackColor(gc::MarkColor newColor) {
   if (newColor != mainStackColor) {
     MOZ_ASSERT(isMarkStackEmpty());
     mainStackColor = newColor;
+    setMarkColorUnchecked(color);
   }
 }
 
@@ -3276,11 +3280,11 @@ inline T* js::TenuringTracer::allocTenured(Zone* zone, AllocKind kind) {
 
 JSObject* js::TenuringTracer::moveToTenuredSlow(JSObject* src) {
   MOZ_ASSERT(IsInsideNursery(src));
-  MOZ_ASSERT(!src->zone()->usedByHelperThread());
+  MOZ_ASSERT(!src->nurseryZone()->usedByHelperThread());
   MOZ_ASSERT(!src->is<PlainObject>());
 
   AllocKind dstKind = src->allocKindForTenure(nursery());
-  auto dst = allocTenured<JSObject>(src->zone(), dstKind);
+  auto dst = allocTenured<JSObject>(src->nurseryZone(), dstKind);
 
   size_t srcSize = Arena::thingSize(dstKind);
   size_t dstSize = srcSize;
@@ -3345,7 +3349,7 @@ JSObject* js::TenuringTracer::moveToTenuredSlow(JSObject* src) {
   RelocationOverlay* overlay = RelocationOverlay::forwardCell(src, dst);
   insertIntoObjectFixupList(overlay);
 
-  gcTracer.tracePromoteToTenured(src, dst);
+  gcprobes::PromoteToTenured(src, dst);
   return dst;
 }
 
@@ -3354,10 +3358,10 @@ inline JSObject* js::TenuringTracer::movePlainObjectToTenured(
   // Fast path version of moveToTenuredSlow() for specialized for PlainObject.
 
   MOZ_ASSERT(IsInsideNursery(src));
-  MOZ_ASSERT(!src->zone()->usedByHelperThread());
+  MOZ_ASSERT(!src->nurseryZone()->usedByHelperThread());
 
   AllocKind dstKind = src->allocKindForTenure();
-  auto dst = allocTenured<PlainObject>(src->zone(), dstKind);
+  auto dst = allocTenured<PlainObject>(src->nurseryZone(), dstKind);
 
   size_t srcSize = Arena::thingSize(dstKind);
   tenuredSize += srcSize;
@@ -3376,7 +3380,7 @@ inline JSObject* js::TenuringTracer::movePlainObjectToTenured(
   RelocationOverlay* overlay = RelocationOverlay::forwardCell(src, dst);
   insertIntoObjectFixupList(overlay);
 
-  gcTracer.tracePromoteToTenured(src, dst);
+  gcprobes::PromoteToTenured(src, dst);
   return dst;
 }
 
@@ -3387,7 +3391,7 @@ size_t js::TenuringTracer::moveSlotsToTenured(NativeObject* dst,
     return 0;
   }
 
-  Zone* zone = src->zone();
+  Zone* zone = src->nurseryZone();
   size_t count = src->numDynamicSlots();
 
   if (!nursery().isInside(src->slots_)) {
@@ -3419,7 +3423,7 @@ size_t js::TenuringTracer::moveElementsToTenured(NativeObject* dst,
     return 0;
   }
 
-  Zone* zone = src->zone();
+  Zone* zone = src->nurseryZone();
 
   ObjectElements* srcHeader = src->getElementsHeader();
   size_t nslots = srcHeader->numAllocatedElements();
@@ -3481,10 +3485,10 @@ inline void js::TenuringTracer::insertIntoStringFixupList(
 
 JSString* js::TenuringTracer::moveToTenured(JSString* src) {
   MOZ_ASSERT(IsInsideNursery(src));
-  MOZ_ASSERT(!src->zone()->usedByHelperThread());
+  MOZ_ASSERT(!src->nurseryZone()->usedByHelperThread());
 
   AllocKind dstKind = src->getAllocKind();
-  Zone* zone = src->zone();
+  Zone* zone = src->nurseryZone();
   zone->tenuredStrings++;
 
   JSString* dst = allocTenured<JSString>(zone, dstKind);
@@ -3494,7 +3498,7 @@ JSString* js::TenuringTracer::moveToTenured(JSString* src) {
   RelocationOverlay* overlay = RelocationOverlay::forwardCell(src, dst);
   insertIntoStringFixupList(overlay);
 
-  gcTracer.tracePromoteToTenured(src, dst);
+  gcprobes::PromoteToTenured(src, dst);
   return dst;
 }
 
@@ -3507,10 +3511,10 @@ inline void js::TenuringTracer::insertIntoBigIntFixupList(
 
 JS::BigInt* js::TenuringTracer::moveToTenured(JS::BigInt* src) {
   MOZ_ASSERT(IsInsideNursery(src));
-  MOZ_ASSERT(!src->zone()->usedByHelperThread());
+  MOZ_ASSERT(!src->nurseryZone()->usedByHelperThread());
 
   AllocKind dstKind = src->getAllocKind();
-  Zone* zone = src->zone();
+  Zone* zone = src->nurseryZone();
   zone->tenuredBigInts++;
 
   JS::BigInt* dst = allocTenured<JS::BigInt>(zone, dstKind);
@@ -3520,7 +3524,7 @@ JS::BigInt* js::TenuringTracer::moveToTenured(JS::BigInt* src) {
   RelocationOverlay* overlay = RelocationOverlay::forwardCell(src, dst);
   insertIntoBigIntFixupList(overlay);
 
-  gcTracer.tracePromoteToTenured(src, dst);
+  gcprobes::PromoteToTenured(src, dst);
   return dst;
 }
 
@@ -3581,14 +3585,14 @@ size_t js::TenuringTracer::moveBigIntToTenured(JS::BigInt* dst, JS::BigInt* src,
   MOZ_ASSERT(OffsetToChunkEnd(src) >= ptrdiff_t(size));
   js_memcpy(dst, src, size);
 
-  MOZ_ASSERT(dst->zone() == src->zone());
+  MOZ_ASSERT(dst->zone() == src->nurseryZone());
 
   if (src->hasHeapDigits()) {
     size_t length = dst->digitLength();
     if (!nursery().isInside(src->heapDigits_)) {
       nursery().removeMallocedBufferDuringMinorGC(src->heapDigits_);
     } else {
-      Zone* zone = src->zone();
+      Zone* zone = src->nurseryZone();
       {
         AutoEnterOOMUnsafeRegion oomUnsafe;
         dst->heapDigits_ = zone->pod_malloc<JS::BigInt::Digit>(length);

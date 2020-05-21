@@ -24,6 +24,7 @@
 #  include "nsXULAppAPI.h"
 #endif
 #include "Tracing.h"
+#include "webaudio/blink/DenormalDisabler.h"
 
 // Use abort() instead of exception in SoundTouch.
 #define ST_NO_EXCEPTION_HANDLING 1
@@ -209,6 +210,7 @@ nsresult AudioStream::SetPlaybackRate(double aPlaybackRate) {
     return NS_ERROR_FAILURE;
   }
 
+  PROFILER_ADD_MARKER("AudioStream::SetPlaybackRate", MEDIA_PLAYBACK);
   mAudioClock.SetPlaybackRate(aPlaybackRate);
 
   if (mAudioClock.GetPreservesPitch()) {
@@ -320,6 +322,7 @@ nsresult AudioStream::Init(uint32_t aNumChannels,
 
 nsresult AudioStream::OpenCubeb(cubeb* aContext, cubeb_stream_params& aParams,
                                 TimeStamp aStartTime, bool aIsFirst) {
+  AUTO_PROFILER_LABEL("AudioStream::OpenCubeb", MEDIA_CUBEB);
   TRACE();
   MOZ_ASSERT(aContext);
 
@@ -350,6 +353,7 @@ nsresult AudioStream::OpenCubeb(cubeb* aContext, cubeb_stream_params& aParams,
 }
 
 void AudioStream::SetVolume(double aVolume) {
+  AUTO_PROFILER_LABEL("AudioStream::SetVolume", MEDIA_CUBEB);
   TRACE();
   MOZ_ASSERT(aVolume >= 0.0 && aVolume <= 1.0, "Invalid volume");
 
@@ -369,6 +373,7 @@ void AudioStream::SetVolume(double aVolume) {
 }
 
 nsresult AudioStream::Start() {
+  AUTO_PROFILER_LABEL("AudioStream::Start", MEDIA_CUBEB);
   TRACE();
   MonitorAutoLock mon(mMonitor);
   MOZ_ASSERT(mState == INITIALIZED);
@@ -387,6 +392,7 @@ nsresult AudioStream::Start() {
 }
 
 void AudioStream::Pause() {
+  AUTO_PROFILER_LABEL("AudioStream::Pause", MEDIA_CUBEB);
   TRACE();
   MonitorAutoLock mon(mMonitor);
   MOZ_ASSERT(mState != INITIALIZED, "Must be Start()ed.");
@@ -408,6 +414,7 @@ void AudioStream::Pause() {
 }
 
 void AudioStream::Resume() {
+  AUTO_PROFILER_LABEL("AudioStream::Resume", MEDIA_CUBEB);
   TRACE();
   MonitorAutoLock mon(mMonitor);
   MOZ_ASSERT(mState != INITIALIZED, "Must be Start()ed.");
@@ -429,6 +436,7 @@ void AudioStream::Resume() {
 }
 
 void AudioStream::Shutdown() {
+  AUTO_PROFILER_LABEL("AudioStream::Shutdown", MEDIA_CUBEB);
   TRACE();
   MonitorAutoLock mon(mMonitor);
   LOG("Shutdown, state %d", mState);
@@ -449,6 +457,7 @@ void AudioStream::Shutdown() {
 
 #if defined(XP_WIN)
 void AudioStream::ResetDefaultDevice() {
+  AUTO_PROFILER_LABEL("AudioStream::ResetDefaultDevice", MEDIA_CUBEB);
   TRACE();
   MonitorAutoLock mon(mMonitor);
   if (mState != STARTED && mState != STOPPED) {
@@ -478,6 +487,7 @@ int64_t AudioStream::GetPositionInFrames() {
 }
 
 int64_t AudioStream::GetPositionInFramesUnlocked() {
+  AUTO_PROFILER_LABEL("AudioStream::GetPositionInFramesUnlocked", MEDIA_CUBEB);
   mMonitor.AssertCurrentThreadOwns();
 
   if (mState == ERRORED) {
@@ -591,6 +601,8 @@ void AudioStream::GetTimeStretched(AudioBufferWriter& aWriter) {
 }
 
 long AudioStream::DataCallback(void* aBuffer, long aFrames) {
+  WebCore::DenormalDisabler disabler;
+
   TRACE_AUDIO_CALLBACK_BUDGET(aFrames, mAudioClock.GetInputRate());
   TRACE();
   MonitorAutoLock mon(mMonitor);

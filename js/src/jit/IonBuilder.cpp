@@ -2355,9 +2355,6 @@ AbortReasonOr<Ok> IonBuilder::inspectOpcode(JSOp op, bool* restarted) {
     case JSOp::CheckIsObj:
       return jsop_checkisobj(GET_UINT8(pc));
 
-    case JSOp::CheckIsCallable:
-      return jsop_checkiscallable(GET_UINT8(pc));
-
     case JSOp::CheckObjCoercible:
       return jsop_checkobjcoercible();
 
@@ -3414,8 +3411,9 @@ AbortReasonOr<Ok> IonBuilder::visitTableSwitch() {
 void IonBuilder::pushConstant(const Value& v) { current->push(constant(v)); }
 
 static inline bool SimpleBitOpOperand(MDefinition* op) {
-  return !op->mightBeType(MIRType::Object) &&
-         !op->mightBeType(MIRType::Symbol) && !op->mightBeType(MIRType::BigInt);
+  return op->definitelyType({MIRType::Undefined, MIRType::Null,
+                             MIRType::Boolean, MIRType::Int32, MIRType::Double,
+                             MIRType::Float32, MIRType::String});
 }
 
 AbortReasonOr<Ok> IonBuilder::bitnotTrySpecialized(bool* emitted,
@@ -3565,14 +3563,16 @@ AbortReasonOr<Ok> IonBuilder::binaryArithTryConcat(bool* emitted, JSOp op,
 
   // The non-string input (if present) should be atleast easily coercible to
   // string.
+  std::initializer_list<MIRType> coercibleToString = {
+      MIRType::Undefined, MIRType::Null,    MIRType::Boolean, MIRType::Int32,
+      MIRType::Double,    MIRType::Float32, MIRType::String,  MIRType::BigInt,
+  };
   if (right->type() != MIRType::String &&
-      (right->mightBeType(MIRType::Symbol) ||
-       right->mightBeType(MIRType::Object) || right->mightBeMagicType())) {
+      !right->definitelyType(coercibleToString)) {
     return Ok();
   }
   if (left->type() != MIRType::String &&
-      (left->mightBeType(MIRType::Symbol) ||
-       left->mightBeType(MIRType::Object) || left->mightBeMagicType())) {
+      !left->definitelyType(coercibleToString)) {
     return Ok();
   }
 
@@ -3643,13 +3643,8 @@ MIRType IonBuilder::binaryArithNumberSpecialization(MDefinition* left,
 AbortReasonOr<MBinaryArithInstruction*> IonBuilder::binaryArithEmitSpecialized(
     MDefinition::Opcode op, MIRType specialization, MDefinition* left,
     MDefinition* right) {
-  MBinaryArithInstruction* ins =
+  auto* ins =
       MBinaryArithInstruction::New(alloc(), op, left, right, specialization);
-
-  if (op == MDefinition::Opcode::Add || op == MDefinition::Opcode::Mul) {
-    ins->setCommutative();
-  }
-
   current->add(ins);
   current->push(ins);
 
@@ -5205,7 +5200,7 @@ AbortReasonOr<MInstruction*> IonBuilder::createCallObject(MDefinition* callee,
         current->add(slots);
       }
       current->add(
-          MStoreSlot::New(alloc(), slots, slot - numFixedSlots, param));
+          MStoreDynamicSlot::New(alloc(), slots, slot - numFixedSlots, param));
     } else {
       current->add(MStoreFixedSlot::New(alloc(), callObj, slot, param));
     }
@@ -5379,13 +5374,14 @@ MDefinition* IonBuilder::createThisScriptedBaseline(MDefinition* callee) {
   }
 
   // Shape guard.
-  callee = addShapeGuard(callee, target->lastProperty(), Bailout_ShapeGuard);
+  callee = addShapeGuard(callee, target->lastProperty());
 
   // Guard callee.prototype == proto.
   MOZ_ASSERT(shape->numFixedSlots() == 0, "Must be a dynamic slot");
   MSlots* slots = MSlots::New(alloc(), callee);
   current->add(slots);
-  MLoadSlot* prototype = MLoadSlot::New(alloc(), slots, shape->slot());
+  MLoadDynamicSlot* prototype =
+      MLoadDynamicSlot::New(alloc(), slots, shape->slot());
   current->add(prototype);
   MDefinition* protoConst = constant(ObjectValue(*proto));
   MGuardObjectIdentity* guard =
@@ -6557,10 +6553,9 @@ AbortReasonOr<Ok> IonBuilder::compareTryCharacter(bool* emitted, JSOp op,
 static bool ObjectOrSimplePrimitive(MDefinition* op) {
   // Return true if op is either undefined/null/boolean/int32/symbol or an
   // object.
-  return !op->mightBeType(MIRType::String) &&
-         !op->mightBeType(MIRType::BigInt) &&
-         !op->mightBeType(MIRType::Double) &&
-         !op->mightBeType(MIRType::Float32) && !op->mightBeMagicType();
+  return op->definitelyType({MIRType::Undefined, MIRType::Null,
+                             MIRType::Boolean, MIRType::Int32, MIRType::Symbol,
+                             MIRType::Object});
 }
 
 AbortReasonOr<Ok> IonBuilder::compareTrySpecialized(bool* emitted, JSOp op,
@@ -9076,7 +9071,7 @@ void IonBuilder::addTypedArrayLengthAndData(MDefinition* obj,
     return;
   }
 
-  *length = MTypedArrayLength::New(alloc(), obj);
+  *length = MArrayBufferViewLength::New(alloc(), obj);
   current->add(*length);
 
   if (index) {
@@ -9084,9 +9079,44 @@ void IonBuilder::addTypedArrayLengthAndData(MDefinition* obj,
       *index = addBoundsCheck(*index, *length);
     }
 
-    *elements = MTypedArrayElements::New(alloc(), obj);
+    *elements = MArrayBufferViewElements::New(alloc(), obj);
     current->add(*elements);
   }
+}
+
+void IonBuilder::addDataViewData(MDefinition* obj, Scalar::Type type,
+                                 MDefinition** index, MInstruction** elements) {
+  MInstruction* length = MArrayBufferViewLength::New(alloc(), obj);
+  current->add(length);
+
+  // Adjust the length to account for accesses near the end of the dataview.
+  if (size_t byteSize = Scalar::byteSize(type); byteSize > 1) {
+    // To ensure |0 <= index && index + byteSize <= length|, we can either emit
+    // |BoundsCheck(index, length)| followed by
+    // |BoundsCheck(index + (byteSize - 1), length)|, or alternatively emit
+    // |BoundsCheck(index, Max(length - (byteSize - 1), 0))|. The latter should
+    // result in faster code when LICM moves the length adjustment and also
+    // ensures Spectre index masking occurs after all bounds checks.
+
+    auto* byteSizeMinusOne = MConstant::New(alloc(), Int32Value(byteSize - 1));
+    current->add(byteSizeMinusOne);
+
+    length = MSub::New(alloc(), length, byteSizeMinusOne, MIRType::Int32);
+    length->toSub()->setTruncateKind(MDefinition::Truncate);
+    current->add(length);
+
+    // |length| mustn't be negative for MBoundsCheck.
+    auto* zero = MConstant::New(alloc(), Int32Value(0));
+    current->add(zero);
+
+    length = MMinMax::New(alloc(), length, zero, MIRType::Int32, true);
+    current->add(length);
+  }
+
+  *index = addBoundsCheck(*index, length);
+
+  *elements = MArrayBufferViewElements::New(alloc(), obj);
+  current->add(*elements);
 }
 
 MInstruction* IonBuilder::addTypedArrayByteOffset(MDefinition* obj) {
@@ -9097,7 +9127,7 @@ MInstruction* IonBuilder::addTypedArrayByteOffset(MDefinition* obj) {
     int32_t offset = AssertedCast<int32_t>(tarr->byteOffset());
     byteOffset = MConstant::New(alloc(), Int32Value(offset));
   } else {
-    byteOffset = MTypedArrayByteOffset::New(alloc(), obj);
+    byteOffset = MArrayBufferViewByteOffset::New(alloc(), obj);
   }
 
   current->add(byteOffset);
@@ -9134,7 +9164,7 @@ AbortReasonOr<Ok> IonBuilder::jsop_getelem_typed(MDefinition* obj,
     // the array type to determine the result type, even if the opcode has
     // never executed. The known pushed type is only used to distinguish
     // uint32 reads that may produce either doubles or integers.
-    MIRType knownType = MIRTypeForTypedArrayRead(arrayType, allowDouble);
+    MIRType knownType = MIRTypeForArrayBufferViewRead(arrayType, allowDouble);
 
     // Get length, bounds-check, then get elements, and add all instructions.
     MInstruction* length;
@@ -9177,6 +9207,12 @@ AbortReasonOr<Ok> IonBuilder::jsop_getelem_typed(MDefinition* obj,
       case Scalar::Float32:
       case Scalar::Float64:
         if (allowDouble) {
+          barrier = BarrierKind::NoBarrier;
+        }
+        break;
+      case Scalar::BigInt64:
+      case Scalar::BigUint64:
+        if (types->hasType(TypeSet::BigIntType())) {
           barrier = BarrierKind::NoBarrier;
         }
         break;
@@ -9562,10 +9598,7 @@ AbortReasonOr<Ok> IonBuilder::jsop_setelem_typed(Scalar::Type arrayType,
     ins = MStoreTypedArrayElementHole::New(alloc(), elements, length, id,
                                            toWrite, arrayType);
   } else {
-    MStoreUnboxedScalar* store =
-        MStoreUnboxedScalar::New(alloc(), elements, id, toWrite, arrayType,
-                                 MStoreUnboxedScalar::TruncateInput);
-    ins = store;
+    ins = MStoreUnboxedScalar::New(alloc(), elements, id, toWrite, arrayType);
   }
 
   current->add(ins);
@@ -9644,12 +9677,6 @@ AbortReasonOr<Ok> IonBuilder::jsop_arguments() {
 }
 
 AbortReasonOr<Ok> IonBuilder::jsop_newtarget() {
-  if (!info().funMaybeLazy()) {
-    MOZ_ASSERT(!info().script()->isForEval());
-    pushConstant(NullValue());
-    return Ok();
-  }
-
   MOZ_ASSERT(info().funMaybeLazy());
 
   if (info().funMaybeLazy()->isArrow()) {
@@ -9765,14 +9792,6 @@ AbortReasonOr<Ok> IonBuilder::jsop_checkisobj(uint8_t kind) {
   }
 
   MCheckIsObj* check = MCheckIsObj::New(alloc(), current->pop(), kind);
-  current->add(check);
-  current->push(check);
-  return Ok();
-}
-
-AbortReasonOr<Ok> IonBuilder::jsop_checkiscallable(uint8_t kind) {
-  MCheckIsCallable* check =
-      MCheckIsCallable::New(alloc(), current->pop(), kind);
   current->add(check);
   current->push(check);
   return Ok();
@@ -10122,7 +10141,7 @@ AbortReasonOr<bool> IonBuilder::testCommonGetterSetter(
   if (guardGlobal) {
     JSObject* obj = &script()->global();
     MDefinition* globalObj = constant(ObjectValue(*obj));
-    *globalGuard = addShapeGuard(globalObj, globalShape, Bailout_ShapeGuard);
+    *globalGuard = addShapeGuard(globalObj, globalShape);
   }
 
   // If the getter/setter is not configurable we don't have to guard on the
@@ -10135,8 +10154,7 @@ AbortReasonOr<bool> IonBuilder::testCommonGetterSetter(
   }
 
   MInstruction* wrapper = constant(ObjectValue(*foundProto));
-  *guard =
-      addShapeGuard(wrapper, foundProto->lastProperty(), Bailout_ShapeGuard);
+  *guard = addShapeGuard(wrapper, foundProto->lastProperty());
   return true;
 }
 
@@ -10279,7 +10297,7 @@ AbortReasonOr<Ok> IonBuilder::loadSlot(MDefinition* obj, size_t slot,
   MSlots* slots = MSlots::New(alloc(), obj);
   current->add(slots);
 
-  MLoadSlot* load = MLoadSlot::New(alloc(), slots, slot - nfixed);
+  MLoadDynamicSlot* load = MLoadDynamicSlot::New(alloc(), slots, slot - nfixed);
   current->add(load);
   current->push(load);
 
@@ -10310,7 +10328,8 @@ AbortReasonOr<Ok> IonBuilder::storeSlot(
   MSlots* slots = MSlots::New(alloc(), obj);
   current->add(slots);
 
-  MStoreSlot* store = MStoreSlot::New(alloc(), slots, slot - nfixed, value);
+  MStoreDynamicSlot* store =
+      MStoreDynamicSlot::New(alloc(), slots, slot - nfixed, value);
   current->add(store);
   current->push(value);
   if (needsBarrier) {
@@ -10738,7 +10757,7 @@ AbortReasonOr<Ok> IonBuilder::getPropTryDefiniteSlot(bool* emitted,
     MInstruction* slots = MSlots::New(alloc(), obj);
     current->add(slots);
 
-    load = MLoadSlot::New(alloc(), slots, slot - nfixed);
+    load = MLoadDynamicSlot::New(alloc(), slots, slot - nfixed);
   }
 
   if (barrier == BarrierKind::NoBarrier) {
@@ -10804,11 +10823,11 @@ MDefinition* IonBuilder::addShapeGuardsForGetterSetter(
 
   if (isOwnProperty) {
     MOZ_ASSERT(receivers.empty());
-    return addShapeGuard(obj, holderShape, Bailout_ShapeGuard);
+    return addShapeGuard(obj, holderShape);
   }
 
   MDefinition* holderDef = constant(ObjectValue(*holder));
-  addShapeGuard(holderDef, holderShape, Bailout_ShapeGuard);
+  addShapeGuard(holderDef, holderShape);
 
   return addGuardReceiverPolymorphic(obj, receivers);
 }
@@ -11053,7 +11072,7 @@ AbortReasonOr<Ok> IonBuilder::getPropTryInlineAccess(bool* emitted,
       // Monomorphic load from a native object.
       spew("Inlining monomorphic native GETPROP");
 
-      obj = addShapeGuard(obj, receivers[0].getShape(), Bailout_ShapeGuard);
+      obj = addShapeGuard(obj, receivers[0].getShape());
 
       Shape* shape = receivers[0].getShape()->searchLinear(NameToId(name));
       MOZ_ASSERT(shape);
@@ -11146,7 +11165,7 @@ AbortReasonOr<Ok> IonBuilder::getPropTryInlineProtoAccess(
   // Guard on the holder's shape.
   MInstruction* holderDef = constant(ObjectValue(*holder));
   Shape* holderShape = holder->as<NativeObject>().shape();
-  holderDef = addShapeGuard(holderDef, holderShape, Bailout_ShapeGuard);
+  holderDef = addShapeGuard(holderDef, holderShape);
 
   Shape* propShape = holderShape->searchLinear(NameToId(name));
   MOZ_ASSERT(propShape);
@@ -11596,9 +11615,9 @@ AbortReasonOr<Ok> IonBuilder::setPropTryDefiniteSlot(bool* emitted,
     MInstruction* slots = MSlots::New(alloc(), obj);
     current->add(slots);
 
-    store = MStoreSlot::New(alloc(), slots, slot - nfixed, value);
+    store = MStoreDynamicSlot::New(alloc(), slots, slot - nfixed, value);
     if (writeBarrier) {
-      store->toStoreSlot()->setNeedsBarrier();
+      store->toStoreDynamicSlot()->setNeedsBarrier();
     }
   }
 
@@ -11634,7 +11653,7 @@ AbortReasonOr<Ok> IonBuilder::setPropTryInlineAccess(
       // Monomorphic store to a native object.
       spew("Inlining monomorphic native SETPROP");
 
-      obj = addShapeGuard(obj, receivers[0].getShape(), Bailout_ShapeGuard);
+      obj = addShapeGuard(obj, receivers[0].getShape());
 
       Shape* shape = receivers[0].getShape()->searchLinear(NameToId(name));
       MOZ_ASSERT(shape);
@@ -12220,7 +12239,7 @@ MDefinition* IonBuilder::getAliasedVar(EnvironmentCoordinate ec) {
     current->add(slots);
 
     uint32_t slot = EnvironmentObject::nonExtensibleDynamicSlotIndex(ec);
-    load = MLoadSlot::New(alloc(), slots, slot);
+    load = MLoadDynamicSlot::New(alloc(), slots, slot);
   }
 
   current->add(load);
@@ -12251,7 +12270,7 @@ AbortReasonOr<Ok> IonBuilder::jsop_setaliasedvar(EnvironmentCoordinate ec) {
     current->add(slots);
 
     uint32_t slot = EnvironmentObject::nonExtensibleDynamicSlotIndex(ec);
-    store = MStoreSlot::NewBarriered(alloc(), slots, slot, rval);
+    store = MStoreDynamicSlot::NewBarriered(alloc(), slots, slot, rval);
   }
 
   current->add(store);
@@ -12613,13 +12632,13 @@ AbortReasonOr<Ok> IonBuilder::jsop_instanceof() {
     }
 
     // Shape guard.
-    rhs = addShapeGuard(rhs, shape, Bailout_ShapeGuard);
+    rhs = addShapeGuard(rhs, shape);
 
     // Guard .prototype == protoObject.
     MOZ_ASSERT(shape->numFixedSlots() == 0, "Must be a dynamic slot");
     MSlots* slots = MSlots::New(alloc(), rhs);
     current->add(slots);
-    MLoadSlot* prototype = MLoadSlot::New(alloc(), slots, slot);
+    MLoadDynamicSlot* prototype = MLoadDynamicSlot::New(alloc(), slots, slot);
     current->add(prototype);
     MConstant* protoConst =
         MConstant::NewConstraintlessObject(alloc(), protoObject);
@@ -12889,9 +12908,8 @@ MInstruction* IonBuilder::addBoundsCheck(MDefinition* index,
   return check;
 }
 
-MInstruction* IonBuilder::addShapeGuard(MDefinition* obj, Shape* const shape,
-                                        BailoutKind bailoutKind) {
-  MGuardShape* guard = MGuardShape::New(alloc(), obj, shape, bailoutKind);
+MInstruction* IonBuilder::addShapeGuard(MDefinition* obj, Shape* const shape) {
+  MGuardShape* guard = MGuardShape::New(alloc(), obj, shape);
   current->add(guard);
 
   // If a shape guard failed in the past, don't optimize shape guard.
@@ -12926,7 +12944,7 @@ MInstruction* IonBuilder::addGuardReceiverPolymorphic(
   if (receivers.length() == 1) {
     if (!receivers[0].getGroup()) {
       // Monomorphic guard on a native object.
-      return addShapeGuard(obj, receivers[0].getShape(), Bailout_ShapeGuard);
+      return addShapeGuard(obj, receivers[0].getShape());
     }
   }
 

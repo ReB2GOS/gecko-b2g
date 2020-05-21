@@ -10,7 +10,8 @@ use std::ops::Deref;
 use std::io;
 
 fn newline<W>(out: &mut W, depth: usize)
-    where W: io::Write
+where
+    W: io::Write,
 {
     writeln!(out, "").expect("failed to dump");
     for i in 0..depth {
@@ -19,16 +20,28 @@ fn newline<W>(out: &mut W, depth: usize)
 }
 
 pub trait ASTDump {
-    fn dump_with_atoms<W>(&self, out: &mut W, atoms: &SourceAtomSet, slices: &SourceSliceList)
-        where W: io::Write
+    fn dump_with_atoms<W>(
+        &self,
+        out: &mut W,
+        atoms: &SourceAtomSet,
+        slices: &SourceSliceList
+    )
+    where
+        W: io::Write,
     {
         self.dump_with_atoms_at(out, atoms, slices, 0);
         writeln!(out, "").expect("failed to dump");
     }
-    fn dump_with_atoms_at<W>(&self, out: &mut W, atoms: &SourceAtomSet, slices: &SourceSliceList, depth: usize)
-        where W: io::Write;
-}
 
+    fn dump_with_atoms_at<W>(
+        &self,
+        out: &mut W,
+        atoms: &SourceAtomSet,
+        slices: &SourceSliceList,
+        depth: usize,
+    )
+    where W: io::Write;
+}
 impl<'alloc> ASTDump for Argument<'alloc> {
     fn dump_with_atoms_at<W>(&self, out: &mut W, atoms: &SourceAtomSet, slices: &SourceSliceList, depth: usize)
         where W: io::Write
@@ -127,6 +140,15 @@ impl<'alloc> ASTDump for CompoundAssignmentOperator {
         where W: io::Write
     {
         match self {
+            CompoundAssignmentOperator::LogicalOr { .. } => {
+                write!(out, "LogicalOr").expect("failed to dump");
+            }
+            CompoundAssignmentOperator::LogicalAnd { .. } => {
+                write!(out, "LogicalAnd").expect("failed to dump");
+            }
+            CompoundAssignmentOperator::Coalesce { .. } => {
+                write!(out, "Coalesce").expect("failed to dump");
+            }
             CompoundAssignmentOperator::Add { .. } => {
                 write!(out, "Add").expect("failed to dump");
             }
@@ -2084,10 +2106,18 @@ impl<'alloc> ASTDump for CoverParenthesized<'alloc> {
 }
 
 impl<'alloc, T> ASTDump for arena::Vec<'alloc, T>
-    where T: ASTDump
+where
+    T: ASTDump,
 {
-    fn dump_with_atoms_at<W>(&self, out: &mut W, atoms: &SourceAtomSet, slices: &SourceSliceList, depth: usize)
-        where W: io::Write
+    fn dump_with_atoms_at<W>(
+        &self,
+        out: &mut W,
+        atoms: &SourceAtomSet,
+        slices: &SourceSliceList,
+        depth: usize,
+    )
+    where
+        W: io::Write,
     {
         write!(out, "[").expect("failed to dump");
         if self.len() > 0 {
@@ -2102,10 +2132,18 @@ impl<'alloc, T> ASTDump for arena::Vec<'alloc, T>
 }
 
 impl<T> ASTDump for Option<T>
-    where T: ASTDump
+where
+    T: ASTDump,
 {
-    fn dump_with_atoms_at<W>(&self, out: &mut W, atoms: &SourceAtomSet, slices: &SourceSliceList, depth: usize)
-        where W: io::Write
+    fn dump_with_atoms_at<W>(
+        &self,
+        out: &mut W,
+        atoms: &SourceAtomSet,
+        slices: &SourceSliceList,
+        depth: usize,
+    )
+    where
+        W: io::Write,
     {
         match self {
             Some(v) => {
@@ -2119,18 +2157,33 @@ impl<T> ASTDump for Option<T>
 }
 
 impl<'alloc, T> ASTDump for arena::Box<'alloc, T>
-    where T: ASTDump
+where
+    T: ASTDump,
 {
-    fn dump_with_atoms_at<W>(&self, out: &mut W, atoms: &SourceAtomSet, slices: &SourceSliceList, depth: usize)
-        where W: io::Write
+    fn dump_with_atoms_at<W>(
+        &self,
+        out: &mut W,
+        atoms: &SourceAtomSet,
+        slices: &SourceSliceList,
+        depth: usize,
+    )
+    where
+        W: io::Write,
     {
         self.deref().dump_with_atoms_at(out, atoms, slices, depth);
     }
 }
 
 impl ASTDump for bool {
-    fn dump_with_atoms_at<W>(&self, out: &mut W, atoms: &SourceAtomSet, slices: &SourceSliceList, depth: usize)
-        where W: io::Write
+    fn dump_with_atoms_at<W>(
+        &self,
+        out: &mut W,
+        atoms: &SourceAtomSet,
+        slices: &SourceSliceList,
+        depth: usize,
+    )
+    where
+        W: io::Write,
     {
         if *self {
             write!(out, "true").expect("failed to dump");
@@ -2141,22 +2194,47 @@ impl ASTDump for bool {
 }
 
 impl ASTDump for SourceAtomSetIndex {
-    fn dump_with_atoms_at<W>(&self, out: &mut W, atoms: &SourceAtomSet, slices: &SourceSliceList, depth: usize)
-        where W: io::Write
+    fn dump_with_atoms_at<W>(
+        &self,
+        out: &mut W,
+        atoms: &SourceAtomSet,
+        slices: &SourceSliceList,
+        depth: usize,
+    )
+    where
+        W: io::Write,
     {
-        write!(out, "{:?}", atoms.get(self.clone())).expect("failed to dump");
+        write!(out, "{:?}", atoms.get(self.clone()))
+            .expect("failed to dump");
     }
 }
+
 impl ASTDump for SourceSliceIndex {
-    fn dump_with_atoms_at<W>(&self, out: &mut W, atoms: &SourceAtomSet, slices: &SourceSliceList, depth: usize)
-        where W: io::Write
+    fn dump_with_atoms_at<W>(
+        &self,
+        out: &mut W,
+        atoms: &SourceAtomSet,
+        slices: &SourceSliceList,
+        depth: usize,
+    )
+    where
+        W: io::Write,
     {
-        write!(out, "{:?}", slices.get(self.clone())).expect("failed to dump");
+        write!(out, "{:?}", slices.get(self.clone()))
+            .expect("failed to dump");
     }
 }
+
 impl ASTDump for f64 {
-    fn dump_with_atoms_at<W>(&self, out: &mut W, atoms: &SourceAtomSet, slices: &SourceSliceList, depth: usize)
-        where W: io::Write
+    fn dump_with_atoms_at<W>(
+        &self,
+        out: &mut W,
+        atoms: &SourceAtomSet,
+        slices: &SourceSliceList,
+        depth: usize,
+    )
+    where
+        W: io::Write,
     {
         write!(out, "{}", self).expect("failed to dump");
     }

@@ -214,8 +214,8 @@ textarea::-moz-text-control-preview {
   white-space: pre-wrap !important;
 }
 
-input:-moz-read-write,
-textarea:-moz-read-write {
+input:read-write,
+textarea:read-write {
   -moz-user-modify: read-write !important;
 }
 
@@ -470,10 +470,6 @@ input[type="image"]:disabled {
   cursor: unset;
 }
 
-input[type="image"]:-moz-focusring {
-  /* Don't specify the outline-color, we should always use initial value. */
-  outline: 1px dotted;
-}
 
 /* file selector */
 input[type="file"] {
@@ -562,15 +558,15 @@ input[type="checkbox"]:disabled:hover:active {
   cursor: unset;
 }
 
-% On Mac, the native theme takes care of this.
-% See nsNativeThemeCocoa::ThemeDrawsFocusForWidget.
-%ifndef XP_MACOSX
-input[type="checkbox"]:-moz-focusring,
-input[type="radio"]:-moz-focusring {
-  /* Don't specify the outline-color, we should always use initial value. */
-  outline: 1px dotted;
+input:not([type="file"]):not([type="image"]):-moz-focusring,
+select:-moz-focusring,
+button:-moz-focusring,
+textarea:-moz-focusring {
+  /* These elements can handle outline themselves when themed, so we use
+   * outline-style: auto and skip rendering the outline only when themed and
+   * the theme allows so */
+  outline-style: auto;
 }
-%endif
 
 input[type="search"] {
   box-sizing: border-box;
@@ -878,16 +874,6 @@ input[type=range] {
 }
 
 /**
- * Ideally we'd also require :-moz-focusring here, but that doesn't currently
- * work. Instead we only use the -moz-focus-outer border style if
- * NS_EVENT_STATE_FOCUSRING is set (the check is in
- * nsRangeFrame::BuildDisplayList).
- */
-input[type=range]::-moz-focus-outer {
-  border: 1px dotted black;
-}
-
-/**
  * Layout handles positioning of this pseudo-element specially (so that content
  * authors can concentrate on styling the thumb without worrying about the
  * logic to position it). Specifically the 'margin', 'top' and 'left'
@@ -1065,8 +1051,8 @@ input[type="time"] {
 
 input[type="date"]:disabled,
 input[type="time"]:disabled,
-input[type="date"]:-moz-read-only,
-input[type="time"]:-moz-read-only {
+input[type="date"]:read-only,
+input[type="time"]:read-only {
   color: GrayText;
 }
 

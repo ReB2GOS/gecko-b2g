@@ -5,16 +5,7 @@
 from __future__ import absolute_import, print_function, unicode_literals
 
 from mozboot.base import BaseBootstrapper
-from mozboot.linux_common import (
-    ClangStaticAnalysisInstall,
-    FixStacksInstall,
-    LucetcInstall,
-    NasmInstall,
-    NodeInstall,
-    SccacheInstall,
-    StyloInstall,
-    WasiSysrootInstall,
-)
+from mozboot.linux_common import LinuxBootstrapper
 
 
 MERCURIAL_INSTALL_PROMPT = '''
@@ -35,14 +26,7 @@ Your choice: '''
 
 
 class DebianBootstrapper(
-        ClangStaticAnalysisInstall,
-        FixStacksInstall,
-        LucetcInstall,
-        NasmInstall,
-        NodeInstall,
-        SccacheInstall,
-        StyloInstall,
-        WasiSysrootInstall,
+        LinuxBootstrapper,
         BaseBootstrapper):
 
     # These are common packages for all Debian-derived distros (such as
@@ -207,4 +191,4 @@ class DebianBootstrapper(
 
         # pip.
         assert res == 1
-        self.run_as_root(['pip', 'install', '--upgrade', 'Mercurial'])
+        self.run_as_root(['pip3', 'install', '--upgrade', 'Mercurial'])

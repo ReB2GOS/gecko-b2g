@@ -20,6 +20,7 @@
 #include "mozilla/StartupTimeline.h"
 #include "mozilla/StaticPrefs_toolkit.h"
 #include "mozilla/LateWriteChecks.h"
+#include "mozilla/XULStore.h"
 #include "nsAppDirectoryServiceDefs.h"
 #include "nsAppRunner.h"
 #include "nsDirectoryServiceUtils.h"
@@ -142,11 +143,18 @@ void AppShutdown::Init(AppShutdownMode aMode) {
 }
 
 void AppShutdown::MaybeFastShutdown(ShutdownPhase aPhase) {
-  if (aPhase == sFastShutdownPhase) {
-    StopLateWriteChecks();
+  // For writes which we want to ensure are recorded, we don't want to trip
+  // the late write checking code. Anything that writes to disk and which
+  // we don't want to skip should be listed out explicitly in this section.
+  if (aPhase == sFastShutdownPhase || aPhase == sLateWriteChecksPhase) {
     if (auto* cache = scache::StartupCache::GetSingletonNoInit()) {
       cache->EnsureShutdownWriteComplete();
     }
+    DebugOnly<nsresult> rv = XULStore::Shutdown();
+    NS_ASSERTION(NS_SUCCEEDED(rv), "XULStore::Shutdown() failed.");
+  }
+  if (aPhase == sFastShutdownPhase) {
+    StopLateWriteChecks();
     RecordShutdownEndTimeStamp();
     MaybeDoRestart();
 

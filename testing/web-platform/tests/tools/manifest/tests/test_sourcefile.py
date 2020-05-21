@@ -107,8 +107,8 @@ def test_name_is_visual(rel_path):
     "css21/floats/floats-placement-vertical-004-ref2.xht",
     "css21/box/rtl-linebreak-notref1.xht",
     "css21/box/rtl-linebreak-notref2.xht",
-    "2dcontext/drawing-images-to-the-canvas/drawimage_html_image_5_ref.html",
-    "2dcontext/line-styles/lineto_ref.html",
+    "html/canvas/element/drawing-images-to-the-canvas/drawimage_html_image_5_ref.html",
+    "html/canvas/element/line-styles/lineto_ref.html",
     "html/rendering/non-replaced-elements/the-fieldset-element-0/ref.html"
 ])
 def test_name_is_reference(rel_path):
@@ -176,7 +176,7 @@ importScripts('/resources/testharness.js')
 test()"""
 
     metadata = list(read_script_metadata(BytesIO(contents), js_meta_re))
-    assert metadata == [(b"timeout", b"long")]
+    assert metadata == [("timeout", "long")]
 
     s = create("html/test.worker.js", contents=contents)
     assert s.name_is_worker
@@ -193,7 +193,7 @@ def test_window_long_timeout():
 test()"""
 
     metadata = list(read_script_metadata(BytesIO(contents), js_meta_re))
-    assert metadata == [(b"timeout", b"long")]
+    assert metadata == [("timeout", "long")]
 
     s = create("html/test.window.js", contents=contents)
     assert s.name_is_window
@@ -272,7 +272,7 @@ def test_python_long_timeout():
 
     metadata = list(read_script_metadata(BytesIO(contents),
                                          python_meta_re))
-    assert metadata == [(b"timeout", b"long")]
+    assert metadata == [("timeout", "long")]
 
     s = create("webdriver/test.py", contents=contents)
     assert s.name_is_webdriver
@@ -315,7 +315,7 @@ importScripts('/resources/testharness.js')
 test()"""
 
     metadata = list(read_script_metadata(BytesIO(contents), js_meta_re))
-    assert metadata == [(b"timeout", b"long")]
+    assert metadata == [("timeout", "long")]
 
     s = create("html/test.any.js", contents=contents)
     assert s.name_is_multi_global
@@ -328,25 +328,10 @@ test()"""
 
 
 @pytest.mark.parametrize("input,expected", [
-    (b"", {"dedicatedworker", "window"}),
-    (b"default", {"dedicatedworker", "window"}),
-    (b"!default", {}),
-    (b"!default,window", {"window"}),
-    (b"window,!default", {}),
-    (b"!default,dedicatedworker", {"dedicatedworker"}),
-    (b"dedicatedworker,!default", {}),
-    (b"!default,worker", {"dedicatedworker", "serviceworker", "sharedworker"}),
-    (b"worker,!default", {"serviceworker", "sharedworker"}),
-    (b"!dedicatedworker", {"window"}),
-    (b"!worker", {"window"}),
-    (b"!window", {"dedicatedworker"}),
-    (b"!window,worker", {"dedicatedworker", "serviceworker", "sharedworker"}),
-    (b"worker,!dedicatedworker", {"serviceworker", "sharedworker", "window"}),
-    (b"!dedicatedworker,worker", {"dedicatedworker", "serviceworker", "sharedworker", "window"}),
-    (b"worker,!sharedworker", {"dedicatedworker", "serviceworker", "window"}),
-    (b"!sharedworker,worker", {"dedicatedworker", "serviceworker", "sharedworker", "window"}),
-    (b"sharedworker", {"dedicatedworker", "sharedworker", "window"}),
-    (b"sharedworker,serviceworker", {"dedicatedworker", "serviceworker", "sharedworker", "window"}),
+    (b"window", {"window"}),
+    (b"sharedworker", {"sharedworker"}),
+    (b"sharedworker,serviceworker", {"serviceworker", "sharedworker"}),
+    (b"worker", {"dedicatedworker", "serviceworker", "sharedworker"}),
 ])
 def test_multi_global_with_custom_globals(input, expected):
     contents = b"""// META: global=%s
@@ -384,7 +369,7 @@ test()""" % input
 
 
 def test_multi_global_with_jsshell_globals():
-    contents = b"""// META: global=jsshell
+    contents = b"""// META: global=window,dedicatedworker,jsshell
 test()"""
 
     s = create("html/test.any.js", contents=contents)
@@ -452,14 +437,14 @@ test()"""
 
 
 @pytest.mark.parametrize("input,expected", [
-    (b"""//META: foo=bar\n""", [(b"foo", b"bar")]),
-    (b"""// META: foo=bar\n""", [(b"foo", b"bar")]),
-    (b"""//  META: foo=bar\n""", [(b"foo", b"bar")]),
+    (b"""//META: foo=bar\n""", [("foo", "bar")]),
+    (b"""// META: foo=bar\n""", [("foo", "bar")]),
+    (b"""//  META: foo=bar\n""", [("foo", "bar")]),
     (b"""\n// META: foo=bar\n""", []),
     (b""" // META: foo=bar\n""", []),
-    (b"""// META: foo=bar\n// META: baz=quux\n""", [(b"foo", b"bar"), (b"baz", b"quux")]),
-    (b"""// META: foo=bar\n\n// META: baz=quux\n""", [(b"foo", b"bar")]),
-    (b"""// META: foo=bar\n// Start of the test\n// META: baz=quux\n""", [(b"foo", b"bar")]),
+    (b"""// META: foo=bar\n// META: baz=quux\n""", [("foo", "bar"), ("baz", "quux")]),
+    (b"""// META: foo=bar\n\n// META: baz=quux\n""", [("foo", "bar")]),
+    (b"""// META: foo=bar\n// Start of the test\n// META: baz=quux\n""", [("foo", "bar")]),
     (b"""// META:\n""", []),
     (b"""// META: foobar\n""", []),
 ])

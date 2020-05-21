@@ -16,6 +16,7 @@ ChromeUtils.import("resource://gre/modules/NotificationDB.jsm");
 
 XPCOMUtils.defineLazyModuleGetters(this, {
   AboutNewTab: "resource:///modules/AboutNewTab.jsm",
+  AboutReaderParent: "resource:///actors/AboutReaderParent.jsm",
   AddonManager: "resource://gre/modules/AddonManager.jsm",
   AMTelemetry: "resource://gre/modules/AddonManager.jsm",
   NewTabPagePreloading: "resource:///modules/NewTabPagePreloading.jsm",
@@ -60,7 +61,6 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   PromiseUtils: "resource://gre/modules/PromiseUtils.jsm",
   // TODO (Bug 1529552): Remove once old urlbar code goes away.
   ReaderMode: "resource://gre/modules/ReaderMode.jsm",
-  ReaderParent: "resource:///modules/ReaderParent.jsm",
   RFPHelper: "resource://gre/modules/RFPHelper.jsm",
   SafeBrowsing: "resource://gre/modules/SafeBrowsing.jsm",
   Sanitizer: "resource:///modules/Sanitizer.jsm",
@@ -245,6 +245,11 @@ XPCOMUtils.defineLazyScriptGetter(
   "A11yUtils",
   "chrome://browser/content/browser-a11yUtils.js"
 );
+XPCOMUtils.defineLazyScriptGetter(
+  this,
+  "gSharedTabWarning",
+  "chrome://browser/content/browser-webrtc.js"
+);
 
 // lazy service getters
 
@@ -416,10 +421,15 @@ XPCOMUtils.defineLazyGetter(this, "PopupNotifications", () => {
     // We also have to hide notifications explicitly when the window is
     // minimized because of the effects of the "noautohide" attribute on Linux.
     // This can be removed once bug 545265 and bug 1320361 are fixed.
+    // Hide popup notifications when system tab prompts are shown so they
+    // don't cover up the prompt.
     let shouldSuppress = () => {
       return (
         window.windowState == window.STATE_MINIMIZED ||
-        (gURLBar.getAttribute("pageproxystate") != "valid" && gURLBar.focused)
+        (gURLBar.getAttribute("pageproxystate") != "valid" &&
+          gURLBar.focused) ||
+        (gBrowser &&
+          gBrowser?.selectedBrowser.hasAttribute("tabmodalChromePromptShowing"))
       );
     };
     return new PopupNotifications(
@@ -554,6 +564,19 @@ var gBrowserAllowScriptsToCloseInitialTabs = false;
 if (AppConstants.platform != "macosx") {
   var gEditUIVisible = true;
 }
+
+Object.defineProperty(this, "gReduceMotion", {
+  enumerable: true,
+  get() {
+    return typeof gReduceMotionOverride == "boolean"
+      ? gReduceMotionOverride
+      : gReduceMotionSetting;
+  },
+});
+// Reduce motion during startup. The setting will be reset later.
+let gReduceMotionSetting = true;
+// This is for tests to set.
+var gReduceMotionOverride;
 
 // Smart getter for the findbar.  If you don't wish to force the creation of
 // the findbar, check gFindBarInitialized first.
@@ -1274,7 +1297,7 @@ var gKeywordURIFixup = {
     // Normalize out a single trailing dot - NB: not using endsWith/lastIndexOf
     // because we need to be sure this last dot is the *only* dot, too.
     // More generally, this is used for the pref and should stay in sync with
-    // the code in nsDefaultURIFixup::KeywordURIFixup .
+    // the code in URIFixup::KeywordURIFixup .
     if (asciiHost.indexOf(".") == asciiHost.length - 1) {
       asciiHost = asciiHost.slice(0, -1);
     }
@@ -1393,11 +1416,12 @@ var gKeywordURIFixup = {
   observe(fixupInfo, topic, data) {
     fixupInfo.QueryInterface(Ci.nsIURIFixupInfo);
 
-    if (!fixupInfo.consumer || fixupInfo.consumer.ownerGlobal != window) {
+    let browser = fixupInfo.consumer?.top?.embedderElement;
+    if (!browser || browser.ownerGlobal != window) {
       return;
     }
 
-    this.check(fixupInfo.consumer, fixupInfo);
+    this.check(browser, fixupInfo);
   },
 
   receiveMessage({ target: browser, data: fixupInfo }) {
@@ -1767,8 +1791,9 @@ var gBrowserInit = {
 
     BrowserWindowTracker.track(window);
 
-    gNavToolbox.palette = document.getElementById("BrowserToolbarPalette");
-    gNavToolbox.palette.remove();
+    gNavToolbox.palette = document.getElementById(
+      "BrowserToolbarPalette"
+    ).content;
     let areas = CustomizableUI.areas;
     areas.splice(areas.indexOf(CustomizableUI.AREA_FIXED_OVERFLOW_PANEL), 1);
     for (let area of areas) {
@@ -2250,12 +2275,15 @@ var gBrowserInit = {
     });
 
     scheduleIdleTask(() => {
-      // Initialize the all tabs menu
-      gTabsPanel.init();
-    });
-
-    scheduleIdleTask(() => {
-      CombinedStopReload.animationDisabledDuringStartup = false;
+      // Read prefers-reduced-motion setting
+      let reduceMotionQuery = window.matchMedia(
+        "(prefers-reduced-motion: reduce)"
+      );
+      function readSetting() {
+        gReduceMotionSetting = reduceMotionQuery.matches;
+      }
+      reduceMotionQuery.addListener(readSetting);
+      readSetting();
     });
 
     scheduleIdleTask(() => {
@@ -5257,7 +5285,7 @@ var XULBrowserWindow = {
     }
     Services.obs.notifyObservers(null, "touchbar-location-change", location);
     UpdateBackForwardCommands(gBrowser.webNavigation);
-    ReaderParent.updateReaderButton(gBrowser.selectedBrowser);
+    AboutReaderParent.updateReaderButton(gBrowser.selectedBrowser);
 
     if (!gMultiProcessBrowser) {
       // Bug 1108553 - Cannot rotate images with e10s
@@ -5544,8 +5572,6 @@ var LinkTargetDisplay = {
 };
 
 var CombinedStopReload = {
-  animationDisabledDuringStartup: true,
-
   // Try to initialize. Returns whether initialization was successful, which
   // may mean we had already initialized.
   ensureInitialized() {
@@ -5658,9 +5684,8 @@ var CombinedStopReload = {
       aWebProgress.isTopLevel &&
       aWebProgress.isLoadingDocument &&
       !gBrowser.tabAnimationsInProgress &&
-      !this.animationDisabledDuringStartup &&
-      this.stopReloadContainer.closest("#nav-bar-customization-target") &&
-      window.matchMedia("(prefers-reduced-motion: no-preference)").matches;
+      !gReduceMotion &&
+      this.stopReloadContainer.closest("#nav-bar-customization-target");
 
     this._cancelTransition();
     if (shouldAnimate) {
@@ -5682,10 +5707,9 @@ var CombinedStopReload = {
       aWebProgress.isTopLevel &&
       !aWebProgress.isLoadingDocument &&
       !gBrowser.tabAnimationsInProgress &&
-      !this.animationDisabledDuringStartup &&
+      !gReduceMotion &&
       this._loadTimeExceedsMinimumForAnimation() &&
-      this.stopReloadContainer.closest("#nav-bar-customization-target") &&
-      window.matchMedia("(prefers-reduced-motion: no-preference)").matches;
+      this.stopReloadContainer.closest("#nav-bar-customization-target");
 
     if (shouldAnimate) {
       BrowserUtils.setToolbarButtonHeightProperty(this.stopReloadContainer);
@@ -5864,9 +5888,13 @@ var TabsProgressListener = {
     if (aFlags & Ci.nsIWebProgressListener.LOCATION_CHANGE_SAME_DOCUMENT) {
       // Reader mode cares about history.pushState and friends.
       // FIXME: The content process should manage this directly (bug 1445351).
-      aBrowser.messageManager.sendAsyncMessage("Reader:PushState", {
-        isArticle: aBrowser.isArticle,
-      });
+      aBrowser.sendMessageToActor(
+        "Reader:PushState",
+        {
+          isArticle: aBrowser.isArticle,
+        },
+        "AboutReader"
+      );
       return;
     }
 
@@ -5993,7 +6021,7 @@ nsBrowserAccess.prototype = {
   openURI(aURI, aOpenWindowInfo, aWhere, aFlags, aTriggeringPrincipal, aCsp) {
     if (!aURI) {
       Cu.reportError("openURI should only be called with a valid URI");
-      throw Cr.NS_ERROR_FAILURE;
+      throw Components.Exception("", Cr.NS_ERROR_FAILURE);
     }
     return this.getContentWindowOrOpenURI(
       aURI,
@@ -6023,7 +6051,7 @@ nsBrowserAccess.prototype = {
         "nsBrowserAccess.openURI did not expect aOpenWindowInfo to be " +
           "passed if the context is OPEN_EXTERNAL."
       );
-      throw Cr.NS_ERROR_FAILURE;
+      throw Components.Exception("", Cr.NS_ERROR_FAILURE);
     }
 
     if (isExternal && aURI && aURI.schemeIs("chrome")) {
@@ -6832,7 +6860,7 @@ function handleLinkClick(event, href, linkNode) {
     Ci.nsIReferrerInfo
   );
   if (linkNode) {
-    referrerInfo.initWithNode(linkNode);
+    referrerInfo.initWithElement(linkNode);
   } else {
     referrerInfo.initWithDocument(doc);
   }
@@ -7979,9 +8007,7 @@ function BrowserOpenAddonsMgr(aView) {
 
     // This must be a new load, else the ping/pong would have
     // found the window above.
-    let whereToOpen =
-      window.gBrowser && gBrowser.selectedTab.isEmpty ? "current" : "tab";
-    openTrustedLinkIn("about:addons", whereToOpen);
+    switchToTabHavingURI("about:addons", true);
 
     Services.obs.addObserver(function observer(aSubject, aTopic, aData) {
       Services.obs.removeObserver(observer, aTopic);
@@ -8720,6 +8746,13 @@ var PanicButtonNotifier = {
       this.notify();
     }
   },
+  createPanelIfNeeded() {
+    // Lazy load the panic-button-success-notification panel the first time we need to display it.
+    if (!document.getElementById("panic-button-success-notification")) {
+      let template = document.getElementById("panicButtonNotificationTemplate");
+      template.replaceWith(template.content);
+    }
+  },
   notify() {
     if (!this._initialized) {
       window.PanicButtonNotifierShouldNotify = true;
@@ -8727,6 +8760,7 @@ var PanicButtonNotifier = {
     }
     // Display notification panel here...
     try {
+      this.createPanelIfNeeded();
       let popup = document.getElementById("panic-button-success-notification");
       popup.hidden = false;
       // To close the popup in 3 seconds after the popup is shown but left uninteracted.
@@ -8873,6 +8907,18 @@ TabModalPromptBox.prototype = {
     );
     browser.setAttribute("tabmodalPromptShowing", true);
 
+    // Indicate if a tab modal chrome prompt is being shown so that
+    // PopupNotifications are suppressed.
+    if (
+      args.modalType === Ci.nsIPrompt.MODAL_TYPE_TAB &&
+      !browser.hasAttribute("tabmodalChromePromptShowing")
+    ) {
+      browser.setAttribute("tabmodalChromePromptShowing", true);
+      // Notify PopupNotifications of the UI change so it hides the notification
+      // panel.
+      PopupNotifications.anchorVisibilityChange();
+    }
+
     let prompts = this.listPrompts(args.modalType);
     if (prompts.length > 1) {
       // Let's hide ourself behind the current prompt.
@@ -8890,19 +8936,16 @@ TabModalPromptBox.prototype = {
       /* Ignore exceptions for host-less URIs */
     }
     if (hostForAllowFocusCheckbox) {
-      let allowFocusRow = document.createElement("div");
-
-      let spacer = document.createElement("div");
-      allowFocusRow.appendChild(spacer);
-
+      let allowFocusRow = document.createXULElement("row");
       allowFocusCheckbox = document.createXULElement("checkbox");
+      let spacer = document.createXULElement("spacer");
+      allowFocusRow.appendChild(spacer);
       let label = gTabBrowserBundle.formatStringFromName(
         "tabs.allowTabFocusByPromptForSite",
         [hostForAllowFocusCheckbox]
       );
       allowFocusCheckbox.setAttribute("label", label);
       allowFocusRow.appendChild(allowFocusCheckbox);
-
       newPrompt.ui.rows.append(allowFocusRow);
     }
 
@@ -8918,7 +8961,8 @@ TabModalPromptBox.prototype = {
   },
 
   removePrompt(aPrompt) {
-    if (aPrompt.modalType === Ci.nsIPrompt.MODAL_TYPE_TAB) {
+    let { modalType } = aPrompt.args;
+    if (modalType === Ci.nsIPrompt.MODAL_TYPE_TAB) {
       this._tabPrompts.delete(aPrompt.element);
     } else {
       this._contentPrompts.delete(aPrompt.element);
@@ -8927,34 +8971,73 @@ TabModalPromptBox.prototype = {
     let browser = this.browser;
     aPrompt.element.remove();
 
-    let prompts = this.listPrompts(aPrompt.modalType);
+    let prompts = this.listPrompts(modalType);
     if (prompts.length) {
       let prompt = prompts[prompts.length - 1];
       prompt.element.hidden = false;
       // Because we were hidden before, this won't have been possible, so do it now:
       prompt.Dialog.setDefaultFocus();
-    } else {
+    } else if (modalType === Ci.nsIPrompt.MODAL_TYPE_TAB) {
+      // If we remove the last tab chrome prompt, also remove the browser
+      // attribute.
+      browser.removeAttribute("tabmodalChromePromptShowing");
+      // Notify PopupNotifications of the UI change so it shows the notification
+      // panel again.
+      PopupNotifications.anchorVisibilityChange();
+    }
+    // Check if all prompts are closed
+    if (!this._hasPrompts()) {
       browser.removeAttribute("tabmodalPromptShowing");
       browser.focus();
     }
   },
 
-  listPrompts(aModalType = null) {
-    // Get the nodelist, then return the TabModalPrompt instances as an array
+  /**
+   * Checks if the prompt box has prompt elements.
+   * @returns {Boolean} - true if there are prompt elements.
+   */
+  _hasPrompts() {
+    return !!this._getPromptElements().length;
+  },
+
+  /**
+   * Get list of current prompt elements.
+   * @param {Number} [aModalType] - Optionally filter by
+   * Ci.nsIPrompt.MODAL_TYPE_.
+   * @returns {NodeList} - A list of tabmodalprompt elements.
+   */
+  _getPromptElements(aModalType = null) {
     let selector = "tabmodalprompt";
-    let promptMap;
 
     if (aModalType != null) {
       if (aModalType === Ci.nsIPrompt.MODAL_TYPE_TAB) {
         selector += ".tab-prompt";
-        promptMap = this._tabPrompts;
       } else {
         selector += ".content-prompt";
+      }
+    }
+    return this.browser.parentNode.querySelectorAll(selector);
+  },
+
+  /**
+   * Get a list of all TabModalPrompt objects associated with the prompt box.
+   * @param {Number} [aModalType] - Optionally filter by
+   * Ci.nsIPrompt.MODAL_TYPE_.
+   * @returns {TabModalPrompt[]} - An array of TabModalPrompt objects.
+   */
+  listPrompts(aModalType = null) {
+    // Get the nodelist, then return the TabModalPrompt instances as an array
+    let promptMap;
+
+    if (aModalType) {
+      if (aModalType === Ci.nsIPrompt.MODAL_TYPE_TAB) {
+        promptMap = this._tabPrompts;
+      } else {
         promptMap = this._contentPrompts;
       }
     }
 
-    let elements = this.browser.parentNode.querySelectorAll(selector);
+    let elements = this._getPromptElements(aModalType);
 
     if (promptMap) {
       return [...elements].map(el => promptMap.get(el));
@@ -9023,6 +9106,8 @@ var ConfirmationHint = {
       this._panel.setAttribute("hidearrow", "true");
     }
 
+    this._panel.setAttribute("data-message-id", messageId);
+
     // The timeout value used here allows the panel to stay open for
     // 1.5s second after the text transition (duration=120ms) has finished.
     // If there is a description, we show for 4s after the text transition.
@@ -9047,7 +9132,6 @@ var ConfirmationHint = {
       { once: true }
     );
 
-    this._panel.hidden = false;
     this._panel.openPopup(anchor, {
       position: "bottomcenter topleft",
       triggerEvent: options.event,
@@ -9059,16 +9143,20 @@ var ConfirmationHint = {
       clearTimeout(this._timerID);
       this._timerID = null;
     }
-    this._panel.removeAttribute("hidearrow");
-    this._animationBox.removeAttribute("animate");
+    if (this.__panel) {
+      this._panel.removeAttribute("hidearrow");
+      this._animationBox.removeAttribute("animate");
+      this._panel.removeAttribute("data-message-id");
+    }
   },
 
   get _panel() {
-    delete this._panel;
-    return (this._panel = document.getElementById("confirmation-hint"));
+    this._ensurePanel();
+    return this.__panel;
   },
 
   get _animationBox() {
+    this._ensurePanel();
     delete this._animationBox;
     return (this._animationBox = document.getElementById(
       "confirmation-hint-checkmark-animation-container"
@@ -9076,6 +9164,7 @@ var ConfirmationHint = {
   },
 
   get _message() {
+    this._ensurePanel();
     delete this._message;
     return (this._message = document.getElementById(
       "confirmation-hint-message"
@@ -9083,10 +9172,19 @@ var ConfirmationHint = {
   },
 
   get _description() {
+    this._ensurePanel();
     delete this._description;
     return (this._description = document.getElementById(
       "confirmation-hint-description"
     ));
+  },
+
+  _ensurePanel() {
+    if (!this.__panel) {
+      let wrapper = document.getElementById("confirmation-hint-wrapper");
+      wrapper.replaceWith(wrapper.content);
+      this.__panel = document.getElementById("confirmation-hint");
+    }
   },
 };
 
@@ -9121,35 +9219,6 @@ if (AppConstants.NIGHTLY_BUILD) {
 
       newFissionWindow.hidden = gFissionBrowser;
       newNonFissionWindow.hidden = !gFissionBrowser;
-
-      if (!Cu.isInAutomation) {
-        // We don't want to display the warning in automation as it messes with many tests
-        // that rely on a specific state of the screen at the end of startup.
-        this.checkFissionWithoutWebRender();
-      }
-    },
-
-    // Display a warning if we're attempting to use Fission without WebRender
-    checkFissionWithoutWebRender() {
-      let isFissionEnabled = Services.prefs.getBoolPref("fission.autostart");
-      if (!isFissionEnabled) {
-        return;
-      }
-
-      let isWebRenderEnabled = Cc["@mozilla.org/gfx/info;1"].getService(
-        Ci.nsIGfxInfo
-      ).WebRenderEnabled;
-
-      if (isWebRenderEnabled) {
-        return;
-      }
-      // Note: Test is hardcoded in English. This is a Nightly-locked warning, so we can afford to.
-      window.gNotificationBox.appendNotification(
-        "You are running with Fission enabled but without WebRender. This combination is untested, so use at your own risk.",
-        "warning-fission-without-webrender-notification",
-        "chrome://global/skin/icons/question-16.png",
-        window.gNotificationBox.PRIORITY_WARNING_LOW
-      );
     },
   };
 }

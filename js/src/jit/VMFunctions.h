@@ -13,6 +13,7 @@
 #include "jspubtd.h"
 
 #include "jit/CompileInfo.h"
+#include "jit/IonScript.h"
 #include "jit/JitFrames.h"
 #include "vm/Interpreter.h"
 
@@ -715,10 +716,6 @@ struct OutParamToDataType<uint32_t*> {
   static const DataType result = Type_Int32;
 };
 template <>
-struct OutParamToDataType<uint64_t*> {
-  static const DataType result = Type_Pointer;
-};
-template <>
 struct OutParamToDataType<uint8_t**> {
   static const DataType result = Type_Pointer;
 };
@@ -1087,9 +1084,6 @@ MOZ_MUST_USE bool CallNativeSetter(JSContext* cx, HandleFunction callee,
 
 MOZ_MUST_USE bool EqualStringsHelperPure(JSString* str1, JSString* str2);
 
-MOZ_MUST_USE bool CheckIsCallable(JSContext* cx, HandleValue v,
-                                  CheckIsCallableKind kind);
-
 void HandleCodeCoverageAtPC(BaselineFrame* frame, jsbytecode* pc);
 void HandleCodeCoverageAtPrologue(BaselineFrame* frame);
 
@@ -1130,13 +1124,15 @@ MOZ_MUST_USE bool TrySkipAwait(JSContext* cx, HandleValue val,
 bool IsPossiblyWrappedTypedArray(JSContext* cx, JSObject* obj, bool* result);
 
 void* AllocateBigIntNoGC(JSContext* cx, bool requestMinorGC);
+bool DoStringToInt64(JSContext* cx, HandleString str, uint64_t* res);
+
 #if JS_BITS_PER_WORD == 32
 BigInt* CreateBigIntFromInt64(JSContext* cx, uint32_t low, uint32_t high);
+BigInt* CreateBigIntFromUint64(JSContext* cx, uint32_t low, uint32_t high);
 #else
 BigInt* CreateBigIntFromInt64(JSContext* cx, uint64_t i64);
+BigInt* CreateBigIntFromUint64(JSContext* cx, uint64_t i64);
 #endif
-bool DoStringToInt64(JSContext* cx, HandleString str, uint64_t* res,
-                     bool* parseSuccess);
 
 template <EqualityKind Kind>
 bool BigIntEqual(BigInt* x, BigInt* y);

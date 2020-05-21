@@ -118,12 +118,12 @@ const AP_SECURITY_NONE = Ci.nsISoftapConfiguration.SECURITY_NONE;
 const AP_SECURITY_WPA = Ci.nsISoftapConfiguration.SECURITY_WPA;
 const AP_SECURITY_WPA2 = Ci.nsISoftapConfiguration.SECURITY_WPA2;
 
-const LEVEL_EXCESSIVE = Ci.nsISupplicantDebugLevel.EXCESSIVE;
-const LEVEL_MSGDUMP = Ci.nsISupplicantDebugLevel.MSGDUMP;
-const LEVEL_DEBUG = Ci.nsISupplicantDebugLevel.DEBUG;
-const LEVEL_INFO = Ci.nsISupplicantDebugLevel.INOF;
-const LEVEL_WARNING = Ci.nsISupplicantDebugLevel.WARNING;
-const LEVEL_ERROR = Ci.nsISupplicantDebugLevel.ERROR;
+const LEVEL_EXCESSIVE = Ci.nsISupplicantDebugLevel.LOG_EXCESSIVE;
+const LEVEL_MSGDUMP = Ci.nsISupplicantDebugLevel.LOG_MSGDUMP;
+const LEVEL_DEBUG = Ci.nsISupplicantDebugLevel.LOG_DEBUG;
+const LEVEL_INFO = Ci.nsISupplicantDebugLevel.LOG_INFO;
+const LEVEL_WARNING = Ci.nsISupplicantDebugLevel.LOG_WARNING;
+const LEVEL_ERROR = Ci.nsISupplicantDebugLevel.LOG_ERROR;
 
 const USE_SINGLE_SCAN = Ci.nsIScanSettings.USE_SINGLE_SCAN;
 const USE_PNO_SCAN = Ci.nsIScanSettings.USE_PNO_SCAN;
@@ -219,6 +219,7 @@ const INVALID_RSSI = -127;
 const INVALID_NETWORK_ID = -1;
 
 const WIFI_ASSOCIATED_SCAN_INTERVAL = 20 * 1000;
+const WIFI_MAX_SCAN_CACHED_TIME = 60 * 1000;
 
 XPCOMUtils.defineLazyGetter(this, "ppmm", () => {
   return Cc["@mozilla.org/parentprocessmessagemanager;1"].getService();
@@ -764,11 +765,7 @@ var WifiManager = (function() {
 
     // Stop dhcpd when use static IP
     if (dhcpInfo != null) {
-#ifdef HAS_KOOST_MODULES
-      netUtil.stopDhcp(manager.ifname, function(success) {});
-#else
       netUtil.stopDhcp(manager.ifname, function() {});
-#endif
     }
 
     // Set ip, mask length, gateway, dns to network interface
@@ -1079,11 +1076,15 @@ var WifiManager = (function() {
       wifiInfo.setSupplicantState(fields.state);
 
       if (manager.isConnectState(fields.state)) {
+        if (wifiInfo.ssid != fields.ssid && fields.ssid.length > 0) {
+          wifiInfo.setSSID(fields.ssid);
+        }
+
         if (
-          wifiInfo.bssid != fields.BSSID &&
-          fields.BSSID !== "00:00:00:00:00:00"
+          wifiInfo.bssid != fields.bssid &&
+          fields.bssid !== "00:00:00:00:00:00"
         ) {
-          wifiInfo.setBSSID(fields.BSSID);
+          wifiInfo.setBSSID(fields.bssid);
         }
 
         if (manager.connectingNetwork[manager.ifname] &&
@@ -1271,6 +1272,7 @@ var WifiManager = (function() {
       notify("scanresultsavailable", { type: USE_SINGLE_SCAN });
     } else if (eventData.indexOf("SCAN_RESULT_FAILED") === 0) {
       debug("Receive single scan failure");
+      manager.cachedScanResults = [];
     } else if (eventData.indexOf("PNO_SCAN_FOUND") === 0) {
       notify("scanresultsavailable", { type: USE_PNO_SCAN });
     } else if (eventData.indexOf("PNO_SCAN_FAILED") === 0) {
@@ -1432,6 +1434,8 @@ var WifiManager = (function() {
   manager.loopDetectionCount = 0;
   manager.numRil = numRil;
   manager.connectingNetwork = Object.create(null);
+  manager.cachedScanResults = [];
+  manager.cachedScanTime = 0;
 
   manager.__defineGetter__("enabled", function() {
     switch (manager.state) {
@@ -1722,6 +1726,7 @@ var WifiManager = (function() {
     return dhcpInfo;
   };
   manager.getConnectionInfo = wifiCommand.getConnectionInfo;
+  manager.getLinkLayerStats = wifiCommand.getLinkLayerStats;
   manager.setScanInterval = wifiCommand.setScanInterval;
   manager.enableAutoReconnect = wifiCommand.enableAutoReconnect;
   manager.autoScanMode = wifiCommand.autoScanMode;
@@ -1911,15 +1916,9 @@ var WifiManager = (function() {
     // If we got disconnected, kill the DHCP client in preparation for
     // reconnection.
     gNetworkService.resetConnections(manager.ifname, function() {
-#ifdef HAS_KOOST_MODULES
-      netUtil.stopDhcp(manager.ifname, function(success) {
-        callback();
-      });
-#else
       netUtil.stopDhcp(manager.ifname, function() {
         callback();
       });
-#endif
     });
   };
 
@@ -3019,6 +3018,7 @@ function WifiWorker() {
       //  OpenNetworkNotifier.handleScanResults(r);
       //}
 
+      WifiManager.cachedScanResults = [];
       if (scanResults.length <= 0 && self.wantScanResults.length !== 0) {
         self.wantScanResults.forEach(function(callback) {
           callback(null);
@@ -3120,6 +3120,8 @@ function WifiWorker() {
           network.relSignalStrength = signal;
         }
         self.networksArray.push(network);
+        WifiManager.cachedScanResults.push(network);
+        WifiManager.cachedScanTime = Date.now();
       }
 
       WifiManager.currentConfigChannels = [];
@@ -3566,48 +3568,64 @@ WifiWorker.prototype = {
 
     var self = this;
     function getConnectionInformation() {
-      // WifiManager.getConnectionInfo(function(connInfo) {
-      //   // See comments in WifiConfigUtils.calculateSignal for information about this.
-      //   if (!connInfo) {
-      //     self._lastConnectionInfo = null;
-      //     return;
-      //   }
-      //   let { rssi, linkspeed, frequency } = connInfo;
-      //   if (rssi > 0)
-      //     rssi -= 256;
-      //   if (rssi <= WifiConfigUtils.MIN_RSSI)
-      //     rssi = WifiConfigUtils.MIN_RSSI;
-      //   else if (rssi >= WifiConfigUtils.MAX_RSSI)
-      //     rssi = WifiConfigUtils.MAX_RSSI;
-      //   if (shouldBroadcastRSSIForIMS(rssi, wifiInfo.rssi)) {
-      //     self.deliverListenerEvent("notifyRssiChanged", [rssi]);
-      //   }
-      //   wifiInfo.setRssi(rssi);
-      //   wifiInfo.setLinkSpeed(linkspeed);
-      //   wifiInfo.setFrequency(frequency);
-      //   let info = { signalStrength: rssi,
-      //                relSignalStrength: WifiConfigUtils.calculateSignal(rssi),
-      //                linkSpeed: linkspeed,
-      //                ipAddress: self.ipAddress };
-      //   let last = self._lastConnectionInfo;
-      //   // Only fire the event if the link speed changed or the signal
-      //   // strength changed by more than 10%.
-      //   function tensPlace(percent) {
-      //     return (percent / 10) | 0;
-      //   }
-      //   if (last && last.linkSpeed === info.linkSpeed &&
-      //       last.ipAddress === info.ipAddress &&
-      //       tensPlace(last.relSignalStrength) === tensPlace(info.relSignalStrength)) {
-      //     return;
-      //   }
-      //   self._lastConnectionInfo = info;
-      //   if (WifiManager.linkDebouncing) {
-      //     debug("linkDebouncing, don't fire connection info update");
-      //     return;
-      //   }
-      //   debug("Firing connectioninfoupdate: " + uneval(info));
-      //   self._fireEvent("connectioninfoupdate", info);
-      // });
+      WifiManager.getConnectionInfo(function(result) {
+        if (result.status != SUCCESS) {
+          debug("Failed to get connection information");
+          return;
+        }
+
+        let connInfo = result.signalPoll();
+        // See comments in WifiConfigUtils.calculateSignal for information about this.
+        if (connInfo.length == 0) {
+          self._lastConnectionInfo = null;
+          return;
+        }
+        let [ rssi, linkSpeed, frequency, rxLinkSpeed ] =
+            [ connInfo[0], connInfo[1], connInfo[2], connInfo[3] ];
+
+        if (rssi > 0)
+          rssi -= 256;
+        if (rssi <= WifiConfigUtils.MIN_RSSI)
+          rssi = WifiConfigUtils.MIN_RSSI;
+        else if (rssi >= WifiConfigUtils.MAX_RSSI)
+          rssi = WifiConfigUtils.MAX_RSSI;
+
+        if (shouldBroadcastRSSIForIMS(rssi, wifiInfo.rssi)) {
+          self.deliverListenerEvent("notifyRssiChanged", [rssi]);
+        }
+        wifiInfo.setRssi(rssi);
+
+        if (linkSpeed > 0) {
+          wifiInfo.setLinkSpeed(linkSpeed);
+        }
+        if (frequency > 0) {
+          wifiInfo.setFrequency(frequency);
+        }
+        let info = {
+          signalStrength: rssi,
+          relSignalStrength: WifiConfigUtils.calculateSignal(rssi),
+          linkSpeed: linkSpeed,
+          ipAddress: self.ipAddress
+        };
+        let last = self._lastConnectionInfo;
+        // Only fire the event if the link speed changed or the signal
+        // strength changed by more than 10%.
+        function tensPlace(percent) {
+          return (percent / 10) | 0;
+        }
+        if (last && last.linkSpeed === info.linkSpeed &&
+            last.ipAddress === info.ipAddress &&
+            tensPlace(last.relSignalStrength) === tensPlace(info.relSignalStrength)) {
+          return;
+        }
+        self._lastConnectionInfo = info;
+        if (WifiManager.linkDebouncing) {
+          debug("linkDebouncing, don't fire connection info update");
+          return;
+        }
+        debug("Firing connectioninfoupdate: " + uneval(info));
+        self._fireEvent("connectioninfoupdate", info);
+      });
     }
 
     // Prime our _lastConnectionInfo immediately and fire the event at the
@@ -3815,9 +3833,23 @@ WifiWorker.prototype = {
           return;
         }
 
+        sent = true;
+        // if last results are available, return the cached scan results.
+        if (WifiManager.cachedScanTime > 0 &&
+            Date.now() - WifiManager.cachedScanTime < WIFI_MAX_SCAN_CACHED_TIME) {
+          this._sendMessage(
+            message,
+            WifiManager.cachedScanResults.length > 0,
+            WifiManager.cachedScanResults,
+            msg
+          );
+          return;
+        } else {
+          WifiManager.cachedScanTime = 0;
+          WifiManager.cachedScanResults = [];
+        }
         // Otherwise, let the client know that it failed, it's responsible for
         // trying again in a few seconds.
-        sent = true;
         this._sendMessage(message, false, "ScanFailed", msg);
       }.bind(this)
     );

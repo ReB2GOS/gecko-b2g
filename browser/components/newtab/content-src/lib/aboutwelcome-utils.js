@@ -5,10 +5,11 @@
 export const AboutWelcomeUtils = {
   handleUserAction(action) {
     switch (action.type) {
+      case "OPEN_ABOUT_PAGE":
       case "OPEN_AWESOME_BAR":
       case "OPEN_PRIVATE_BROWSER_WINDOW":
       case "SHOW_MIGRATION_WIZARD":
-        window.AWSendToParent(action.type);
+        window.AWSendToParent("SPECIAL_ACTION", action);
         break;
       case "OPEN_URL":
         window.open(action.data.args);

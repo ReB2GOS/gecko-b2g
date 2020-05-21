@@ -33,13 +33,15 @@
 #include "mozilla/dom/BrowserChild.h"
 #include "mozilla/intl/OSPreferences.h"
 #include "mozilla/ipc/GeckoChildProcessHost.h"
+#include "mozilla/java/GeckoAppShellNatives.h"
+#include "mozilla/java/GeckoThreadNatives.h"
+#include "mozilla/java/XPCOMEventTargetNatives.h"
 #include "mozilla/widget/ScreenManager.h"
 #include "prenv.h"
 
 #include "AndroidBridge.h"
 #include "AndroidBridgeUtilities.h"
 #include "AndroidSurfaceTexture.h"
-#include "GeneratedJNINatives.h"
 #include <android/log.h>
 #include <pthread.h>
 #include <wchar.h>
@@ -666,7 +668,6 @@ bool nsAppShell::ProcessNextNativeEvent(bool mayWait) {
       AUTO_PROFILER_LABEL("nsAppShell::ProcessNextNativeEvent:Wait", IDLE);
       mozilla::BackgroundHangMonitor().NotifyWait();
 
-      AUTO_PROFILER_THREAD_SLEEP;
       curEvent = mEventQueue.Pop(/* mayWait */ true);
     }
   }

@@ -15,7 +15,9 @@
 #include "mozilla/TaskQueue.h"
 #include "mozilla/Unused.h"
 #include "nsContentUtils.h"
+#include "nsIThreadInternal.h"
 #include "nsServiceManagerUtils.h"
+#include "nsThreadManager.h"
 #include "nsThreadUtils.h"
 
 namespace mozilla {
@@ -26,76 +28,120 @@ LazyLogModule gStateWatchingLog("StateWatching");
 StaticRefPtr<AbstractThread> sMainThread;
 MOZ_THREAD_LOCAL(AbstractThread*) AbstractThread::sCurrentThreadTLS;
 
-class EventTargetWrapper : public AbstractThread {
+class XPCOMThreadWrapper final : public AbstractThread,
+                                 public nsIThreadObserver {
  public:
-  explicit EventTargetWrapper(nsIEventTarget* aTarget,
-                              bool aRequireTailDispatch)
-      : AbstractThread(aRequireTailDispatch), mTarget(aTarget) {
-    // Our current mechanism of implementing tail dispatch is appshell-specific.
-    // This is because a very similar mechanism already exists on the main
-    // thread, and we want to avoid making event dispatch on the main thread
-    // more complicated than it already is.
-    //
-    // If you need to use tail dispatch on other XPCOM threads, you'll need to
-    // implement an nsIThreadObserver to fire the tail dispatcher at the
-    // appropriate times. You will also need to modify this assertion.
-    MOZ_ASSERT_IF(aRequireTailDispatch,
-                  NS_IsMainThread() && aTarget->IsOnCurrentThread());
+  XPCOMThreadWrapper(nsIThreadInternal* aThread, bool aRequireTailDispatch,
+                     bool aOnThread)
+      : AbstractThread(aRequireTailDispatch),
+        mThread(aThread),
+        mOnThread(aOnThread) {
+    MOZ_DIAGNOSTIC_ASSERT(!aOnThread || IsCurrentThreadIn());
+    if (aOnThread) {
+      MOZ_ASSERT(!sCurrentThreadTLS.get(),
+                 "There can only be a single XPCOMThreadWrapper available on a "
+                 "thread");
+      // Set the default current thread so that GetCurrent() never returns
+      // nullptr.
+      sCurrentThreadTLS.set(this);
+    }
   }
+
+  NS_DECL_ISUPPORTS_INHERITED
+  NS_DECL_NSITHREADOBSERVER
 
   nsresult Dispatch(already_AddRefed<nsIRunnable> aRunnable,
                     DispatchReason aReason = NormalDispatch) override {
+    nsCOMPtr<nsIRunnable> r = aRunnable;
     AbstractThread* currentThread;
     if (aReason != TailDispatch && (currentThread = GetCurrent()) &&
-        RequiresTailDispatch(currentThread)) {
-      return currentThread->TailDispatcher().AddTask(this,
-                                                     std::move(aRunnable));
+        RequiresTailDispatch(currentThread) &&
+        currentThread->IsTailDispatcherAvailable()) {
+      return currentThread->TailDispatcher().AddTask(this, r.forget());
     }
 
-    RefPtr<nsIRunnable> runner = new Runner(this, std::move(aRunnable));
-    return mTarget->Dispatch(runner.forget(), NS_DISPATCH_NORMAL);
+    // At a certain point during shutdown, we stop processing events from the
+    // main thread event queue (this happens long after all _other_ XPCOM
+    // threads have been shut down). However, various bits of subsequent
+    // teardown logic (the media shutdown blocker and the final shutdown cycle
+    // collection) can trigger state watching and state mirroring notifications
+    // that result in dispatch to the main thread. This causes shutdown leaks,
+    // because the |Runner| wrapper below creates a guaranteed cycle
+    // (Thread->EventQueue->Runnable->Thread) until the event is processed. So
+    // if we put the event into a queue that will never be processed, we'll wind
+    // up with a leak.
+    //
+    // We opt to just release the runnable in that case. Ordinarily, this
+    // approach could cause problems for runnables that are only safe to be
+    // released on the target thread (and not the dispatching thread). This is
+    // why XPCOM thread dispatch explicitly leaks the runnable when dispatch
+    // fails, rather than releasing it. But given that this condition only
+    // applies very late in shutdown when only one thread remains operational,
+    // that concern is unlikely to apply.
+    if (gXPCOMMainThreadEventsAreDoomed) {
+      return NS_ERROR_FAILURE;
+    }
+
+    RefPtr<nsIRunnable> runner = new Runner(this, r.forget());
+    return mThread->Dispatch(runner.forget(), NS_DISPATCH_NORMAL);
   }
 
   // Prevent a GCC warning about the other overload of Dispatch being hidden.
   using AbstractThread::Dispatch;
 
   bool IsCurrentThreadIn() const override {
-    return mTarget->IsOnCurrentThread();
-  }
-
-  void FireTailDispatcher() {
-    MOZ_DIAGNOSTIC_ASSERT(mTailDispatcher.isSome());
-    mTailDispatcher.ref().DrainDirectTasks();
-    mTailDispatcher.reset();
+    return mThread->IsOnCurrentThread();
   }
 
   TaskDispatcher& TailDispatcher() override {
     MOZ_ASSERT(IsCurrentThreadIn());
+    MOZ_ASSERT(IsTailDispatcherAvailable());
     if (!mTailDispatcher.isSome()) {
       mTailDispatcher.emplace(/* aIsTailDispatcher = */ true);
-
-      nsCOMPtr<nsIRunnable> event =
-          NewRunnableMethod("EventTargetWrapper::FireTailDispatcher", this,
-                            &EventTargetWrapper::FireTailDispatcher);
-      nsContentUtils::RunInStableState(event.forget());
+      mThread->AddObserver(this);
     }
 
     return mTailDispatcher.ref();
   }
 
+  bool IsTailDispatcherAvailable() override {
+    // Our tail dispatching implementation relies on nsIThreadObserver
+    // callbacks. If we're not doing event processing, it won't work.
+    bool inEventLoop =
+        static_cast<nsThread*>(mThread.get())->RecursionDepth() > 0;
+    return inEventLoop;
+  }
+
   bool MightHaveTailTasks() override { return mTailDispatcher.isSome(); }
 
-  nsIEventTarget* AsEventTarget() override { return mTarget; }
+  nsIEventTarget* AsEventTarget() override { return mThread; }
 
  private:
-  const RefPtr<nsIEventTarget> mTarget;
+  const RefPtr<nsIThreadInternal> mThread;
   Maybe<AutoTaskDispatcher> mTailDispatcher;
+  const bool mOnThread;
+
+  ~XPCOMThreadWrapper() {
+    if (mOnThread) {
+      MOZ_DIAGNOSTIC_ASSERT(IsCurrentThreadIn(),
+                            "Must be destroyed on the thread it was created");
+      sCurrentThreadTLS.set(nullptr);
+    }
+  }
+
+  void MaybeFireTailDispatcher() {
+    if (mTailDispatcher.isSome()) {
+      mTailDispatcher.ref().DrainDirectTasks();
+      mThread->RemoveObserver(this);
+      mTailDispatcher.reset();
+    }
+  }
 
   class Runner : public Runnable {
    public:
-    explicit Runner(EventTargetWrapper* aThread,
+    explicit Runner(XPCOMThreadWrapper* aThread,
                     already_AddRefed<nsIRunnable> aRunnable)
-        : Runnable("EventTargetWrapper::Runner"),
+        : Runnable("XPCOMThreadWrapper::Runner"),
           mThread(aThread),
           mRunnable(aRunnable) {}
 
@@ -121,7 +167,7 @@ class EventTargetWrapper : public AbstractThread {
 #endif
 
    private:
-    const RefPtr<EventTargetWrapper> mThread;
+    const RefPtr<XPCOMThreadWrapper> mThread;
     const RefPtr<nsIRunnable> mRunnable;
   };
 };
@@ -196,46 +242,72 @@ void AbstractThread::InitTLS() {
 void AbstractThread::InitMainThread() {
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(!sMainThread);
-  nsCOMPtr<nsIThread> mainThread;
-  NS_GetMainThread(getter_AddRefs(mainThread));
+  nsCOMPtr<nsIThreadInternal> mainThread =
+      do_QueryInterface(nsThreadManager::get().GetMainThreadWeak());
   MOZ_DIAGNOSTIC_ASSERT(mainThread);
-  sMainThread = new EventTargetWrapper(mainThread.get(),
-                                       /* aRequireTailDispatch = */ true);
-  ClearOnShutdown(&sMainThread);
 
   if (!sCurrentThreadTLS.init()) {
     MOZ_CRASH();
   }
-  // Set the default current main thread so that GetCurrent() never returns
-  // nullptr.
-  sCurrentThreadTLS.set(sMainThread);
+  sMainThread = new XPCOMThreadWrapper(mainThread.get(),
+                                       /* aRequireTailDispatch = */ true,
+                                       true /* onThread */);
+}
+
+void AbstractThread::ShutdownMainThread() {
+  MOZ_ASSERT(NS_IsMainThread());
+  sMainThread = nullptr;
 }
 
 void AbstractThread::DispatchStateChange(
     already_AddRefed<nsIRunnable> aRunnable) {
-  GetCurrent()->TailDispatcher().AddStateChangeTask(this, std::move(aRunnable));
+  AbstractThread* currentThread = GetCurrent();
+  MOZ_DIAGNOSTIC_ASSERT(currentThread, "An AbstractThread must exist");
+  if (currentThread->IsTailDispatcherAvailable()) {
+    currentThread->TailDispatcher().AddStateChangeTask(this,
+                                                       std::move(aRunnable));
+  } else {
+    // If the tail dispatcher isn't available, we just avoid sending state
+    // updates.
+    //
+    // This happens, specifically (1) During async shutdown (via the media
+    // shutdown blocker), and (2) During the final shutdown cycle collection.
+    // Both of these trigger changes to various watched and mirrored state.
+    nsCOMPtr<nsIRunnable> neverDispatched = aRunnable;
+  }
 }
 
 /* static */
 void AbstractThread::DispatchDirectTask(
     already_AddRefed<nsIRunnable> aRunnable) {
-  GetCurrent()->TailDispatcher().AddDirectTask(std::move(aRunnable));
+  AbstractThread* currentThread = GetCurrent();
+  MOZ_DIAGNOSTIC_ASSERT(currentThread, "An AbstractThread must exist");
+  if (currentThread->IsTailDispatcherAvailable()) {
+    currentThread->TailDispatcher().AddDirectTask(std::move(aRunnable));
+  } else {
+    // If the tail dispatcher isn't available, we post as a regular task.
+    currentThread->Dispatch(std::move(aRunnable));
+  }
 }
 
 /* static */
 already_AddRefed<AbstractThread> AbstractThread::CreateXPCOMThreadWrapper(
-    nsIThread* aThread, bool aRequireTailDispatch) {
-  RefPtr<EventTargetWrapper> wrapper =
-      new EventTargetWrapper(aThread, aRequireTailDispatch);
+    nsIThread* aThread, bool aRequireTailDispatch, bool aOnThread) {
+  nsCOMPtr<nsIThreadInternal> internalThread = do_QueryInterface(aThread);
+  MOZ_ASSERT(internalThread, "Need an nsThread for AbstractThread");
+  RefPtr<XPCOMThreadWrapper> wrapper =
+      new XPCOMThreadWrapper(internalThread, aRequireTailDispatch, aOnThread);
 
   bool onCurrentThread = false;
   Unused << aThread->IsOnCurrentThread(&onCurrentThread);
 
   if (onCurrentThread) {
-    MOZ_ASSERT(
-        !sCurrentThreadTLS.get(),
-        "There can only be a single EventTargetWrapper available on a thread");
-    sCurrentThreadTLS.set(wrapper);
+    if (!aOnThread) {
+      MOZ_ASSERT(!sCurrentThreadTLS.get(),
+                 "There can only be a single XPCOMThreadWrapper available on a "
+                 "thread");
+      sCurrentThreadTLS.set(wrapper);
+    }
     return wrapper.forget();
   }
 
@@ -245,11 +317,37 @@ already_AddRefed<AbstractThread> AbstractThread::CreateXPCOMThreadWrapper(
   nsCOMPtr<nsIRunnable> r = NS_NewRunnableFunction(
       "AbstractThread::CreateXPCOMThreadWrapper", [wrapper]() {
         MOZ_ASSERT(!sCurrentThreadTLS.get(),
-                   "There can only be a single EventTargetWrapper available on "
+                   "There can only be a single XPCOMThreadWrapper available on "
                    "a thread");
         sCurrentThreadTLS.set(wrapper);
       });
   aThread->Dispatch(r.forget(), NS_DISPATCH_NORMAL);
   return wrapper.forget();
 }
+
+NS_IMPL_ISUPPORTS_INHERITED(XPCOMThreadWrapper, AbstractThread,
+                            nsIThreadObserver);
+
+NS_IMETHODIMP
+XPCOMThreadWrapper::OnDispatchedEvent() { return NS_OK; }
+
+NS_IMETHODIMP
+XPCOMThreadWrapper::AfterProcessNextEvent(nsIThreadInternal* thread,
+                                          bool eventWasProcessed) {
+  // This is the primary case.
+  MaybeFireTailDispatcher();
+  return NS_OK;
+}
+
+NS_IMETHODIMP
+XPCOMThreadWrapper::OnProcessNextEvent(nsIThreadInternal* thread,
+                                       bool mayWait) {
+  // In general, the tail dispatcher is handled at the end of the current in
+  // AfterProcessNextEvent() above. However, if start spinning a nested event
+  // loop, it's generally better to fire the tail dispatcher before the first
+  // nested event, rather than after it. This check handles that case.
+  MaybeFireTailDispatcher();
+  return NS_OK;
+}
+
 }  // namespace mozilla

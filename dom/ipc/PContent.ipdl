@@ -14,6 +14,9 @@ include protocol PExternalHelperApp;
 include protocol PHandlerService;
 include protocol PDeviceStorageRequest;
 include protocol PFileDescriptorSet;
+#ifdef MOZ_B2G_FM
+include protocol PFMRadio;
+#endif
 include protocol PHal;
 include protocol PHeapSnapshotTempFileHelper;
 include protocol PProcessHangMonitor;
@@ -21,10 +24,7 @@ include protocol PSharedBufferManager;
 include protocol PImageBridge;
 include protocol PIPCBlobInputStream;
 include protocol PLoginReputation;
-include protocol PImsRegServiceFinder;
-include protocol PImsRegistration;
 include protocol PMedia;
-include protocol PMobileConnection;
 include protocol PNecko;
 include protocol PStreamFilter;
 include protocol PGMPContent;
@@ -38,13 +38,18 @@ include protocol POfflineCacheUpdate;
 #ifdef MOZ_WEBSPEECH
 include protocol PSpeechSynthesis;
 #endif
+#ifdef MOZ_B2G_RIL
+include protocol PMobileConnection;
+include protocol PImsRegServiceFinder;
+include protocol PImsRegistration;
 include protocol PCellBroadcast;
 include protocol PIcc;
 //include protocol PSms;
 include protocol PSubsidyLock;
 include protocol PTelephony;
-include protocol PTestShell;
 include protocol PVoicemail;
+#endif
+include protocol PTestShell;
 include protocol PJavaScript;
 include protocol PRemoteSpellcheckEngine;
 include protocol PWebBrowserPersistDocument;
@@ -59,8 +64,6 @@ include protocol PProfiler;
 include protocol PScriptCache;
 include protocol PSessionStorageObserver;
 include protocol PSystemMessageService;
-include protocol PSHEntry;
-include protocol PSHistory;
 include protocol PBenchmarkStorage;
 include DOMTypes;
 include JavaScriptTypes;
@@ -127,7 +130,6 @@ using mozilla::dom::BrowsingContextTransaction from "mozilla/dom/BrowsingContext
 using mozilla::dom::BrowsingContextInitializer from "mozilla/dom/BrowsingContext.h";
 using mozilla::dom::MaybeDiscardedWindowContext from "mozilla/dom/WindowContext.h";
 using mozilla::dom::WindowContextTransaction from "mozilla/dom/WindowContext.h";
-using mozilla::dom::WindowContextInitializer from "mozilla/dom/WindowContext.h";
 using base::SharedMemoryHandle from "base/shared_memory.h";
 using mozilla::ipc::SharedMemoryBasic::Handle from "mozilla/ipc/SharedMemoryBasic.h";
 using mozilla::fontlist::Pointer from "SharedFontList.h";
@@ -140,10 +142,11 @@ using mozilla::dom::MaybeMediaMetadataBase from "mozilla/dom/MediaSessionIPCUtil
 using mozilla::dom::MediaSessionPlaybackState from "mozilla/dom/MediaSessionBinding.h";
 using refcounted class nsDocShellLoadState from "nsDocShellLoadState.h";
 using mozilla::dom::ServiceWorkerShutdownState::Progress from "mozilla/dom/ServiceWorkerShutdownState.h";
-using refcounted class mozilla::dom::CrossProcessSHEntry from "mozilla/dom/MaybeNewPSHEntry.h";
 using mozilla::ContentBlockingNotifier::StorageAccessGrantedReason from "mozilla/ContentBlockingNotifier.h";
 using mozilla::ContentBlockingNotifier::BlockingDecision from "mozilla/ContentBlockingNotifier.h";
 using mozilla::ContentBlocking::StorageAccessPromptChoices from "mozilla/ContentBlocking.h";
+using JSActorMessageKind from "mozilla/dom/JSActor.h";
+using JSActorMessageMeta from "mozilla/dom/PWindowGlobal.h";
 
 union ChromeRegistryItem
 {
@@ -305,6 +308,42 @@ struct DeviceStorageLocationInfo {
   nsString appsstorage;
 };
 
+#ifdef MOZ_B2G_FM
+struct FMRadioRequestEnableParams
+{
+  double frequency;
+};
+
+struct FMRadioRequestDisableParams
+{
+
+};
+
+struct FMRadioRequestSetFrequencyParams
+{
+  double frequency;
+};
+
+struct FMRadioRequestSeekParams
+{
+  bool upward;
+};
+
+struct FMRadioRequestCancelSeekParams
+{
+
+};
+
+union FMRadioRequestParams
+{
+  FMRadioRequestEnableParams;
+  FMRadioRequestDisableParams;
+  FMRadioRequestSetFrequencyParams;
+  FMRadioRequestSeekParams;
+  FMRadioRequestCancelSeekParams;
+};
+#endif
+
 // Note: Any changes to this structure should also be changed in
 // FileSystemUpdate below.
 struct VolumeInfo {
@@ -387,13 +426,29 @@ struct JSWindowActorInfo
 {
   nsCString name;
   bool allFrames;
+
+  // The module of the url.
   nsCString? url;
 
   JSWindowActorEventDecl[] events;
+
+  // Observer notifications this actor listens to.
   nsCString[] observers;
   nsString[] matches;
   nsString[] remoteTypes;
   nsString[] messageManagerGroups;
+};
+
+struct JSProcessActorInfo
+{
+    // The name of the actor.
+    nsCString name;
+    // The module of the url.
+    nsCString? url;
+
+    // Observer notifications this actor listens to.
+    nsCString[] observers;
+    nsString[] remoteTypes;
 };
 
 struct GMPAPITags
@@ -514,14 +569,14 @@ nested(upto inside_cpow) sync protocol PContent
     manages PDeviceStorageRequest;
     manages PExternalHelperApp;
     manages PFileDescriptorSet;
+#ifdef MOZ_B2G_FM
+    manages PFMRadio;
+#endif
     manages PHal;
     manages PHandlerService;
     manages PHeapSnapshotTempFileHelper;
     manages PIPCBlobInputStream;
-    manages PImsRegServiceFinder;
-    manages PImsRegistration;
     manages PMedia;
-    manages PMobileConnection;
     manages PNecko;
     manages POfflineCacheUpdate;
     manages PPrinting;
@@ -530,14 +585,18 @@ nested(upto inside_cpow) sync protocol PContent
 #ifdef MOZ_WEBSPEECH
     manages PSpeechSynthesis;
 #endif
+#ifdef MOZ_B2G_RIL
+    manages PMobileConnection;
+    manages PImsRegServiceFinder;
+    manages PImsRegistration;
     manages PCellBroadcast;
     manages PIcc;
     //manages PSms;
     manages PSubsidyLock;
     manages PTelephony;
-    //manages PVoicemail;
-    manages PTestShell;
     manages PVoicemail;
+#endif
+    manages PTestShell;
     manages PJavaScript;
     manages PRemoteSpellcheckEngine;
     manages PWebBrowserPersistDocument;
@@ -549,8 +608,6 @@ nested(upto inside_cpow) sync protocol PContent
     manages PLoginReputation;
     manages PSessionStorageObserver;
     manages PSystemMessageService;
-    manages PSHEntry;
-    manages PSHistory;
     manages PBenchmarkStorage;
 
     // Depending on exactly how the new browser is being created, it might be
@@ -603,6 +660,9 @@ both:
     // ignored and should be null.
     async PWebBrowserPersistDocument(nullable PBrowser aBrowser,
                                      MaybeDiscardedBrowsingContext aContext);
+
+    async RawMessage(JSActorMessageMeta aMetadata, ClonedMessageData aData,
+                     ClonedMessageData aStack);
 
 child:
     async InitGMPService(Endpoint<PGMPServiceChild> service);
@@ -781,14 +841,19 @@ child:
     async InitBlobURLs(BlobURLRegistrationData[] registrations);
 
     /**
-     * Send JSWindowActorInfos to child process.
+     * Send JS{Content, Window}ActorInfos to child process.
      */
-    async InitJSWindowActorInfos(JSWindowActorInfo[] aInfos);
+    async InitJSActorInfos(JSProcessActorInfo[] aContentInfos, JSWindowActorInfo[] aWindowInfos);
 
     /**
      * Unregister a previously registered JSWindowActor in the child process.
      */
     async UnregisterJSWindowActor(nsCString name);
+
+    /**
+     * Unregister a previously registered JSProcessActor in the child process.
+     */
+    async UnregisterJSProcessActor(nsCString name);
 
     async SetXPCOMProcessAttributes(XPCOMInitData xpcomInit,
                                     StructuredCloneData initialData,
@@ -1031,21 +1096,12 @@ child:
     async InitSandboxTesting(Endpoint<PSandboxTestingChild> aEndpoint);
 #endif
 
-    async DestroySHEntrySharedState(uint64_t aID);
-
-    async EvictContentViewers(uint64_t[] aToEvictSharedStateIDs);
-
     async LoadURI(MaybeDiscardedBrowsingContext aContext, nsDocShellLoadState aLoadState, bool aSetNavigating)
         returns (bool aSuccess);
 
     async InternalLoad(MaybeDiscardedBrowsingContext aContext, nsDocShellLoadState aLoadState, bool aTakeFocus);
 
     async DisplayLoadError(MaybeDiscardedBrowsingContext aContext, nsString aURI);
-
-    // Tell aContext's docshell to update its mOSHE and mLSHE entries
-    async UpdateSHEntriesInDocShell(CrossProcessSHEntry aOldEntry,
-                                    CrossProcessSHEntry aNewEntry,
-                                    MaybeDiscardedBrowsingContext aContext);
 
     async OnAllowAccessFor(MaybeDiscardedBrowsingContext aParentContext,
                            nsCString aTrackingOrigin,
@@ -1061,6 +1117,9 @@ child:
      * are part of a BrowsingContextGroup.
      */
     async AbortOrientationPendingPromises(MaybeDiscardedBrowsingContext aContext);
+
+    async HistoryCommitLength(MaybeDiscardedBrowsingContext aContext,
+                              uint32_t aLength);
 
 parent:
     async InitBackground(Endpoint<PBackgroundParent> aEndpoint);
@@ -1109,12 +1168,6 @@ parent:
 
     async PHeapSnapshotTempFileHelper();
 
-    async PImsRegServiceFinder();
-
-    async PImsRegistration(uint32_t aServiceId);
-
-    async PMobileConnection(uint32_t clientId);
-
     async PNecko();
 
     async PPrinting();
@@ -1124,6 +1177,13 @@ parent:
 #ifdef MOZ_WEBSPEECH
     async PSpeechSynthesis();
 #endif
+
+#ifdef MOZ_B2G_RIL
+    async PImsRegServiceFinder();
+
+    async PImsRegistration(uint32_t aServiceId);
+
+    async PMobileConnection(uint32_t clientId);
 
     async PIcc(uint32_t serviceId);
 
@@ -1136,10 +1196,15 @@ parent:
     async PTelephony();
 
     async PVoicemail();
+#endif
 
     async PMedia();
 
     async PBluetooth();
+
+#ifdef MOZ_B2G_FM
+    async PFMRadio();
+#endif
 
     async PWebrtcGlobal();
 
@@ -1156,11 +1221,6 @@ parent:
 
     async PSessionStorageObserver();
 
-    async PSHistory(MaybeDiscardedBrowsingContext aContext);
-
-    // Clone using shared id.
-    sync PSHEntry(nullable PSHistory shistory, uint64_t sharedID);
-
     async PBenchmarkStorage();
 
     async PSystemMessageService();
@@ -1170,7 +1230,7 @@ parent:
     async StartVisitedQueries(nsIURI[] uri);
     async SetURITitle(nsIURI uri, nsString title);
 
-    async LoadURIExternal(nsIURI uri, PBrowser windowContext);
+    async LoadURIExternal(nsIURI uri, MaybeDiscardedBrowsingContext browsingContext);
     async ExtProtocolChannelConnectParent(uint32_t registrarId);
 
     // PrefService message
@@ -1724,7 +1784,8 @@ parent:
      * A 3rd party tracking origin (aTrackingOrigin) has received the permission
      * granted to have access to aGrantedOrigin when loaded by aParentWindowId.
      */
-    async FirstPartyStorageAccessGrantedForOrigin(uint64_t aParentWindowId,
+    async FirstPartyStorageAccessGrantedForOrigin(uint64_t aTopLevelWindowId,
+                                                  MaybeDiscardedBrowsingContext aParentContext,
                                                   Principal aTrackingPrincipal,
                                                   nsCString aTrackingOrigin,
                                                   int aAllowMode)
@@ -1804,17 +1865,16 @@ parent:
                                               Progress aProgress);
 
     /**
-     * Whenever docshell updates its SH entries, we need to update them in
-     * the corresponding BrowsingContext
-     */
-    async UpdateSHEntriesInBC(nullable PSHEntry aNewLSHE, nullable
-                              PSHEntry aNewOSHE, MaybeDiscardedBrowsingContext aContext);
-
-    /**
      * Whenever a document is updating the OrientationLock, we need to
      * reject the orientationPendingPromises in other processes.
      */
     async AbortOtherOrientationPendingPromises(MaybeDiscardedBrowsingContext aContext);
+
+    async HistoryCommit(MaybeDiscardedBrowsingContext aContext,
+                        uint64_t aSessionHistoryEntryID);
+
+    async HistoryGo(MaybeDiscardedBrowsingContext aContext,
+                    int32_t aOffset) returns(int32_t requestedIndex);
 
 both:
     async ScriptError(nsString message, nsString sourceName, nsString sourceLine,
@@ -1860,6 +1920,9 @@ both:
     async DiscardBrowsingContext(MaybeDiscardedBrowsingContext aContext)
             returns (bool unused);
 
+    async AdjustWindowFocus(MaybeDiscardedBrowsingContext aContext,
+                            bool aCheckPermission,
+                            bool aIsVisible);
     async WindowClose(MaybeDiscardedBrowsingContext aContext,
                       bool aTrustedCaller);
     async WindowFocus(MaybeDiscardedBrowsingContext aContext,
@@ -1888,7 +1951,7 @@ child:
 both:
     async MaybeExitFullscreen(MaybeDiscardedBrowsingContext aContext);
     async WindowPostMessage(MaybeDiscardedBrowsingContext aContext,
-                            ClonedMessageData aMessage,
+                            ClonedOrErrorMessageData aMessage,
                             PostMessageData aData);
 
     /**

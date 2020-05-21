@@ -76,7 +76,7 @@ StaticAutoPtr<WindowIdentifier::IDArrayType> gLastIDToVibrate;
 
 static void RecordLastIDToVibrate(const WindowIdentifier& aId) {
   if (!InSandbox()) {
-    *gLastIDToVibrate = aId.AsArray();
+    *gLastIDToVibrate = aId.AsArray().Clone();
   }
 }
 
@@ -107,7 +107,7 @@ void Vibrate(const nsTArray<uint32_t>& pattern, nsPIDOMWindowInner* window) {
   Vibrate(pattern, WindowIdentifier(window));
 }
 
-void Vibrate(const nsTArray<uint32_t>& pattern, const WindowIdentifier& id) {
+void Vibrate(const nsTArray<uint32_t>& pattern, WindowIdentifier&& id) {
   AssertMainThread();
 
   // Only active windows may start vibrations.  If |id| hasn't gone
@@ -126,26 +126,27 @@ void Vibrate(const nsTArray<uint32_t>& pattern, const WindowIdentifier& id) {
   // Don't forward our ID if we are not in the sandbox, because hal_impl
   // doesn't need it, and we don't want it to be tempted to read it.  The
   // empty identifier will assert if it's used.
-  PROXY_IF_SANDBOXED(Vibrate(pattern, InSandbox() ? id : WindowIdentifier()));
+  PROXY_IF_SANDBOXED(
+      Vibrate(pattern, InSandbox() ? std::move(id) : WindowIdentifier()));
 }
 
 void CancelVibrate(nsPIDOMWindowInner* window) {
   CancelVibrate(WindowIdentifier(window));
 }
 
-void CancelVibrate(const WindowIdentifier& id) {
+void CancelVibrate(WindowIdentifier&& id) {
   AssertMainThread();
 
   if (MayCancelVibration(id)) {
     // Don't forward our ID if we are not in the sandbox, because hal_impl
     // doesn't need it, and we don't want it to be tempted to read it.  The
     // empty identifier will assert if it's used.
-    PROXY_IF_SANDBOXED(CancelVibrate(InSandbox() ? id : WindowIdentifier()));
+    PROXY_IF_SANDBOXED(
+        CancelVibrate(InSandbox() ? std::move(id) : WindowIdentifier()));
   }
 }
 
-void SetScreenBrightness(double aBrightness)
-{
+void SetScreenBrightness(double aBrightness) {
 #ifdef MOZ_WIDGET_GONK
   AssertMainThread();
   PROXY_IF_SANDBOXED(SetScreenBrightness(clamped(aBrightness, 0.0, 1.0)));
@@ -298,7 +299,6 @@ static SensorObserverList* GetSensorObservers(SensorType sensor_type) {
   StaticAutoPtr<name_##ObserversManager> s##name_##Observers;    \
                                                                  \
   static name_##ObserversManager* name_##Observers() {           \
-                                                                 \
     if (!s##name_##Observers) {                                  \
       s##name_##Observers = new name_##ObserversManager();       \
     }                                                            \
@@ -325,14 +325,56 @@ void NotifyBatteryChange(const BatteryInformation& aInfo) {
   BatteryObservers()->BroadcastCachedInformation();
 }
 
-bool GetScreenEnabled()
-{
+class FlashlightObserversManager
+    : public ObserversManager<FlashlightInformation> {
+ protected:
+  void EnableNotifications() {
+    PROXY_IF_SANDBOXED(EnableFlashlightNotifications());
+  }
+
+  void DisableNotifications() {
+    PROXY_IF_SANDBOXED(DisableFlashlightNotifications());
+  }
+};
+
+static FlashlightObserversManager sFlashlightObservers;
+
+void RegisterFlashlightObserver(FlashlightObserver* aObserver) {
+  AssertMainThread();
+  sFlashlightObservers.AddObserver(aObserver);
+}
+
+void UnregisterFlashlightObserver(FlashlightObserver* aObserver) {
+  AssertMainThread();
+  sFlashlightObservers.RemoveObserver(aObserver);
+}
+
+void UpdateFlashlightState(const FlashlightInformation& aFlashlightState) {
+  AssertMainThread();
+  sFlashlightObservers.BroadcastInformation(aFlashlightState);
+}
+
+void RequestCurrentFlashlightState() {
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(RequestCurrentFlashlightState());
+}
+
+bool GetFlashlightEnabled() {
+  AssertMainThread();
+  RETURN_PROXY_IF_SANDBOXED(GetFlashlightEnabled(), true);
+}
+
+void SetFlashlightEnabled(bool aEnabled) {
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(SetFlashlightEnabled(aEnabled));
+}
+
+bool GetScreenEnabled() {
   AssertMainThread();
   RETURN_PROXY_IF_SANDBOXED(GetScreenEnabled(), false);
 }
 
-void SetScreenEnabled(bool aEnabled)
-{
+void SetScreenEnabled(bool aEnabled) {
   AssertMainThread();
   PROXY_IF_SANDBOXED(SetScreenEnabled(aEnabled));
 }
@@ -381,8 +423,7 @@ void NotifyNetworkChange(const NetworkInformation& aInfo) {
   NetworkObservers()->BroadcastCachedInformation();
 }
 
-void SetNetworkType(int32_t aType)
-{
+void SetNetworkType(int32_t aType) {
   AssertMainThread();
   PROXY_IF_SANDBOXED(SetNetworkType(aType));
 }
@@ -454,11 +495,13 @@ void DisableSwitchNotifications(SwitchDevice aDevice) {
 SwitchState GetCurrentSwitchState(SwitchDevice aDevice) {
 #ifdef MOZ_WIDGET_GONK
   AssertMainThread();
-  RETURN_PROXY_IF_SANDBOXED(GetCurrentSwitchState(aDevice), SWITCH_STATE_UNKNOWN);
+  RETURN_PROXY_IF_SANDBOXED(GetCurrentSwitchState(aDevice),
+                            SWITCH_STATE_UNKNOWN);
 #endif
 }
 
-void NotifySwitchStateFromInputDevice(SwitchDevice aDevice, SwitchState aState) {
+void NotifySwitchStateFromInputDevice(SwitchDevice aDevice,
+                                      SwitchState aState) {
 #ifdef MOZ_WIDGET_GONK
   AssertMainThread();
   PROXY_IF_SANDBOXED(NotifySwitchStateFromInputDevice(aDevice, aState));
@@ -467,7 +510,7 @@ void NotifySwitchStateFromInputDevice(SwitchDevice aDevice, SwitchState aState) 
 
 typedef mozilla::ObserverList<SwitchEvent> SwitchObserverList;
 
-static SwitchObserverList *sSwitchObserverLists = nullptr;
+static SwitchObserverList* sSwitchObserverLists = nullptr;
 
 static SwitchObserverList& GetSwitchObserverList(SwitchDevice aDevice) {
   MOZ_ASSERT(0 <= aDevice && aDevice < NUM_SWITCH_DEVICE);
@@ -479,16 +522,15 @@ static SwitchObserverList& GetSwitchObserverList(SwitchDevice aDevice) {
 
 static void ReleaseObserversIfNeeded() {
   for (int i = 0; i < NUM_SWITCH_DEVICE; i++) {
-    if (sSwitchObserverLists[i].Length() != 0)
-      return;
+    if (sSwitchObserverLists[i].Length() != 0) return;
   }
 
-  //The length of every list is 0, no observer in the list.
-  delete [] sSwitchObserverLists;
+  // The length of every list is 0, no observer in the list.
+  delete[] sSwitchObserverLists;
   sSwitchObserverLists = nullptr;
 }
 
-void RegisterSwitchObserver(SwitchDevice aDevice, SwitchObserver *aObserver) {
+void RegisterSwitchObserver(SwitchDevice aDevice, SwitchObserver* aObserver) {
   AssertMainThread();
   SwitchObserverList& observer = GetSwitchObserverList(aDevice);
   observer.AddObserver(aObserver);
@@ -497,7 +539,7 @@ void RegisterSwitchObserver(SwitchDevice aDevice, SwitchObserver *aObserver) {
   }
 }
 
-void UnregisterSwitchObserver(SwitchDevice aDevice, SwitchObserver *aObserver) {
+void UnregisterSwitchObserver(SwitchDevice aDevice, SwitchObserver* aObserver) {
   AssertMainThread();
 
   if (!sSwitchObserverLists) {
@@ -516,8 +558,7 @@ void UnregisterSwitchObserver(SwitchDevice aDevice, SwitchObserver *aObserver) {
 void NotifySwitchChange(const SwitchEvent& aEvent) {
   // When callback this notification, main thread may call unregister function
   // first. We should check if this pointer is valid.
-  if (!sSwitchObserverLists)
-    return;
+  if (!sSwitchObserverLists) return;
 
   SwitchObserverList& observer = GetSwitchObserverList(aEvent.device());
   observer.Broadcast(aEvent);
@@ -562,11 +603,7 @@ void SetProcessPriority(int aPid, ProcessPriority aPriority) {
   PROXY_IF_SANDBOXED(SetProcessPriority(aPid, aPriority));
 }
 
-uint32_t
-GetTotalSystemMemory()
-{
-  return hal_impl::GetTotalSystemMemory();
-}
+uint32_t GetTotalSystemMemory() { return hal_impl::GetTotalSystemMemory(); }
 
 // From HalTypes.h.
 const char* ProcessPriorityToString(ProcessPriority aPriority) {
@@ -646,6 +683,230 @@ bool SystemServiceIsRunning(const char* aSvcName) {
 bool SystemServiceIsStopped(const char* aSvcName) {
   AssertMainThread();
   RETURN_PROXY_IF_SANDBOXED(SystemServiceIsStopped(aSvcName), false);
+}
+
+static StaticAutoPtr<ObserverList<FMRadioOperationInformation>>
+    sFMRadioObservers;
+static StaticAutoPtr<ObserverList<FMRadioRDSGroup>> sFMRadioRDSObservers;
+
+static void InitializeFMRadioObserver() {
+  if (!sFMRadioObservers) {
+    sFMRadioObservers = new ObserverList<FMRadioOperationInformation>;
+    sFMRadioRDSObservers = new ObserverList<FMRadioRDSGroup>;
+    ClearOnShutdown(&sFMRadioRDSObservers);
+    ClearOnShutdown(&sFMRadioObservers);
+  }
+}
+
+void RegisterFMRadioObserver(FMRadioObserver* aFMRadioObserver) {
+  AssertMainThread();
+  InitializeFMRadioObserver();
+  sFMRadioObservers->AddObserver(aFMRadioObserver);
+}
+
+void UnregisterFMRadioObserver(FMRadioObserver* aFMRadioObserver) {
+  AssertMainThread();
+  InitializeFMRadioObserver();
+  sFMRadioObservers->RemoveObserver(aFMRadioObserver);
+}
+
+void NotifyFMRadioStatus(const FMRadioOperationInformation& aFMRadioState) {
+  InitializeFMRadioObserver();
+  sFMRadioObservers->Broadcast(aFMRadioState);
+}
+
+void RegisterFMRadioRDSObserver(FMRadioRDSObserver* aFMRadioRDSObserver) {
+  AssertMainThread();
+  InitializeFMRadioObserver();
+  sFMRadioRDSObservers->AddObserver(aFMRadioRDSObserver);
+}
+
+void UnregisterFMRadioRDSObserver(FMRadioRDSObserver* aFMRadioRDSObserver) {
+  AssertMainThread();
+  InitializeFMRadioObserver();
+  sFMRadioRDSObservers->RemoveObserver(aFMRadioRDSObserver);
+}
+
+void NotifyFMRadioRDSGroup(const FMRadioRDSGroup& aRDSGroup) {
+  InitializeFMRadioObserver();
+  sFMRadioRDSObservers->Broadcast(aRDSGroup);
+}
+
+void EnableFMRadio(const FMRadioSettings& aInfo) {
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(EnableFMRadio(aInfo));
+}
+
+void DisableFMRadio() {
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(DisableFMRadio());
+}
+
+#if defined(PRODUCT_MANUFACTURER_SPRD) || defined(PRODUCT_MANUFACTURER_MTK)
+void SetFMRadioAntenna(const int32_t aStatus) {
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(SetFMRadioAntenna(aStatus));
+}
+#endif
+
+void FMRadioSeek(const FMRadioSeekDirection& aDirection) {
+  PROXY_IF_SANDBOXED(FMRadioSeek(aDirection));
+}
+
+void GetFMRadioSettings(FMRadioSettings* aInfo) {
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(GetFMRadioSettings(aInfo));
+}
+
+void SetFMRadioFrequency(const uint32_t aFrequency) {
+  PROXY_IF_SANDBOXED(SetFMRadioFrequency(aFrequency));
+}
+
+uint32_t GetFMRadioFrequency() {
+  AssertMainThread();
+  RETURN_PROXY_IF_SANDBOXED(GetFMRadioFrequency(), 0);
+}
+
+bool IsFMRadioOn() {
+  AssertMainThread();
+  RETURN_PROXY_IF_SANDBOXED(IsFMRadioOn(), false);
+}
+
+uint32_t GetFMRadioSignalStrength() {
+  AssertMainThread();
+  RETURN_PROXY_IF_SANDBOXED(GetFMRadioSignalStrength(), 0);
+}
+
+void CancelFMRadioSeek() {
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(CancelFMRadioSeek());
+}
+
+bool EnableRDS(uint32_t aMask) {
+  AssertMainThread();
+  RETURN_PROXY_IF_SANDBOXED(EnableRDS(aMask), false);
+}
+
+void DisableRDS() {
+  AssertMainThread();
+  PROXY_IF_SANDBOXED(DisableRDS());
+}
+
+FMRadioSettings GetFMBandSettings(FMRadioCountry aCountry) {
+  FMRadioSettings settings;
+
+  switch (aCountry) {
+    case FM_RADIO_COUNTRY_US:
+    case FM_RADIO_COUNTRY_EU:
+      settings.upperLimit() = 108000;
+      settings.lowerLimit() = 87800;
+      settings.spaceType() = 200;
+      settings.preEmphasis() = 75;
+      break;
+    case FM_RADIO_COUNTRY_JP_STANDARD:
+      settings.upperLimit() = 76000;
+      settings.lowerLimit() = 90000;
+      settings.spaceType() = 100;
+      settings.preEmphasis() = 50;
+      break;
+    case FM_RADIO_COUNTRY_CY:
+    case FM_RADIO_COUNTRY_DE:
+    case FM_RADIO_COUNTRY_DK:
+    case FM_RADIO_COUNTRY_ES:
+    case FM_RADIO_COUNTRY_FI:
+    case FM_RADIO_COUNTRY_FR:
+    case FM_RADIO_COUNTRY_HU:
+    case FM_RADIO_COUNTRY_IR:
+    case FM_RADIO_COUNTRY_IT:
+    case FM_RADIO_COUNTRY_KW:
+    case FM_RADIO_COUNTRY_LT:
+    case FM_RADIO_COUNTRY_ML:
+    case FM_RADIO_COUNTRY_NO:
+    case FM_RADIO_COUNTRY_OM:
+    case FM_RADIO_COUNTRY_PG:
+    case FM_RADIO_COUNTRY_NL:
+    case FM_RADIO_COUNTRY_CZ:
+    case FM_RADIO_COUNTRY_UK:
+    case FM_RADIO_COUNTRY_RW:
+    case FM_RADIO_COUNTRY_SN:
+    case FM_RADIO_COUNTRY_SI:
+    case FM_RADIO_COUNTRY_ZA:
+    case FM_RADIO_COUNTRY_SE:
+    case FM_RADIO_COUNTRY_CH:
+    case FM_RADIO_COUNTRY_TW:
+    case FM_RADIO_COUNTRY_UA:
+      settings.upperLimit() = 108000;
+      settings.lowerLimit() = 87500;
+      settings.spaceType() = 100;
+      settings.preEmphasis() = 50;
+      break;
+    case FM_RADIO_COUNTRY_VA:
+    case FM_RADIO_COUNTRY_MA:
+    case FM_RADIO_COUNTRY_TR:
+      settings.upperLimit() = 10800;
+      settings.lowerLimit() = 87500;
+      settings.spaceType() = 100;
+      settings.preEmphasis() = 75;
+      break;
+    case FM_RADIO_COUNTRY_AU:
+    case FM_RADIO_COUNTRY_BD:
+      settings.upperLimit() = 108000;
+      settings.lowerLimit() = 87500;
+      settings.spaceType() = 200;
+      settings.preEmphasis() = 75;
+      break;
+    case FM_RADIO_COUNTRY_AW:
+    case FM_RADIO_COUNTRY_BS:
+    case FM_RADIO_COUNTRY_CO:
+    case FM_RADIO_COUNTRY_KR:
+      settings.upperLimit() = 108000;
+      settings.lowerLimit() = 88000;
+      settings.spaceType() = 200;
+      settings.preEmphasis() = 75;
+      break;
+    case FM_RADIO_COUNTRY_EC:
+      settings.upperLimit() = 108000;
+      settings.lowerLimit() = 88000;
+      settings.spaceType() = 200;
+      settings.preEmphasis() = 0;
+      break;
+    case FM_RADIO_COUNTRY_GM:
+      settings.upperLimit() = 108000;
+      settings.lowerLimit() = 88000;
+      settings.spaceType() = 0;
+      settings.preEmphasis() = 75;
+      break;
+    case FM_RADIO_COUNTRY_QA:
+      settings.upperLimit() = 108000;
+      settings.lowerLimit() = 88000;
+      settings.spaceType() = 200;
+      settings.preEmphasis() = 50;
+      break;
+    case FM_RADIO_COUNTRY_SG:
+      settings.upperLimit() = 108000;
+      settings.lowerLimit() = 88000;
+      settings.spaceType() = 200;
+      settings.preEmphasis() = 50;
+      break;
+    case FM_RADIO_COUNTRY_IN:
+      settings.upperLimit() = 100000;
+      settings.lowerLimit() = 108000;
+      settings.spaceType() = 100;
+      settings.preEmphasis() = 50;
+      break;
+    case FM_RADIO_COUNTRY_NZ:
+      settings.upperLimit() = 100000;
+      settings.lowerLimit() = 88000;
+      settings.spaceType() = 50;
+      settings.preEmphasis() = 50;
+      break;
+    case FM_RADIO_COUNTRY_USER_DEFINED:
+      break;
+    default:
+      MOZ_ASSERT(0);
+      break;
+  }
+  return settings;
 }
 
 }  // namespace mozilla::hal

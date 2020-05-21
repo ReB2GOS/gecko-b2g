@@ -20,7 +20,7 @@
 #include "mozilla/dom/SameProcessMessageQueue.h"
 #include "mozilla/dom/ScriptLoader.h"
 #include "mozilla/dom/WindowProxyHolder.h"
-#include "mozilla/dom/JSWindowActorService.h"
+#include "mozilla/dom/JSActorService.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -37,7 +37,7 @@ InProcessBrowserChildMessageManager::Create(nsDocShell* aShell,
   NS_ENSURE_TRUE(mm->Init(), nullptr);
 
   if (XRE_IsParentProcess()) {
-    RefPtr<JSWindowActorService> wasvc = JSWindowActorService::GetSingleton();
+    RefPtr<JSActorService> wasvc = JSActorService::GetSingleton();
     wasvc->RegisterChromeEventTarget(mm);
   }
 
@@ -111,7 +111,7 @@ InProcessBrowserChildMessageManager::InProcessBrowserChildMessageManager(
 
 InProcessBrowserChildMessageManager::~InProcessBrowserChildMessageManager() {
   if (XRE_IsParentProcess()) {
-    JSWindowActorService::UnregisterChromeEventTarget(this);
+    JSActorService::UnregisterChromeEventTarget(this);
   }
 
   mAnonymousGlobalScopes.Clear();
@@ -244,19 +244,6 @@ void InProcessBrowserChildMessageManager::GetEventTargetParent(
     EventChainPreVisitor& aVisitor) {
   aVisitor.mForceContentDispatch = true;
   aVisitor.mCanHandle = true;
-
-#ifdef DEBUG
-  if (mOwner) {
-    RefPtr<nsFrameLoaderOwner> owner = do_QueryObject(mOwner);
-    RefPtr<nsFrameLoader> fl = owner->GetFrameLoader();
-    if (fl) {
-      NS_ASSERTION(this == fl->GetBrowserChildMessageManager(),
-                   "Wrong event target!");
-      NS_ASSERTION(fl->mMessageManager == mChromeMessageManager,
-                   "Wrong message manager!");
-    }
-  }
-#endif
 
   if (mPreventEventsEscaping) {
     aVisitor.SetParentTarget(nullptr, false);

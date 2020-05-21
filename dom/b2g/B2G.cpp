@@ -30,6 +30,7 @@ NS_IMPL_CYCLE_COLLECTION_UNLINK_END
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(B2G)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mOwner)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAlarmManager)
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFlashlightManager)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mTetheringManager)
 #ifdef MOZ_B2G_RIL
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mIccManager)
@@ -47,17 +48,30 @@ NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN(B2G)
 #ifdef MOZ_B2G_CAMERA
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mCameraManager)
 #endif
-#ifndef DISABLE_WIFI
+#if defined(MOZ_WIDGET_GONK) && !defined(DISABLE_WIFI)
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mWifiManager)
 #endif
 #ifdef MOZ_AUDIO_CHANNEL_MANAGER
   NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mAudioChannelManager)
 #endif
+#ifdef MOZ_B2G_FM
+  NS_IMPL_CYCLE_COLLECTION_TRAVERSE(mFMRadio)
+#endif
 NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
 
 NS_IMPL_CYCLE_COLLECTION_TRACE_WRAPPERCACHE(B2G)
 
-void B2G::Shutdown() {}
+void B2G::Shutdown() {
+
+  if (mFlashlightManager) {
+    mFlashlightManager->Shutdown();
+    mFlashlightManager = nullptr;
+  }
+
+#ifdef MOZ_B2G_CAMERA
+  mCameraManager = nullptr;
+#endif
+}
 
 JSObject* B2G::WrapObject(JSContext* cx, JS::Handle<JSObject*> aGivenProto) {
   return B2G_Binding::Wrap(cx, this, aGivenProto);
@@ -74,6 +88,26 @@ AlarmManager* B2G::GetAlarmManager(ErrorResult& aRv) {
   }
 
   return mAlarmManager;
+}
+
+already_AddRefed<Promise> B2G::GetFlashlightManager(ErrorResult& aRv) {
+  if (!mFlashlightManager) {
+    if (!mOwner) {
+      aRv.Throw(NS_ERROR_UNEXPECTED);
+      return nullptr;
+    }
+
+    nsPIDOMWindowInner* innerWindow = mOwner->AsInnerWindow();
+    if (!innerWindow) {
+      aRv.Throw(NS_ERROR_UNEXPECTED);
+      return nullptr;
+    }
+    mFlashlightManager = new FlashlightManager(innerWindow);
+    mFlashlightManager->Init();
+  }
+
+  RefPtr<Promise> p = mFlashlightManager->GetPromise(aRv);
+  return p.forget();
 }
 
 TetheringManager* B2G::GetTetheringManager(ErrorResult& aRv) {
@@ -245,7 +279,7 @@ nsDOMCameraManager* B2G::GetCameras(ErrorResult& aRv) {
 }
 #endif // MOZ_B2G_CAMERA
 
-#ifndef DISABLE_WIFI
+#if defined(MOZ_WIDGET_GONK) && !defined(DISABLE_WIFI)
 WifiManager* B2G::GetWifiManager(ErrorResult& aRv) {
   if (!mWifiManager) {
     if (!mOwner) {
@@ -260,7 +294,7 @@ WifiManager* B2G::GetWifiManager(ErrorResult& aRv) {
   }
   return mWifiManager;
 }
-#endif
+#endif // MOZ_WIDGET_GONK && !DISABLE_WIFI
 
 /* static */
 bool B2G::HasCameraSupport(JSContext* /* unused */, JSObject* aGlobal) {
@@ -272,8 +306,8 @@ bool B2G::HasCameraSupport(JSContext* /* unused */, JSObject* aGlobal) {
 
 /* static */
 bool B2G::HasWifiManagerSupport(JSContext* /* unused */, JSObject* aGlobal) {
-#ifdef DISABLE_WIFI
-  return false;
+#if defined(MOZ_WIDGET_GONK) && !defined(DISABLE_WIFI)
+  return true;
 #endif
   // On XBL scope, the global object is NOT |window|. So we have
   // to use nsContentUtils::GetObjectPrincipal to get the principal
@@ -321,6 +355,48 @@ system::AudioChannelManager* B2G::GetAudioChannelManager(ErrorResult& aRv) {
   return mAudioChannelManager;
 }
 #endif
+
+#ifdef MOZ_B2G_FM
+FMRadio* B2G::GetFmRadio(ErrorResult& aRv) {
+  if (!mFMRadio) {
+    if (!mOwner) {
+      aRv.Throw(NS_ERROR_UNEXPECTED);
+      return nullptr;
+    }
+    mFMRadio = new FMRadio();
+    mFMRadio->Init(mOwner);
+  }
+  return mFMRadio;
+}
+#endif
+
+/* static */
+bool B2G::HasWakeLockSupport(JSContext* /* unused*/, JSObject* /*unused */)
+{
+  nsCOMPtr<nsIPowerManagerService> pmService =
+    do_GetService(POWERMANAGERSERVICE_CONTRACTID);
+  // No service means no wake lock support
+  return !!pmService;
+}
+
+already_AddRefed<WakeLock> B2G::RequestWakeLock(const nsAString &aTopic, ErrorResult& aRv) {
+  nsPIDOMWindowInner* innerWindow = mOwner->AsInnerWindow();
+  if (!innerWindow) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  RefPtr<power::PowerManagerService> pmService =
+    power::PowerManagerService::GetInstance();
+  // Maybe it went away for some reason... Or maybe we're just called
+  // from our XPCOM method.
+  if (!pmService) {
+    aRv.Throw(NS_ERROR_UNEXPECTED);
+    return nullptr;
+  }
+
+  return pmService->NewWakeLock(aTopic, innerWindow, aRv);
+}
 
 }  // namespace dom
 }  // namespace mozilla

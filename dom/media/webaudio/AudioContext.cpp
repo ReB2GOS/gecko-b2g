@@ -142,11 +142,7 @@ static float GetSampleRateForAudioContext(bool aIsOffline, float aSampleRate) {
   if (aIsOffline || aSampleRate != 0.0) {
     return aSampleRate;
   } else {
-    float rate = static_cast<float>(CubebUtils::PreferredSampleRate());
-    if (StaticPrefs::privacy_resistFingerprinting()) {
-      return 44100.f;
-    }
-    return rate;
+    return static_cast<float>(CubebUtils::PreferredSampleRate());
   }
 }
 
@@ -752,20 +748,6 @@ void AudioContext::DisconnectFromOwner() {
   mIsDisconnecting = true;
   Shutdown();
   DOMEventTargetHelper::DisconnectFromOwner();
-}
-
-void AudioContext::BindToOwner(nsIGlobalObject* aNew) {
-  auto scopeExit =
-      MakeScopeExit([&] { DOMEventTargetHelper::BindToOwner(aNew); });
-
-  if (GetOwner()) {
-    GetOwner()->RemoveAudioContext(this);
-  }
-
-  nsCOMPtr<nsPIDOMWindowInner> newWindow = do_QueryInterface(aNew);
-  if (newWindow) {
-    newWindow->AddAudioContext(this);
-  }
 }
 
 void AudioContext::Shutdown() {

@@ -11,7 +11,7 @@ def B2GBranding():
             'app.ico',
         ]
     # elif CONFIG['MOZ_WIDGET_TOOLKIT'] == 'cocoa':
-    #    BRANDING_FILES += [
+    #     BRANDING_FILES += [
     #         'app.icns',
     #         'background.png',
     #         'disk.icns',

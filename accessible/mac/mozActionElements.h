@@ -13,6 +13,9 @@
 - (BOOL)hasPopup;
 @end
 
+@interface mozPopupButtonAccessible : mozButtonAccessible
+@end
+
 @interface mozCheckboxAccessible : mozButtonAccessible
 // returns one of the constants defined in CheckboxValue
 - (int)isChecked;
@@ -26,8 +29,8 @@
 @end
 
 /**
- * Accessible for a slider
+ * Base accessible for an incrementable
  */
-@interface mozSliderAccessible : mozAccessible
+@interface mozIncrementableAccessible : mozAccessible
 
 @end

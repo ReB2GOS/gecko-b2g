@@ -14,6 +14,7 @@
 #include "mozilla/net/PDocumentChannelParent.h"
 #include "mozilla/net/ParentChannelListener.h"
 #include "mozilla/net/ADocumentChannelBridge.h"
+#include "mozilla/dom/SessionHistoryEntry.h"
 #include "nsDOMNavigationTiming.h"
 #include "nsIInterfaceRequestor.h"
 #include "nsIParentChannel.h"
@@ -203,12 +204,6 @@ class DocumentLoadListener : public nsIInterfaceRequestor,
                              uint32_t aLoadFlags,
                              dom::ContentParent* aParent) const;
 
-  const nsTArray<DocumentChannelRedirect>& Redirects() const {
-    return mRedirects;
-  }
-
-  net::LastVisitInfo LastVisitInfo() const;
-
  protected:
   DocumentLoadListener(dom::CanonicalBrowsingContext* aBrowsingContext,
                        base::ProcessId aPendingBridgeProcess);
@@ -267,6 +262,7 @@ class DocumentLoadListener : public nsIInterfaceRequestor,
 
   dom::CanonicalBrowsingContext* GetBrowsingContext();
 
+  void AddURIVisit(nsIChannel* aChannel, uint32_t aLoadFlags);
   bool HasCrossOriginOpenerPolicyMismatch() const;
   void ApplyPendingFunctions(nsISupports* aChannel) const;
 
@@ -395,12 +391,16 @@ class DocumentLoadListener : public nsIInterfaceRequestor,
   // switch occurs.
   RefPtr<nsDOMNavigationTiming> mTiming;
 
-  nsTArray<DocumentChannelRedirect> mRedirects;
+  // Used to identify an internal redirect in redirect chain.
+  // True when we have seen at least one non-interal redirect.
+  bool mHaveVisibleRedirect = false;
 
   nsTArray<StreamFilterRequest> mStreamFilterRequests;
 
   nsString mSrcdocData;
   nsCOMPtr<nsIURI> mBaseURI;
+
+  mozilla::UniquePtr<mozilla::dom::SessionHistoryInfoAndId> mSessionHistoryInfo;
 
   // Flags from nsDocShellLoadState::LoadFlags/Type that we want to make
   // available to the new docshell if we switch processes.
@@ -434,6 +434,9 @@ class DocumentLoadListener : public nsIInterfaceRequestor,
   // This identifier is set by MaybeTriggerProcessSwitch, and is later
   // passed to the childChannel in order to identify it in the new process.
   uint64_t mCrossProcessRedirectIdentifier = 0;
+
+  // True if cancelled.
+  bool mCancelled = false;
 };
 
 NS_DEFINE_STATIC_IID_ACCESSOR(DocumentLoadListener, DOCUMENT_LOAD_LISTENER_IID)

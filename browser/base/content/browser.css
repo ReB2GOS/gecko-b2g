@@ -675,6 +675,10 @@ toolbar:not(#TabsToolbar) > #personal-bookmarks {
   min-width: 22em;
 }
 
+#PopupAutoComplete[resultstyles~="importableLogins"] {
+  min-width: 24em;
+}
+
 #PopupAutoComplete > richlistbox > richlistitem[originaltype="insecureWarning"] {
   height: auto;
 }
@@ -1027,14 +1031,12 @@ toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > .toolbarbut
   -moz-appearance: none;
   background: transparent;
   border: none;
-  -moz-font-smoothing-background-color: unset;
-
   /* The popup inherits -moz-image-region from the button, must reset it */
   -moz-image-region: auto;
 }
 
-/* Keep in sync with xul.css */
 @supports -moz-bool-pref("xul.panel-animations.enabled") {
+@media (prefers-reduced-motion: no-preference) {
 %ifdef MOZ_WIDGET_COCOA
   /* On Mac, use the properties "-moz-window-transform" and "-moz-window-opacity"
      instead of "transform" and "opacity" for these animations.
@@ -1098,6 +1100,7 @@ toolbarpaletteitem[place="palette"] > #downloads-button[indicator] > .toolbarbut
     transform: none;
   }
 %endif
+}
 }
 
 /* Apply crisp rendering for favicons at exactly 2dppx resolution */

@@ -95,7 +95,9 @@ nsresult nsThreadPool::PutEvent(already_AddRefed<nsIRunnable> aEvent,
       spawnThread = true;
     }
 
-    mEvents.PutEvent(std::move(aEvent), EventQueuePriority::Normal, lock);
+    nsCOMPtr<nsIRunnable> event(aEvent);
+    LogRunnable::LogDispatch(event);
+    mEvents.PutEvent(event.forget(), EventQueuePriority::Normal, lock);
     mEventsAvailable.Notify();
     stackSize = mStackSize;
   }
@@ -274,10 +276,7 @@ nsThreadPool::Run() {
           TimeDuration delta = timeout - (now - idleSince);
           LOG(("THRD-P(%p) %s waiting [%f]\n", this, mName.BeginReading(),
                delta.ToMilliseconds()));
-          {
-            AUTO_PROFILER_THREAD_SLEEP;
-            mEventsAvailable.Wait(delta);
-          }
+          mEventsAvailable.Wait(delta);
           LOG(("THRD-P(%p) done waiting\n", this));
         }
       } else if (wasIdle) {
@@ -297,7 +296,10 @@ nsThreadPool::Run() {
       // when we sample.
       current->SetRunningEventDelay(delay, TimeStamp::Now());
 
+      LogRunnable::Run log(event);
       event->Run();
+      // To cover the event's destructor code in the LogRunnable span
+      event = nullptr;
     }
   } while (!exitThread);
 

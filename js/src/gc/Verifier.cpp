@@ -606,8 +606,7 @@ void js::gc::MarkingValidator::nonIncrementalMark(AutoGCSession& session) {
     gcstats::AutoPhase ap1(gc->stats(), gcstats::PhaseKind::SWEEP);
     gcstats::AutoPhase ap2(gc->stats(), gcstats::PhaseKind::SWEEP_MARK);
 
-    auto unlimited = SliceBudget::unlimited();
-    gc->markAllWeakReferences(gcstats::PhaseKind::SWEEP_MARK_WEAK, unlimited);
+    gc->markAllWeakReferences();
 
     /* Update zone state for gray marking. */
     for (GCZonesIter zone(gc); !zone.done(); zone.next()) {
@@ -618,8 +617,7 @@ void js::gc::MarkingValidator::nonIncrementalMark(AutoGCSession& session) {
     gcmarker->setMainStackColor(MarkColor::Gray);
 
     gc->markAllGrayReferences(gcstats::PhaseKind::SWEEP_MARK_GRAY);
-    gc->markAllWeakReferences(gcstats::PhaseKind::SWEEP_MARK_GRAY_WEAK,
-                              unlimited);
+    gc->markAllWeakReferences();
     gc->marker.setMainStackColor(MarkColor::Black);
 
     /* Restore zone state. */
@@ -824,17 +822,7 @@ bool HeapCheckTracerBase::onChild(const JS::GCCellPtr& thing) {
   }
 
   // Don't trace into GC in zones being used by helper threads.
-  Zone* zone;
-  if (thing.is<JSObject>()) {
-    zone = thing.as<JSObject>().zone();
-  } else if (thing.is<JSString>()) {
-    zone = thing.as<JSString>().zone();
-  } else if (thing.is<JS::BigInt>()) {
-    zone = thing.as<JS::BigInt>().zone();
-  } else {
-    zone = cell->asTenured().zone();
-  }
-
+  Zone* zone = thing.asCell()->zone();
   if (zone->usedByHelperThread()) {
     return true;
   }
@@ -1015,22 +1003,6 @@ JS_FRIEND_API bool js::CheckGrayMarkingState(JSRuntime* rt) {
   return tracer.check(session);
 }
 
-static Zone* GetCellZoneFromAnyThread(Cell* cell) {
-  if (cell->is<JSObject>()) {
-    return cell->as<JSObject>()->zoneFromAnyThread();
-  }
-
-  if (cell->is<JSString>()) {
-    return cell->as<JSString>()->zoneFromAnyThread();
-  }
-
-  if (cell->is<JS::BigInt>()) {
-    return cell->as<JS::BigInt>()->zoneFromAnyThread();
-  }
-
-  return cell->asTenured().zoneFromAnyThread();
-}
-
 static JSObject* MaybeGetDelegate(Cell* cell) {
   if (!cell->is<JSObject>()) {
     return nullptr;
@@ -1052,11 +1024,11 @@ bool js::gc::CheckWeakMapEntryMarking(const WeakMapBase* map, Cell* key,
   MOZ_ASSERT_IF(object, object->zone() == zone);
 
   // Debugger weak maps can have keys in different zones.
-  Zone* keyZone = GetCellZoneFromAnyThread(key);
+  Zone* keyZone = key->zoneFromAnyThread();
   MOZ_ASSERT_IF(!map->allowKeysInOtherZones(),
                 keyZone == zone || keyZone->isAtomsZone());
 
-  Zone* valueZone = GetCellZoneFromAnyThread(value);
+  Zone* valueZone = value->zoneFromAnyThread();
   MOZ_ASSERT(valueZone == zone || valueZone->isAtomsZone());
 
   if (object && object->color() != map->mapColor) {

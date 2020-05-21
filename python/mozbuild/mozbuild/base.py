@@ -42,7 +42,6 @@ from .util import (
     memoize,
     memoized_property,
 )
-from .virtualenv import VirtualenvManager
 
 
 def ancestors(path):
@@ -273,6 +272,8 @@ class MozbuildObject(ProcessExecutionMixin):
 
     @property
     def virtualenv_manager(self):
+        from .virtualenv import VirtualenvManager
+
         if self._virtualenv_manager is None:
             name = "init"
             if six.PY3:
@@ -554,12 +555,9 @@ class MozbuildObject(ProcessExecutionMixin):
         if where == 'staged-package':
             stem = os.path.join(stem, substs['MOZ_APP_NAME'])
 
-        if substs['OS_ARCH'] == 'Darwin':
-            if substs['MOZ_BUILD_APP'] == 'xulrunner':
-                stem = os.path.join(stem, 'XUL.framework')
-            else:
-                stem = os.path.join(stem, substs['MOZ_MACBUNDLE_NAME'], 'Contents',
-                                    'MacOS')
+        if substs['OS_ARCH'] == 'Darwin' and 'MOZ_MACBUNDLE_NAME' in substs:
+            stem = os.path.join(stem, substs['MOZ_MACBUNDLE_NAME'], 'Contents',
+                                'MacOS')
         elif where == 'default':
             stem = os.path.join(stem, 'bin')
 
@@ -968,6 +966,11 @@ class MachCommandConditions(object):
         if hasattr(cls, 'substs'):
             return cls.substs.get('MOZ_BUILD_APP') == 'comm/mail'
         return False
+
+    @staticmethod
+    def is_firefox_or_thunderbird(cls):
+        """Must have a Firefox or Thunderbird build."""
+        return MachCommandConditions.is_firefox(cls) or MachCommandConditions.is_thunderbird(cls)
 
     @staticmethod
     def is_android(cls):

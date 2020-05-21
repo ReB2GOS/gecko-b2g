@@ -49,10 +49,6 @@ inline NSString* ToNSString(id aValue) {
 
 @implementation mozTextAccessible
 
-- (BOOL)accessibilityIsIgnored {
-  return ![self getGeckoAccessible] && ![self getProxyAccessible];
-}
-
 - (NSArray*)accessibilityAttributeNames {
   NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
 
@@ -345,6 +341,14 @@ inline NSString* ToNSString(id aValue) {
 - (NSString*)subrole {
   if (mRole == roles::PASSWORD_TEXT) return NSAccessibilitySecureTextFieldSubrole;
 
+  if (mRole == roles::ENTRY) {
+    AccessibleWrap* accWrap = [self getGeckoAccessible];
+    ProxyAccessible* proxy = [self getProxyAccessible];
+    if ((accWrap && accWrap->IsSearchbox()) || (proxy && proxy->IsSearchbox())) {
+      return @"AXSearchField";
+    }
+  }
+
   return nil;
 }
 
@@ -576,39 +580,11 @@ inline NSString* ToNSString(id aValue) {
 }
 
 - (id)accessibilityAttributeValue:(NSString*)attribute {
-  if ([attribute isEqualToString:NSAccessibilityTitleAttribute]) return @"";
+  if ([attribute isEqualToString:NSAccessibilityTitleAttribute]) return nil;
 
-  if ([attribute isEqualToString:NSAccessibilityValueAttribute]) return [self text];
+  if ([attribute isEqualToString:NSAccessibilityValueAttribute]) return [self title];
 
   return [super accessibilityAttributeValue:attribute];
-}
-
-- (NSString*)text {
-  if (AccessibleWrap* accWrap = [self getGeckoAccessible]) {
-    return nsCocoaUtils::ToNSString(accWrap->AsTextLeaf()->Text());
-  }
-
-  if (ProxyAccessible* proxy = [self getProxyAccessible]) {
-    nsString text;
-    proxy->Text(&text);
-    return nsCocoaUtils::ToNSString(text);
-  }
-
-  return nil;
-}
-
-- (long)textLength {
-  if (AccessibleWrap* accWrap = [self getGeckoAccessible]) {
-    return accWrap->AsTextLeaf()->Text().Length();
-  }
-
-  if (ProxyAccessible* proxy = [self getProxyAccessible]) {
-    nsString text;
-    proxy->Text(&text);
-    return text.Length();
-  }
-
-  return 0;
 }
 
 - (NSString*)accessibilityLabel {

@@ -11,6 +11,7 @@
 //! ```
 
 // Re-exporting for later use in generated code.
+pub extern crate chrono;
 pub extern crate once_cell;
 pub extern crate uuid;
 
@@ -19,10 +20,13 @@ pub mod metrics;
 /// Run a closure with a mutable reference to the locked global Glean object.
 fn with_glean<F, R>(f: F) -> R
 where
-    F: FnOnce(&glean_core::Glean) -> R,
+    F: FnOnce(&mut glean_core::Glean) -> R,
 {
-    let lock = glean_core::global_glean().lock().unwrap();
-    f(&lock)
+    let mut lock = glean_core::global_glean()
+        .expect("Global Glean object not initialized")
+        .lock()
+        .unwrap();
+    f(&mut lock)
 }
 
 /// Determine whether upload is enabled.

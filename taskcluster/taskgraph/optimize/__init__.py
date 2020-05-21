@@ -376,8 +376,11 @@ import_sibling_modules()
 
 # Register composite strategies.
 register_strategy('build', args=('skip-unless-schedules',))(Alias)
-register_strategy('build-fuzzing', args=('skip-unless-schedules', 'seta'))(Any)
-register_strategy('test', args=(Any('skip-unless-schedules', 'seta'), 'backstop'))(All)
+register_strategy('build-fuzzing', args=('backstop',))(Alias)
+register_strategy('test', args=(
+    Any('skip-unless-schedules', 'bugbug-reduced-fallback', split_args=tuple),
+    'backstop',
+))(All)
 register_strategy('test-inclusive', args=('skip-unless-schedules',))(Alias)
 register_strategy('test-try', args=('skip-unless-schedules',))(Alias)
 
@@ -394,48 +397,69 @@ class experimental(object):
     """
 
     bugbug_all = {
-        'test': Any('skip-unless-schedules', 'bugbug'),
+        'test': Any('skip-unless-schedules', 'bugbug', split_args=tuple),
     }
     """Doesn't limit platforms, medium confidence threshold."""
 
-    bugbug_all_low = {
-        'test': Any('skip-unless-schedules', 'bugbug-low'),
-    }
-    """Doesn't limit platforms, low confidence threshold."""
-
     bugbug_all_high = {
-        'test': Any('skip-unless-schedules', 'bugbug-high'),
+        'test': Any('skip-unless-schedules', 'bugbug-high', split_args=tuple),
     }
     """Doesn't limit platforms, high confidence threshold."""
 
-    bugbug_combined_high = {
-        'test': Any('skip-unless-schedules', 'bugbug-combined-high'),
-    }
-    """Combines the weights of all groups, high confidence threshold."""
-
-    bugbug_debug = {
-        'test': Any('skip-unless-schedules', 'bugbug', 'platform-debug'),
+    bugbug_debug_disperse = {
+        'test': Any(
+            'skip-unless-schedules',
+            Any('bugbug', 'platform-debug', 'platform-disperse'),
+            split_args=tuple
+        ),
     }
     """Restricts tests to debug platforms."""
 
+    bugbug_disperse_low = {
+        'test': Any(
+            'skip-unless-schedules',
+            Any('bugbug-low', 'platform-disperse'),
+            split_args=tuple
+        ),
+    }
+    """Disperse tests across platforms, low confidence threshold."""
+
+    bugbug_disperse = {
+        'test': Any(
+            'skip-unless-schedules',
+            Any('bugbug', 'platform-disperse'),
+            split_args=tuple
+        ),
+    }
+    """Disperse tests across platforms, medium confidence threshold."""
+
+    bugbug_disperse_high = {
+        'test': Any(
+            'skip-unless-schedules',
+            Any('bugbug-high', 'platform-disperse'),
+            split_args=tuple
+        ),
+    }
+    """Disperse tests across platforms, high confidence threshold."""
+
     bugbug_reduced = {
-        'test': Any('skip-unless-schedules', 'bugbug-reduced'),
+        'test': Any('skip-unless-schedules', 'bugbug-reduced', split_args=tuple),
     }
     """Use the reduced set of tasks (and no groups) chosen by bugbug."""
 
     bugbug_reduced_high = {
-        'test': Any('skip-unless-schedules', 'bugbug-reduced-high'),
+        'test': Any('skip-unless-schedules', 'bugbug-reduced-high', split_args=tuple),
     }
     """Use the reduced set of tasks (and no groups) chosen by bugbug, high
     confidence threshold."""
 
     relevant_tests = {
-        'test': Any('skip-unless-schedules', 'skip-unless-has-relevant-tests'),
+        'test': Any('skip-unless-schedules', 'skip-unless-has-relevant-tests', split_args=tuple),
     }
     """Runs task containing tests in the same directories as modified files."""
 
     seta = {
-        'test': Any('skip-unless-schedules', 'seta'),
+        'test': Any('skip-unless-schedules', 'seta', split_args=tuple),
     }
     """Provides a stable history of SETA's performance in the event we make it
     non-default in the future. Only useful as a benchmark."""
@@ -463,6 +487,6 @@ class ExperimentalOverride(object):
 
 
 tryselect = ExperimentalOverride(experimental, {
-    'build': Alias('always'),
-    'build-fuzzing': Alias('always'),
+    'build': Any('skip-unless-schedules', 'bugbug-reduced', split_args=tuple),
+    'build-fuzzing': Any('skip-unless-schedules', 'bugbug-reduced', split_args=tuple),
 })

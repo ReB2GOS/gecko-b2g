@@ -23,7 +23,6 @@ import attr
 from mozbuild.util import memoize
 from taskgraph.util.attributes import TRUNK_PROJECTS
 from taskgraph.util.hash import hash_path
-from taskgraph.util.taskcluster import get_root_url
 from taskgraph.util.treeherder import split_symbol
 from taskgraph.transforms.base import TransformSequence
 from taskgraph.util.keyed_by import evaluate_keyed_by
@@ -1151,32 +1150,6 @@ def build_bouncer_submission_payload(config, task, task_def):
     }
 
 
-@payload_builder('push-apk', schema={
-    Required('upstream-artifacts'): [{
-        Required('taskId'): taskref_or_string,
-        Required('taskType'): text_type,
-        Required('paths'): [text_type],
-        Optional('optional', default=False): bool,
-    }],
-
-    # "Invalid" is a noop for try and other non-supported branches
-    Required('google-play-track'): Any('production', 'beta', 'alpha', 'rollout', 'internal'),
-    Required('commit'): bool,
-    Optional('rollout-percentage'): Any(int, None),
-})
-def build_push_apk_payload(config, task, task_def):
-    worker = task['worker']
-
-    task_def['payload'] = {
-        'commit': worker['commit'],
-        'upstreamArtifacts': worker['upstream-artifacts'],
-        'google_play_track': worker['google-play-track'],
-    }
-
-    if worker.get('rollout-percentage', None):
-        task_def['payload']['rollout_percentage'] = worker['rollout-percentage']
-
-
 @payload_builder('push-snap', schema={
     Required('channel'): text_type,
     Required('upstream-artifacts'): [{
@@ -1999,10 +1972,6 @@ def build_task(config, tasks):
             if payload:
                 env = payload.setdefault('env', {})
                 env['MOZ_AUTOMATION'] = '1'
-
-                # Set TASKCLUSTER_ROOT_URL on workers that don't set it
-                if provisioner_id == 'terraform-packet':
-                    env['TASKCLUSTER_ROOT_URL'] = get_root_url(False)
 
         yield {
             'label': task['label'],

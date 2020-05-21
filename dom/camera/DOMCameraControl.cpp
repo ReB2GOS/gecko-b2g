@@ -263,7 +263,8 @@ nsDOMCameraControl::nsDOMCameraControl(uint32_t aCameraId,
   mInput = new CameraPreviewMediaStream();
   //mOwnedStream = mInput;
 
-  BindToOwner(aWindow);
+  nsIGlobalObject* global = aWindow ? aWindow->AsGlobal() : nullptr;
+  BindToOwner(global);
 
   RefPtr<DOMCameraConfiguration> initialConfig =
     new DOMCameraConfiguration(aInitialConfig);
@@ -1590,13 +1591,13 @@ nsDOMCameraControl::OnTakePictureComplete(dom::Blob* aPicture)
   DOM_CAMERA_LOGT("%s:%d : this=%p\n", __func__, __LINE__, this);
   MOZ_ASSERT(NS_IsMainThread());
   MOZ_ASSERT(aPicture);
-  
+
   RefPtr<Promise> promise = mTakePicturePromise.forget();
   if (promise) {
     RefPtr<Blob> picture = aPicture;
     promise->MaybeResolve(picture);
   }
- 
+
   RefPtr<Blob> blob = static_cast<Blob*>(aPicture);
   BlobEventInit eventInit;
   eventInit.mData = blob;

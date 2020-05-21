@@ -36,21 +36,19 @@ static PHalChild* Hal() {
   return sHal;
 }
 
-void Vibrate(const nsTArray<uint32_t>& pattern, const WindowIdentifier& id) {
+void Vibrate(const nsTArray<uint32_t>& pattern, WindowIdentifier&& id) {
   HAL_LOG("Vibrate: Sending to parent process.");
 
-  AutoTArray<uint32_t, 8> p(pattern);
-
-  WindowIdentifier newID(id);
+  WindowIdentifier newID(std::move(id));
   newID.AppendProcessID();
-  Hal()->SendVibrate(p, newID.AsArray(),
+  Hal()->SendVibrate(pattern, newID.AsArray(),
                      BrowserChild::GetFrom(newID.GetWindow()));
 }
 
-void CancelVibrate(const WindowIdentifier& id) {
+void CancelVibrate(WindowIdentifier&& id) {
   HAL_LOG("CancelVibrate: Sending to parent process.");
 
-  WindowIdentifier newID(id);
+  WindowIdentifier newID(std::move(id));
   newID.AppendProcessID();
   Hal()->SendCancelVibrate(newID.AsArray(),
                            BrowserChild::GetFrom(newID.GetWindow()));
@@ -68,8 +66,7 @@ void EnableNetworkNotifications() { Hal()->SendEnableNetworkNotifications(); }
 
 void DisableNetworkNotifications() { Hal()->SendDisableNetworkNotifications(); }
 
-void
-SetNetworkType(int32_t aType) {}
+void SetNetworkType(int32_t aType) {}
 
 void GetCurrentNetworkInformation(NetworkInformation* aNetworkInfo) {
   Hal()->SendGetCurrentNetworkInformation(aNetworkInfo);
@@ -95,23 +92,15 @@ bool LockScreenOrientation(const hal::ScreenOrientation& aOrientation) {
 
 void UnlockScreenOrientation() { Hal()->SendUnlockScreenOrientation(); }
 
-bool
-GetScreenEnabled()
-{
+bool GetScreenEnabled() {
   bool enabled = false;
   Hal()->SendGetScreenEnabled(&enabled);
   return enabled;
 }
 
-void
-SetScreenEnabled(bool aEnabled)
-{
-  Hal()->SendSetScreenEnabled(aEnabled);
-}
+void SetScreenEnabled(bool aEnabled) { Hal()->SendSetScreenEnabled(aEnabled); }
 
-void
-SetScreenBrightness(double aBrightness)
-{
+void SetScreenBrightness(double aBrightness) {
   Hal()->SendSetScreenBrightness(aBrightness);
 }
 
@@ -155,10 +144,30 @@ SwitchState GetCurrentSwitchState(SwitchDevice aDevice) {
   return state;
 }
 
-void NotifySwitchStateFromInputDevice(SwitchDevice aDevice, SwitchState aState) {
+void NotifySwitchStateFromInputDevice(SwitchDevice aDevice,
+                                      SwitchState aState) {
   Unused << aDevice;
   Unused << aState;
   MOZ_CRASH("Only the main process may notify switch state change.");
+}
+
+void EnableFlashlightNotifications() {
+  Hal()->SendEnableFlashlightNotifications();
+}
+
+void DisableFlashlightNotifications() {
+  Hal()->SendDisableFlashlightNotifications();
+}
+
+void RequestCurrentFlashlightState() { Hal()->SendGetFlashlightEnabled(); }
+
+bool GetFlashlightEnabled() {
+  MOZ_CRASH("GetFlashlightEnabled() can't be called from sandboxed contexts.");
+  return true;
+}
+
+void SetFlashlightEnabled(bool aEnabled) {
+  Hal()->SendSetFlashlightEnabled(aEnabled);
 }
 
 bool EnableAlarm() {
@@ -207,13 +216,68 @@ bool SystemServiceIsStopped(const char* aSvcName) {
   return true;
 }
 
+void EnableFMRadio(const hal::FMRadioSettings& aSettings) {
+  MOZ_CRASH("FM radio cannot be called from sandboxed contexts.");
+}
+
+void DisableFMRadio() {
+  MOZ_CRASH("FM radio cannot be called from sandboxed contexts.");
+}
+
+#if defined(PRODUCT_MANUFACTURER_SPRD) || defined(PRODUCT_MANUFACTURER_MTK)
+void SetFMRadioAntenna(const int32_t aStatus) {
+  MOZ_CRASH("FM radio cannot be called from sandboxed contexts.");
+}
+#endif
+
+void FMRadioSeek(const hal::FMRadioSeekDirection& aDirection) {
+  MOZ_CRASH("FM radio cannot be called from sandboxed contexts.");
+}
+
+void GetFMRadioSettings(FMRadioSettings* aSettings) {
+  MOZ_CRASH("FM radio cannot be called from sandboxed contexts.");
+}
+
+void SetFMRadioFrequency(const uint32_t aFrequency) {
+  MOZ_CRASH("FM radio cannot be called from sandboxed contexts.");
+}
+
+uint32_t GetFMRadioFrequency() {
+  MOZ_CRASH("FM radio cannot be called from sandboxed contexts.");
+  return 0;
+}
+
+bool IsFMRadioOn() {
+  MOZ_CRASH("FM radio cannot be called from sandboxed contexts.");
+  return false;
+}
+
+uint32_t GetFMRadioSignalStrength() {
+  MOZ_CRASH("FM radio cannot be called from sandboxed contexts.");
+  return 0;
+}
+
+void CancelFMRadioSeek() {
+  MOZ_CRASH("FM radio cannot be called from sandboxed contexts.");
+}
+
+bool EnableRDS(uint32_t aMask) {
+  MOZ_CRASH("FM radio cannot be called from sandboxed contexts.");
+  return false;
+}
+
+void DisableRDS() {
+  MOZ_CRASH("FM radio cannot be called from sandboxed contexts.");
+}
+
 class HalParent : public PHalParent,
                   public BatteryObserver,
                   public NetworkObserver,
                   public ISensorObserver,
                   public WakeLockObserver,
                   public ScreenConfigurationObserver,
-                  public SwitchObserver {
+                  public SwitchObserver,
+                  public FlashlightObserver {
  public:
   virtual void ActorDestroy(ActorDestroyReason aWhy) override {
     // NB: you *must* unconditionally unregister your observer here,
@@ -225,6 +289,7 @@ class HalParent : public PHalParent,
       hal::UnregisterSensorObserver(sensor, this);
     }
     hal::UnregisterWakeLockObserver(this);
+    hal::UnregisterFlashlightObserver(this);
   }
 
   virtual mozilla::ipc::IPCResult RecvVibrate(
@@ -236,8 +301,7 @@ class HalParent : public PHalParent,
     nsCOMPtr<nsIDOMWindow> window =
       do_QueryInterface(browserParent->GetBrowserDOMWindow());
     */
-    WindowIdentifier newID(id, nullptr);
-    hal::Vibrate(pattern, newID);
+    hal::Vibrate(pattern, WindowIdentifier(std::move(id), nullptr));
     return IPC_OK();
   }
 
@@ -248,9 +312,37 @@ class HalParent : public PHalParent,
     nsCOMPtr<nsIDOMWindow> window =
       browserParent->GetBrowserDOMWindow();
     */
-    WindowIdentifier newID(id, nullptr);
-    hal::CancelVibrate(newID);
+    hal::CancelVibrate(WindowIdentifier(std::move(id), nullptr));
     return IPC_OK();
+  }
+
+  virtual mozilla::ipc::IPCResult RecvEnableFlashlightNotifications() override {
+    hal::RegisterFlashlightObserver(this);
+    return IPC_OK();
+  }
+
+  virtual mozilla::ipc::IPCResult RecvDisableFlashlightNotifications()
+      override {
+    hal::UnregisterFlashlightObserver(this);
+    return IPC_OK();
+  }
+
+  virtual mozilla::ipc::IPCResult RecvGetFlashlightEnabled() override {
+    bool flashlightState = hal::GetFlashlightEnabled();
+    FlashlightInformation flashlightInfo;
+    flashlightInfo.enabled() = flashlightState;
+    Unused << SendNotifyFlashlightState(flashlightInfo);
+    return IPC_OK();
+  }
+
+  virtual mozilla::ipc::IPCResult RecvSetFlashlightEnabled(
+      const bool& aEnabled) override {
+    hal::SetFlashlightEnabled(aEnabled);
+    return IPC_OK();
+  }
+
+  void Notify(const FlashlightInformation& aFlashlightInfo) override {
+    Unused << SendNotifyFlashlightState(aFlashlightInfo);
   }
 
   virtual mozilla::ipc::IPCResult RecvEnableBatteryNotifications() override {
@@ -331,7 +423,7 @@ class HalParent : public PHalParent,
 
   virtual mozilla::ipc::IPCResult RecvGetScreenEnabled(
       bool* aEnabled) override {
-#if 0 // TODO: FIXME
+#if 0  // TODO: FIXME
     if (!AssertAppProcessPermission(this, "power")) {
       return false;
     }
@@ -342,7 +434,7 @@ class HalParent : public PHalParent,
 
   virtual mozilla::ipc::IPCResult RecvSetScreenEnabled(
       const bool& aEnabled) override {
-#if 0 // TODO: FIXME
+#if 0  // TODO: FIXME
     if (!AssertAppProcessPermission(this, "power")) {
       return false;
     }
@@ -353,7 +445,7 @@ class HalParent : public PHalParent,
 
   virtual mozilla::ipc::IPCResult RecvSetScreenBrightness(
       const double& aBrightness) override {
-#if 0 // TODO: FIXME
+#if 0  // TODO: FIXME
     if (!AssertAppProcessPermission(this, "power")) {
       return false;
     }
@@ -412,13 +504,15 @@ class HalParent : public PHalParent,
     Unused << SendNotifyWakeLockChange(aWakeLockInfo);
   }
 
-  virtual mozilla::ipc::IPCResult RecvEnableSwitchNotifications(const SwitchDevice& aDevice) override {
+  virtual mozilla::ipc::IPCResult RecvEnableSwitchNotifications(
+      const SwitchDevice& aDevice) override {
     // Content has no reason to listen to switch events currently.
     hal::RegisterSwitchObserver(aDevice, this);
     return IPC_OK();
   }
 
-  virtual mozilla::ipc::IPCResult RecvDisableSwitchNotifications(const SwitchDevice& aDevice) override {
+  virtual mozilla::ipc::IPCResult RecvDisableSwitchNotifications(
+      const SwitchDevice& aDevice) override {
     hal::UnregisterSwitchObserver(aDevice, this);
     return IPC_OK();
   }
@@ -427,7 +521,8 @@ class HalParent : public PHalParent,
     Unused << SendNotifySwitchChange(aSwitchEvent);
   }
 
-  virtual mozilla::ipc::IPCResult RecvGetCurrentSwitchState(const SwitchDevice& aDevice, hal::SwitchState *aState) override {
+  virtual mozilla::ipc::IPCResult RecvGetCurrentSwitchState(
+      const SwitchDevice& aDevice, hal::SwitchState* aState) override {
     // Content has no reason to listen to switch events currently.
     *aState = hal::GetCurrentSwitchState(aDevice);
     return IPC_OK();
@@ -467,8 +562,15 @@ class HalChild : public PHalChild {
     return IPC_OK();
   }
 
-  virtual mozilla::ipc::IPCResult RecvNotifySwitchChange(const mozilla::hal::SwitchEvent& aEvent) override {
+  virtual mozilla::ipc::IPCResult RecvNotifySwitchChange(
+      const mozilla::hal::SwitchEvent& aEvent) override {
     hal::NotifySwitchChange(aEvent);
+    return IPC_OK();
+  }
+
+  mozilla::ipc::IPCResult RecvNotifyFlashlightState(
+      const FlashlightInformation& aFlashlightState) override {
+    hal::UpdateFlashlightState(aFlashlightState);
     return IPC_OK();
   }
 };

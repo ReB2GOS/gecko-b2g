@@ -95,6 +95,20 @@ class SocketProcessParent final
 
   already_AddRefed<PAltServiceParent> AllocPAltServiceParent();
 
+  mozilla::ipc::IPCResult RecvGetTLSClientCert(
+      const nsCString& aHostName, const OriginAttributes& aOriginAttributes,
+      const int32_t& aPort, const uint32_t& aProviderFlags,
+      const uint32_t& aProviderTlsFlags, const ByteArray& aServerCert,
+      Maybe<ByteArray>&& aClientCert, nsTArray<ByteArray>&& aCollectedCANames,
+      bool* aSucceeded, ByteArray* aOutCert, ByteArray* aOutKey,
+      nsTArray<ByteArray>* aBuiltChain);
+
+  already_AddRefed<PProxyConfigLookupParent> AllocPProxyConfigLookupParent(
+      nsIURI* aURI, const uint32_t& aProxyResolveFlags);
+  mozilla::ipc::IPCResult RecvPProxyConfigLookupConstructor(
+      PProxyConfigLookupParent* aActor, nsIURI* aURI,
+      const uint32_t& aProxyResolveFlags) override;
+
  private:
   SocketProcessHost* mHost;
   UniquePtr<dom::MemoryReportRequestHost> mMemoryReportRequest;

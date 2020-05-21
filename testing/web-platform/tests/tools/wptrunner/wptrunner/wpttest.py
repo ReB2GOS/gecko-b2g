@@ -1,5 +1,6 @@
 import os
 import subprocess
+import sys
 from six.moves.urllib.parse import urljoin
 from collections import defaultdict
 from six import iteritems, string_types
@@ -102,6 +103,7 @@ class RunInfo(dict):
         if rev:
             self["revision"] = rev
 
+        self["python_version"] = sys.version_info.major
         self["product"] = product
         if debug is not None:
             self["debug"] = debug
@@ -259,6 +261,13 @@ class Test(object):
         return 0
 
     @property
+    def lsan_disabled(self):
+        for meta in self.itermeta():
+            if meta.lsan_disabled is not None:
+                return meta.lsan_disabled
+        return False
+
+    @property
     def lsan_allowed(self):
         lsan_allowed = set()
         for meta in self.itermeta():
@@ -401,7 +410,8 @@ class TestharnessTest(Test):
         testdriver = manifest_item.testdriver if hasattr(manifest_item, "testdriver") else False
         jsshell = manifest_item.jsshell if hasattr(manifest_item, "jsshell") else False
         script_metadata = manifest_item.script_metadata or []
-        scripts = [v for (k, v) in script_metadata if k == b"script"]
+        scripts = [v for (k, v) in script_metadata
+                   if k == "script"]
         return cls(manifest_file.tests_root,
                    manifest_item.url,
                    inherit_metadata,

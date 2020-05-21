@@ -19,6 +19,7 @@
 #include "mozilla/net/NeckoParent.h"
 #include "mozilla/InputStreamLengthHelper.h"
 #include "mozilla/IntegerPrintfMacros.h"
+#include "mozilla/StoragePrincipalHelper.h"
 #include "mozilla/UniquePtr.h"
 #include "mozilla/Unused.h"
 #include "HttpBackgroundChannelParent.h"
@@ -62,11 +63,10 @@ using namespace mozilla::ipc;
 namespace mozilla {
 namespace net {
 
-HttpChannelParent::HttpChannelParent(const PBrowserOrId& iframeEmbedding,
+HttpChannelParent::HttpChannelParent(dom::BrowserParent* iframeEmbedding,
                                      nsILoadContext* aLoadContext,
                                      PBOverrideStatus aOverrideStatus)
     : mLoadContext(aLoadContext),
-      mNestedFrameId(0),
       mIPCClosed(false),
       mPBOverride(aOverrideStatus),
       mStatus(NS_OK),
@@ -93,12 +93,7 @@ HttpChannelParent::HttpChannelParent(const PBrowserOrId& iframeEmbedding,
   MOZ_ASSERT(gHttpHandler);
   mHttpHandler = gHttpHandler;
 
-  if (iframeEmbedding.type() == PBrowserOrId::TPBrowserParent) {
-    mBrowserParent =
-        static_cast<dom::BrowserParent*>(iframeEmbedding.get_PBrowserParent());
-  } else {
-    mNestedFrameId = iframeEmbedding.get_TabId();
-  }
+  mBrowserParent = iframeEmbedding;
 
   mSendWindowSize = gHttpHandler->SendWindowSize();
 
@@ -623,7 +618,8 @@ bool HttpChannelParent::DoAsyncOpen(
 
     if (setChooseApplicationCache) {
       OriginAttributes attrs;
-      NS_GetOriginAttributes(httpChannel, attrs);
+      StoragePrincipalHelper::GetOriginAttributes(
+          httpChannel, attrs, StoragePrincipalHelper::eRegularPrincipal);
 
       nsCOMPtr<nsIPrincipal> principal =
           BasePrincipal::CreateContentPrincipal(uri, attrs);
@@ -916,7 +912,8 @@ mozilla::ipc::IPCResult HttpChannelParent::RecvRedirect2Verify(
           newHttpChannel->GetURI(getter_AddRefs(uri));
 
           OriginAttributes attrs;
-          NS_GetOriginAttributes(newHttpChannel, attrs);
+          StoragePrincipalHelper::GetOriginAttributes(
+              newHttpChannel, attrs, StoragePrincipalHelper::eRegularPrincipal);
 
           nsCOMPtr<nsIPrincipal> principal =
               BasePrincipal::CreateContentPrincipal(uri, attrs);
@@ -1291,11 +1288,11 @@ mozilla::ipc::IPCResult HttpChannelParent::RecvRemoveCorsPreflightCacheEntry(
   if (!deserializedURI) {
     return IPC_FAIL_NO_REASON(this);
   }
-  nsCOMPtr<nsIPrincipal> principal =
-      PrincipalInfoToPrincipal(requestingPrincipal);
-  if (!principal) {
+  auto principalOrErr = PrincipalInfoToPrincipal(requestingPrincipal);
+  if (NS_WARN_IF(principalOrErr.isErr())) {
     return IPC_FAIL_NO_REASON(this);
   }
+  nsCOMPtr<nsIPrincipal> principal = principalOrErr.unwrap();
   nsCORSListenerProxy::RemoveFromCorsPreflightCache(deserializedURI, principal);
   return IPC_OK();
 }
@@ -1408,27 +1405,23 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
     MOZ_ASSERT(NS_SUCCEEDED(rv));
   }
 
-  bool isFromCache = false;
-  bool isRacing = false;
-  uint64_t cacheEntryId = 0;
-  int32_t fetchCount = 0;
-  uint32_t expirationTime = nsICacheEntry::NO_EXPIRATION_TIME;
-  nsCString cachedCharset;
+  HttpChannelOnStartRequestArgs args;
+  args.multiPartID() = multiPartID;
+  args.isLastPartOfMultiPart() = isLastPartOfMultiPart;
+
+  args.cacheExpirationTime() = nsICacheEntry::NO_EXPIRATION_TIME;
 
   RefPtr<nsHttpChannel> httpChannelImpl = do_QueryObject(chan);
 
   if (httpChannelImpl) {
-    httpChannelImpl->IsFromCache(&isFromCache);
-    httpChannelImpl->IsRacing(&isRacing);
-    httpChannelImpl->GetCacheEntryId(&cacheEntryId);
-    httpChannelImpl->GetCacheTokenFetchCount(&fetchCount);
-    httpChannelImpl->GetCacheTokenExpirationTime(&expirationTime);
-    httpChannelImpl->GetCacheTokenCachedCharset(cachedCharset);
-  }
+    httpChannelImpl->IsFromCache(&args.isFromCache());
+    httpChannelImpl->IsRacing(&args.isRacing());
+    httpChannelImpl->GetCacheEntryId(&args.cacheEntryId());
+    httpChannelImpl->GetCacheTokenFetchCount(&args.cacheFetchCount());
+    httpChannelImpl->GetCacheTokenExpirationTime(&args.cacheExpirationTime());
+    httpChannelImpl->GetCacheTokenCachedCharset(args.cachedCharset());
 
-  bool loadedFromApplicationCache = false;
-
-  if (httpChannelImpl) {
+    bool loadedFromApplicationCache = false;
     httpChannelImpl->GetLoadedFromApplicationCache(&loadedFromApplicationCache);
     if (loadedFromApplicationCache) {
       mOfflineForeignMarker.reset(
@@ -1449,48 +1442,40 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
   // Propagate whether or not conversion should occur from the parent-side
   // channel to the child-side channel.  Then disable the parent-side
   // conversion so that it only occurs in the child.
-  bool applyConversion = true;
-  Unused << chan->GetApplyConversion(&applyConversion);
+  Unused << chan->GetApplyConversion(&args.applyConversion());
   chan->SetApplyConversion(false);
 
   // If we've already applied the conversion (as can happen if we installed
   // a multipart converted), then don't apply it again on the child.
   if (chan->HasAppliedConversion()) {
-    applyConversion = false;
+    args.applyConversion() = false;
   }
 
-  nsresult channelStatus = NS_OK;
-  chan->GetStatus(&channelStatus);
+  chan->GetStatus(&args.channelStatus());
 
   // Keep the cache entry for future use in RecvSetCacheTokenCachedCharset().
   // It could be already released by nsHttpChannel at that time.
   nsCOMPtr<nsISupports> cacheEntry;
-  uint32_t cacheKey = 0;
-  nsAutoCString altDataType;
 
   if (httpChannelImpl) {
     httpChannelImpl->GetCacheToken(getter_AddRefs(cacheEntry));
     mCacheEntry = do_QueryInterface(cacheEntry);
+    args.cacheEntryAvailable() = mCacheEntry ? true : false;
 
-    httpChannelImpl->GetCacheKey(&cacheKey);
-
-    httpChannelImpl->GetAlternativeDataType(altDataType);
+    httpChannelImpl->GetCacheKey(&args.cacheKey());
+    httpChannelImpl->GetAlternativeDataType(args.altDataType());
   }
 
-  nsCString secInfoSerialization;
-  UpdateAndSerializeSecurityInfo(secInfoSerialization);
+  args.altDataLength() = chan->GetAltDataLength();
+  args.deliveringAltData() = chan->IsDeliveringAltData();
 
-  uint8_t redirectCount = 0;
-  chan->GetRedirectCount(&redirectCount);
+  UpdateAndSerializeSecurityInfo(args.securityInfoSerialization());
 
-  int64_t altDataLen = chan->GetAltDataLength();
-  bool deliveringAltData = chan->IsDeliveringAltData();
+  chan->GetRedirectCount(&args.redirectCount());
 
   nsCOMPtr<nsILoadInfo> loadInfo = chan->LoadInfo();
-
-  ParentLoadInfoForwarderArgs loadInfoForwarderArg;
   mozilla::ipc::LoadInfoToParentLoadInfoForwarder(loadInfo,
-                                                  &loadInfoForwarderArg);
+                                                  &args.loadInfoForwarder());
 
   nsHttpResponseHead* responseHead = chan->GetResponseHead();
   bool useResponseHead = !!responseHead;
@@ -1513,6 +1498,13 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
     responseHead = &cleanedUpResponseHead;
   }
 
+  chan->GetIsResolvedByTRR(&args.isResolvedByTRR());
+  chan->GetAllRedirectsSameOrigin(&args.allRedirectsSameOrigin());
+  chan->GetCrossOriginOpenerPolicy(&args.openerPolicy());
+  args.selfAddr() = chan->GetSelfAddr();
+  args.peerAddr() = chan->GetPeerAddr();
+  args.timing() = GetTimingAttributes(mChannel);
+
   nsHttpRequestHead* requestHead = chan->GetRequestHead();
   // !!! We need to lock headers and please don't forget to unlock them !!!
   requestHead->Enter();
@@ -1525,28 +1517,12 @@ HttpChannelParent::OnStartRequest(nsIRequest* aRequest) {
     cleanedUpRequest = true;
   }
 
-  bool isResolvedByTRR = false;
-  chan->GetIsResolvedByTRR(&isResolvedByTRR);
-
-  bool allRedirectsSameOrigin = false;
-  chan->GetAllRedirectsSameOrigin(&allRedirectsSameOrigin);
-
-  nsILoadInfo::CrossOriginOpenerPolicy openerPolicy =
-      nsILoadInfo::OPENER_POLICY_UNSAFE_NONE;
-  chan->GetCrossOriginOpenerPolicy(&openerPolicy);
-
   rv = NS_OK;
   if (mIPCClosed ||
       !SendOnStartRequest(
-          channelStatus, *responseHead, useResponseHead,
+          *responseHead, useResponseHead,
           cleanedUpRequest ? cleanedUpRequestHeaders : requestHead->Headers(),
-          loadInfoForwarderArg, isFromCache, isRacing,
-          mCacheEntry ? true : false, cacheEntryId, fetchCount, expirationTime,
-          cachedCharset, secInfoSerialization, chan->GetSelfAddr(),
-          chan->GetPeerAddr(), redirectCount, cacheKey, altDataType, altDataLen,
-          deliveringAltData, applyConversion, isResolvedByTRR,
-          GetTimingAttributes(mChannel), allRedirectsSameOrigin, multiPartID,
-          isLastPartOfMultiPart, openerPolicy)) {
+          args)) {
     rv = NS_ERROR_UNEXPECTED;
   }
   requestHead->Exit();
@@ -1688,8 +1664,16 @@ HttpChannelParent::OnDataAvailable(nsIRequest* aRequest,
 
   nsresult transportStatus = NS_NET_STATUS_RECEIVING_FROM;
   RefPtr<nsHttpChannel> httpChannelImpl = do_QueryObject(mChannel);
-  if (httpChannelImpl && httpChannelImpl->IsReadingFromCache()) {
-    transportStatus = NS_NET_STATUS_READING;
+  if (httpChannelImpl) {
+    if (httpChannelImpl->IsReadingFromCache()) {
+      transportStatus = NS_NET_STATUS_READING;
+    }
+
+    if (httpChannelImpl->OnDataAlreadySent()) {
+      LOG(("  OnDataAvailable already sent to the child.\n"));
+      uint32_t n;
+      return aInputStream->ReadSegments(NS_DiscardSegment, nullptr, aCount, &n);
+    }
   }
 
   static uint32_t const kCopyChunkSize = 128 * 1024;
@@ -2447,7 +2431,7 @@ NS_IMETHODIMP
 HttpChannelParent::GetAuthPrompt(uint32_t aPromptReason, const nsIID& iid,
                                  void** aResult) {
   nsCOMPtr<nsIAuthPrompt2> prompt =
-      new NeckoParent::NestedFrameAuthPrompt(Manager(), mNestedFrameId);
+      new NeckoParent::NestedFrameAuthPrompt(Manager(), TabId(0));
   prompt.forget(aResult);
   return NS_OK;
 }

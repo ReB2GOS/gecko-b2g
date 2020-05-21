@@ -6,9 +6,7 @@
 
 module.exports = async function({
   targetList,
-  targetType,
   targetFront,
-  isTopLevel,
   isFissionEnabledOnContentToolbox,
   onAvailable,
 }) {
@@ -20,9 +18,9 @@ module.exports = async function({
   const isContentToolbox = targetList.targetFront.isLocalTab;
   const listenForFrames = isContentToolbox && isFissionEnabledOnContentToolbox;
   const isAllowed =
-    isTopLevel ||
-    targetType === targetList.TYPES.PROCESS ||
-    (targetType === targetList.TYPES.FRAME && listenForFrames);
+    targetFront.isTopLevel ||
+    targetFront.targetType === targetList.TYPES.PROCESS ||
+    (targetFront.targetType === targetList.TYPES.FRAME && listenForFrames);
 
   if (!isAllowed) {
     return;
@@ -40,19 +38,29 @@ module.exports = async function({
   // /!\ The actor implementation requires to call startListeners("PageError") first /!\
   const { messages } = await webConsoleFront.getCachedMessages(["PageError"]);
 
-  for (const message of messages) {
+  for (let message of messages) {
     // On older server (< v77), we're also getting LogMessage cached messages, so we need
     // to ignore those.
     if (
       !webConsoleFront.traits.newCacheStructure &&
+      message._type &&
       message._type !== "PageError"
     ) {
       continue;
     }
 
+    // Handling cached messages for servers older than Firefox 78.
+    if (message._type) {
+      // Wrap the message into a `pageError` attribute, to match `pageError` behavior
+      message = {
+        pageError: message,
+        type: "pageError",
+      };
+    }
+
     // Cached messages don't have the same shape as live messages,
     // so we need to transform them.
-    onAvailable({ pageError: message });
+    onAvailable(message);
   }
 
   webConsoleFront.on("pageError", onAvailable);

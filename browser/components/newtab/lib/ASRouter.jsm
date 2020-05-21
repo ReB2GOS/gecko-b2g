@@ -770,13 +770,19 @@ class _ASRouter {
       p =>
         p.id === "message-groups" && MessageLoaderUtils.shouldProviderUpdate(p)
     );
-    if (!provider) {
-      return;
+    let remoteMessages = [];
+    if (provider) {
+      const { messages } = await MessageLoaderUtils._loadDataForProvider(
+        provider,
+        {
+          storage: this._storage,
+          dispatchToAS: this.dispatchToAS,
+        }
+      );
+      if (messages && messages.length) {
+        remoteMessages = messages;
+      }
     }
-    let { messages } = await MessageLoaderUtils._loadDataForProvider(provider, {
-      storage: this._storage,
-      dispatchToAS: this.dispatchToAS,
-    });
     const providerGroups = this.state.providers.map(
       ({ id, frequency = null, enabled }) => {
         const defaultGroup = { id, enabled, type: "default" };
@@ -785,11 +791,11 @@ class _ASRouter {
         }
         const localGroup =
           LOCAL_GROUP_CONFIGURATIONS.find(g => g.id === id) || {};
-        const remoteGroup = messages.find(g => g.id === id) || {};
+        const remoteGroup = remoteMessages.find(g => g.id === id) || {};
         return { ...defaultGroup, ...localGroup, ...remoteGroup };
       }
     );
-    const messageGroups = messages
+    const messageGroups = remoteMessages
       .filter(m => !providerGroups.find(g => g.id === m.id))
       .map(remoteGroup => {
         const localGroup =
@@ -1851,6 +1857,7 @@ class _ASRouter {
       providers.push({
         id: "preview",
         type: "remote",
+        enabled: true,
         url,
         updateCycleInMs: 0,
       });
@@ -1943,14 +1950,18 @@ class _ASRouter {
         );
         break;
       case ra.OPEN_ABOUT_PAGE:
+        let aboutPageURL = new URL(`about:${action.data.args}`);
+        if (action.data.entrypoint) {
+          aboutPageURL.search = action.data.entrypoint;
+        }
         target.browser.ownerGlobal.openTrustedLinkIn(
-          `about:${action.data.args}`,
+          aboutPageURL.toString(),
           "tab"
         );
         break;
       case ra.OPEN_PREFERENCES_PAGE:
         target.browser.ownerGlobal.openPreferences(
-          action.data.category,
+          action.data.category || action.data.args,
           action.data.entrypoint && {
             urlParams: { entrypoint: action.data.entrypoint },
           }

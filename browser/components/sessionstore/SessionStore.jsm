@@ -316,13 +316,15 @@ var SessionStore = {
     aWindow,
     aTab,
     aDelta = 0,
-    aRestoreImmediately = true
+    aRestoreImmediately = true,
+    aOptions = {}
   ) {
     return SessionStoreInternal.duplicateTab(
       aWindow,
       aTab,
       aDelta,
-      aRestoreImmediately
+      aRestoreImmediately,
+      aOptions
     );
   },
 
@@ -3089,7 +3091,8 @@ var SessionStoreInternal = {
     aWindow,
     aTab,
     aDelta = 0,
-    aRestoreImmediately = true
+    aRestoreImmediately = true,
+    { index } = {}
   ) {
     if (!aTab || !aTab.ownerGlobal) {
       throw Components.Exception("Need a valid tab", Cr.NS_ERROR_INVALID_ARG);
@@ -3112,6 +3115,7 @@ var SessionStoreInternal = {
 
     let tabOptions = {
       userContextId,
+      index,
       ...(aTab == aWindow.gBrowser.selectedTab
         ? { relatedToCurrent: true, ownerTab: aTab }
         : {}),
@@ -3834,10 +3838,15 @@ var SessionStoreInternal = {
    */
   async _asyncNavigateAndRestore(tab) {
     let permanentKey = tab.linkedBrowser.permanentKey;
+    let browser = tab.linkedBrowser;
+
+    browser.messageManager.sendAsyncMessage(
+      "SessionStore:prepareForProcessChange"
+    );
 
     // NOTE: This is currently the only async operation used, but this is likely
     // to change in the future.
-    await TabStateFlusher.flush(tab.linkedBrowser);
+    await TabStateFlusher.flush(browser);
 
     // Now that we have flushed state, our loadArguments, etc. may have been
     // overwritten by multiple calls to navigateAndRestore. Load the most

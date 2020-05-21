@@ -66,6 +66,8 @@
 #      include "mozilla/remoteSandboxBroker.h"
 #    endif
 #  endif
+
+#  include "mozilla/NativeNt.h"
 #endif
 
 #if defined(XP_LINUX) && defined(MOZ_SANDBOX)
@@ -97,7 +99,9 @@ using mozilla::ScopedPRFileDesc;
 
 #ifdef MOZ_WIDGET_ANDROID
 #  include "AndroidBridge.h"
-#  include "GeneratedJNIWrappers.h"
+#  include "mozilla/java/GeckoProcessManagerWrappers.h"
+#  include "mozilla/java/GeckoProcessTypeWrappers.h"
+#  include "mozilla/java/GeckoResultWrappers.h"
 #  include "mozilla/jni/Refs.h"
 #  include "mozilla/jni/Utils.h"
 #endif
@@ -219,7 +223,8 @@ class WindowsProcessLauncher : public BaseProcessLauncher {
   WindowsProcessLauncher(GeckoChildProcessHost* aHost,
                          std::vector<std::string>&& aExtraOpts)
       : BaseProcessLauncher(aHost, std::move(aExtraOpts)),
-        mProfileDir(aHost->mProfileDir) {}
+        mProfileDir(aHost->mProfileDir),
+        mCachedNtdllThunk(aHost->sCachedNtDllThunk) {}
 
  protected:
   virtual bool DoSetup() override;
@@ -230,6 +235,8 @@ class WindowsProcessLauncher : public BaseProcessLauncher {
   bool mUseSandbox = false;
 
   nsCOMPtr<nsIFile> mProfileDir;
+
+  const StaticAutoPtr<Buffer<IMAGE_THUNK_DATA>>& mCachedNtdllThunk;
 };
 typedef WindowsProcessLauncher ProcessLauncher;
 #endif  // XP_WIN
@@ -319,6 +326,51 @@ mozilla::StaticAutoPtr<mozilla::LinkedList<GeckoChildProcessHost>>
     GeckoChildProcessHost::sGeckoChildProcessHosts;
 
 mozilla::StaticMutex GeckoChildProcessHost::sMutex;
+
+#ifdef XP_WIN
+mozilla::StaticAutoPtr<Buffer<IMAGE_THUNK_DATA>>
+    GeckoChildProcessHost::sCachedNtDllThunk;
+
+// This static method initializes sCachedNtDllThunk.  Because it's called in
+// XREMain::XRE_main, which happens long before WindowsProcessLauncher's ctor
+// accesses sCachedNtDllThunk, there is no race on sCachedNtDllThunk, thus
+// no mutex is needed.
+/* static */
+void GeckoChildProcessHost::CacheNtDllThunk() {
+  if (sCachedNtDllThunk) {
+    return;
+  }
+
+  do {
+    nt::PEHeaders ourExeImage(::GetModuleHandleW(nullptr));
+    if (!ourExeImage) {
+      break;
+    }
+
+    nt::PEHeaders ntdllImage(::GetModuleHandleW(L"ntdll.dll"));
+    if (!ntdllImage) {
+      break;
+    }
+
+    Maybe<Range<const uint8_t>> ntdllBoundaries = ntdllImage.GetBounds();
+    if (!ntdllBoundaries) {
+      break;
+    }
+
+    Maybe<Span<IMAGE_THUNK_DATA>> maybeNtDllThunks =
+        ourExeImage.GetIATThunksForModule("ntdll.dll", ntdllBoundaries.ptr());
+    if (maybeNtDllThunks.isNothing()) {
+      break;
+    }
+
+    sCachedNtDllThunk = new Buffer<IMAGE_THUNK_DATA>(maybeNtDllThunks.value());
+    return;
+  } while (false);
+
+  // Failed to cache IAT.  Initializing the variable with nullptr.
+  sCachedNtDllThunk = new Buffer<IMAGE_THUNK_DATA>();
+}
+#endif
 
 GeckoChildProcessHost::GeckoChildProcessHost(GeckoProcessType aProcessType,
                                              bool aIsFileContent)
@@ -981,6 +1033,15 @@ bool BaseProcessLauncher::DoSetup() {
         ENVIRONMENT_STRING(value);
   });
 #endif
+#ifdef MOZ_MEMORY
+  if (mProcessType == GeckoProcessType_Content) {
+    nsAutoCString mallocOpts(PR_GetEnv("MALLOC_OPTIONS"));
+    // Disable randomization of small arenas in content.
+    mallocOpts.Append("r");
+    self->mLaunchOptions->env_map[ENVIRONMENT_LITERAL("MALLOC_OPTIONS")] =
+        ENVIRONMENT_STRING(mallocOpts.get());
+  }
+#endif
 
   MapChildLogging();
 
@@ -1508,10 +1569,12 @@ RefPtr<ProcessHandlePromise> WindowsProcessLauncher::DoLaunch() {
   ProcessHandle handle = 0;
 #  ifdef MOZ_SANDBOX
   if (mUseSandbox) {
+    const IMAGE_THUNK_DATA* cachedNtdllThunk =
+        mCachedNtdllThunk ? mCachedNtdllThunk->begin() : nullptr;
     if (mResults.mSandboxBroker->LaunchApp(
             mCmdLine->program().c_str(),
             mCmdLine->command_line_string().c_str(), mLaunchOptions->env_map,
-            mProcessType, mEnableSandboxLogging, &handle)) {
+            mProcessType, mEnableSandboxLogging, cachedNtdllThunk, &handle)) {
       EnvironmentLog("MOZ_PROCESS_LOG")
           .print("==> process %d launched child process %d (%S)\n",
                  base::GetCurrentProcId(), base::GetProcId(handle),

@@ -11,7 +11,28 @@ exclude: true
 
 # GeckoView API Changelog.
 
-⚠️  breaking change
+⚠️  breaking change and deprecation notices
+
+## v78
+- Added [`WebExtensionController.installBuiltIn`][78.1] that allows installing an
+  extension that is bundled with the APK. This method is meant as a replacement
+  for [`GeckoRuntime.registerWebExtension`][67.15], ⚠️ which is now deprecated
+  and will be removed in GeckoView 81.
+- Added [`CookieBehavior.ACCEPT_FIRST_PARTY_AND_ISOLATE_OTHERS`][78.2] to allow
+  enabling dynamic first party isolation; this will block tracking cookies and
+  isolate all other third party cookies by keying them based on the first party
+  from which they are accessed.
+- Added `cookieStoreId` field to [`WebExtension.CreateTabDetails`][78.3]. This adds the optional
+  ability to create a tab with a given cookie store ID for its [`contextual identity`][78.4].
+  ([bug 1622500]({{bugzilla}}1622500))
+- Added [`NavigationDelegate.onSubframeLoadRequest`][78.5] to allow intercepting
+  non-top-level navigations.
+
+[78.1]: {{javadoc_uri}}/WebExtensionController.html#installBuiltIn-java.lang.String-
+[78.2]: {{javadoc_uri}}/ContentBlocking.CookieBehavior.html#ACCEPT_FIRST_PARTY_AND_ISOLATE_OTHERS
+[78.3]: {{javadoc_uri}}/WebExtension.CreateTabDetails.html
+[78.4]: https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/contextualIdentities
+[78.5]: {{javadoc_uri}}/GeckoSession.NavigationDelegate.html#onSubframeLoadRequest-org.mozilla.geckoview.GeckoSession-org.mozilla.geckoview.GeckoSession.NavigationDelegate.LoadRequest-
 
 ## v77
 - Added [`GeckoRuntime.appendAppNotesToCrashReport`][77.1] For adding app notes to the crash report.
@@ -675,4 +696,4 @@ exclude: true
 [65.24]: {{javadoc_uri}}/CrashReporter.html#sendCrashReport-android.content.Context-android.os.Bundle-java.lang.String-
 [65.25]: {{javadoc_uri}}/GeckoResult.html
 
-[api-version]: 562c75192093098207d596f83a159dcb9df2d3e6
+[api-version]: bde8001c948235193636d0d21f684baeb551e739

@@ -686,9 +686,6 @@ var AddonTestUtils = {
       version,
       platformVersion,
       crashReporter: true,
-      extraProps: {
-        browserTabsRemoteAutostart: false,
-      },
     });
     this.appInfo = AppInfo.getAppInfo();
   },
@@ -891,6 +888,7 @@ var AddonTestUtils = {
     );
     const blocklistMapping = {
       extensions: bsPass.ExtensionBlocklistRS,
+      extensionsMLBF: bsPass.ExtensionBlocklistMLBF,
       plugins: bsPass.PluginBlocklistRS,
     };
 

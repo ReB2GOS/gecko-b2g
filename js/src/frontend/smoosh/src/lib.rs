@@ -69,6 +69,7 @@ pub struct SmooshCompileOptions {
 
 #[repr(C)]
 pub enum SmooshGCThingKind {
+    AtomIndex,
     ScopeIndex,
     RegExpIndex,
 }
@@ -82,6 +83,10 @@ pub struct SmooshGCThing {
 impl From<GCThing> for SmooshGCThing {
     fn from(item: GCThing) -> Self {
         match item {
+            GCThing::Atom(index) => Self {
+                kind: SmooshGCThingKind::AtomIndex,
+                index: index.into(),
+            },
             GCThing::Function(_index) => {
                 panic!("Not yet implemented");
             }
@@ -149,6 +154,9 @@ impl From<ScopeData> for SmooshScopeData {
                 enclosing: data.enclosing.into(),
                 first_frame_slot: data.first_frame_slot.into(),
             },
+            _ => {
+                panic!("Not yet implemented");
+            }
         }
     }
 }
@@ -208,7 +216,6 @@ pub struct SmooshResult {
     unimplemented: bool,
     error: CVec<u8>,
     bytecode: CVec<u8>,
-    atoms: CVec<usize>,
     gcthings: CVec<SmooshGCThing>,
     scopes: CVec<SmooshScopeData>,
     scope_notes: CVec<SmooshScopeNote>,
@@ -274,7 +281,6 @@ impl SmooshResult {
             unimplemented,
             error,
             bytecode: CVec::empty(),
-            atoms: CVec::empty(),
             gcthings: CVec::empty(),
             scopes: CVec::empty(),
             scope_notes: CVec::empty(),
@@ -341,7 +347,6 @@ pub unsafe extern "C" fn smoosh_run(
             let script = result.scripts.remove(0);
 
             let bytecode = CVec::from(script.bytecode);
-            let atoms = CVec::from(script.atoms.into_iter().map(|s| s.into()).collect());
             let gcthings = CVec::from(script.gcthings.into_iter().map(|x| x.into()).collect());
             let scopes = CVec::from(result.scopes.into_iter().map(|x| x.into()).collect());
             let scope_notes =
@@ -383,7 +388,6 @@ pub unsafe extern "C" fn smoosh_run(
                 unimplemented: false,
                 error: CVec::empty(),
                 bytecode,
-                atoms,
                 gcthings,
                 scopes,
                 scope_notes,
@@ -430,7 +434,7 @@ fn convert_parse_result<'alloc, T>(r: jsparagus::parser::Result<T>) -> SmooshPar
             unimplemented: false,
             error: CVec::empty(),
         },
-        Err(err) => match err {
+        Err(err) => match *err {
             ParseError::NotImplemented(_) => {
                 let message = err.message();
                 SmooshParseResult {
@@ -540,7 +544,6 @@ pub unsafe extern "C" fn smoosh_get_slice_len_at(result: SmooshResult, index: us
 pub unsafe extern "C" fn smoosh_free(result: SmooshResult) {
     let _ = result.error.into();
     let _ = result.bytecode.into();
-    let _ = result.atoms.into();
     let _ = result.gcthings.into();
     let _ = result.scopes.into();
     let _ = result.scope_notes.into();
@@ -574,7 +577,7 @@ fn smoosh<'alloc>(
         slices.clone(),
     ) {
         Ok(result) => result,
-        Err(err) => match err {
+        Err(err) => match *err {
             ParseError::NotImplemented(_) => {
                 println!("Unimplemented: {}", err.message());
                 return Err(SmooshError::NotImplemented);

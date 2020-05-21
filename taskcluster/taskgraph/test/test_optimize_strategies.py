@@ -4,16 +4,30 @@
 from __future__ import absolute_import
 
 import time
-
-import pytest
 from datetime import datetime
-from mozunit import main
 from time import mktime
 
-from taskgraph.optimize import registry
+import pytest
+from mozunit import main
+
+from taskgraph.optimize import seta
 from taskgraph.optimize.backstop import Backstop
-from taskgraph.optimize.bugbug import BugBugPushSchedules, BugbugTimeoutException
+from taskgraph.optimize.bugbug import (
+    BugBugPushSchedules,
+    DisperseGroups,
+    SkipUnlessDebug,
+)
 from taskgraph.task import Task
+from taskgraph.util.bugbug import (
+    BUGBUG_BASE_URL,
+    BugbugTimeoutException,
+    push_schedules,
+)
+
+
+@pytest.fixture(autouse=True)
+def clear_push_schedules_memoize():
+    push_schedules.clear()
 
 
 @pytest.fixture(scope='module')
@@ -28,34 +42,56 @@ def params():
     }
 
 
-@pytest.fixture(scope='module')
-def generate_tasks():
+def generate_tasks(*tasks):
+    for i, task in enumerate(tasks):
+        task.setdefault('label', 'task-{}'.format(i))
+        task.setdefault('kind', 'test')
+        task.setdefault('task', {})
+        task.setdefault('attributes', {})
+        task['attributes'].setdefault('e10s', True)
 
-    def inner(*tasks):
-        for i, task in enumerate(tasks):
-            task.setdefault('label', 'task-{}'.format(i))
-            task.setdefault('kind', 'test')
-            task.setdefault('attributes', {})
-            task.setdefault('task', {})
+        for attr in ('optimization', 'dependencies', 'soft_dependencies', 'release_artifacts'):
+            task.setdefault(attr, None)
 
-            for attr in ('optimization', 'dependencies', 'soft_dependencies', 'release_artifacts'):
-                task.setdefault(attr, None)
-
-            task['task'].setdefault('label', task['label'])
-            yield Task.from_json(task)
-
-    return inner
+        task['task'].setdefault('label', task['label'])
+        yield Task.from_json(task)
 
 
-@pytest.fixture(scope='module')
-def tasks(generate_tasks):
-    return list(generate_tasks(
-        {'attributes': {'test_manifests': ['foo/test.ini', 'bar/test.ini']}},
-        {'attributes': {'test_manifests': ['bar/test.ini'], 'build_type': 'debug'}},
-        {'attributes': {'build_type': 'debug'}},
-        {'attributes': {'test_manifests': []}},
-        {'attributes': {'build_type': 'opt'}},
-    ))
+# task sets
+
+default_tasks = list(generate_tasks(
+    {'attributes': {'test_manifests': ['foo/test.ini', 'bar/test.ini']}},
+    {'attributes': {'test_manifests': ['bar/test.ini'], 'build_type': 'debug'}},
+    {'attributes': {'build_type': 'debug'}},
+    {'attributes': {'test_manifests': [], 'build_type': 'opt'}},
+    {'attributes': {'build_type': 'opt'}},
+))
+
+
+disperse_tasks = list(generate_tasks(
+    {'attributes': {
+        'test_manifests': ['foo/test.ini', 'bar/test.ini'],
+        'test_platform': 'linux/opt',
+    }},
+    {'attributes': {
+        'test_manifests': ['bar/test.ini'],
+        'test_platform': 'linux/opt',
+    }},
+    {'attributes': {
+        'test_manifests': ['bar/test.ini'],
+        'test_platform': 'windows/debug',
+    }},
+    {'attributes': {
+        'test_manifests': ['bar/test.ini'],
+        'test_platform': 'linux/opt',
+        'unittest_variant': 'fission',
+    }},
+    {'attributes': {
+        'e10s': False,
+        'test_manifests': ['bar/test.ini'],
+        'test_platform': 'linux/opt',
+    }},
+))
 
 
 def idfn(param):
@@ -64,15 +100,49 @@ def idfn(param):
     return None
 
 
-@pytest.mark.parametrize("strategy,expected", [
+@pytest.mark.parametrize("opt,tasks,arg,expected", [
+    # debug
     pytest.param(
-        'platform-debug',
-        ['task-1', 'task-2'],
+        SkipUnlessDebug(),
+        default_tasks,
+        None,
+        ['task-0', 'task-1', 'task-2'],
+    ),
+
+    # disperse with no supplied importance
+    pytest.param(
+        DisperseGroups(),
+        disperse_tasks,
+        None,
+        [t.label for t in disperse_tasks],
+    ),
+
+    # disperse with low importance
+    pytest.param(
+        DisperseGroups(),
+        disperse_tasks,
+        {'bar/test.ini': 'low'},
+        ['task-0', 'task-2'],
+    ),
+
+    # disperse with medium importance
+    pytest.param(
+        DisperseGroups(),
+        disperse_tasks,
+        {'bar/test.ini': 'medium'},
+        ['task-0', 'task-1', 'task-2'],
+    ),
+
+    # disperse with high importance
+    pytest.param(
+        DisperseGroups(),
+        disperse_tasks,
+        {'bar/test.ini': 'high'},
+        ['task-0', 'task-1', 'task-2', 'task-3'],
     ),
 ], ids=idfn)
-def test_optimization_strategy(responses, params, tasks, strategy, expected):
-    opt = registry[strategy]
-    labels = [t.label for t in tasks if not opt.should_remove_task(t, params, None)]
+def test_optimization_strategy(responses, params, opt, tasks, arg, expected):
+    labels = [t.label for t in tasks if not opt.should_remove_task(t, params, arg)]
     assert sorted(labels) == sorted(expected)
 
 
@@ -91,28 +161,18 @@ def test_optimization_strategy(responses, params, tasks, strategy, expected):
         ['task-2'],
     ),
 
+    # tasks which are unknown to bugbug are selected
+    pytest.param(
+        (0.1,),
+        {'tasks': {'task-1': 0.9, 'task-3': 0.5}, 'known_tasks': ['task-1', 'task-3', 'task-4']},
+        ['task-2'],
+    ),
+
     # tasks containing groups selected
     pytest.param(
         (0.1,),
         {'groups': {'foo/test.ini': 0.4}},
         ['task-0'],
-    ),
-
-    # tasks containing multiple groups have a higher overall confidence with combined_weights
-    pytest.param(
-        (0.75, False, False),
-        {'groups': {'foo/test.ini': 0.5, 'bar/test.ini': 0.5}},
-        [],
-    ),
-    pytest.param(
-        (0.75, False, True),
-        {'groups': {'foo/test.ini': 0.5, 'bar/test.ini': 0.5}},
-        ['task-0'],
-    ),
-    pytest.param(
-        (0.76, False, True),
-        {'groups': {'foo/test.ini': 0.5, 'bar/test.ini': 0.5}},
-        [],
     ),
 
     # tasks matching "tasks" or "groups" selected
@@ -144,9 +204,9 @@ def test_optimization_strategy(responses, params, tasks, strategy, expected):
     ),
 
 ], ids=idfn)
-def test_bugbug_push_schedules(responses, params, tasks, args, data, expected):
+def test_bugbug_push_schedules(responses, params, args, data, expected):
     query = "/push/{branch}/{head_rev}/schedules".format(**params)
-    url = BugBugPushSchedules.BUGBUG_BASE_URL + query
+    url = BUGBUG_BASE_URL + query
 
     responses.add(
         responses.GET,
@@ -156,13 +216,13 @@ def test_bugbug_push_schedules(responses, params, tasks, args, data, expected):
     )
 
     opt = BugBugPushSchedules(*args)
-    labels = [t.label for t in tasks if not opt.should_remove_task(t, params, None)]
+    labels = [t.label for t in default_tasks if not opt.should_remove_task(t, params, {})]
     assert sorted(labels) == sorted(expected)
 
 
-def test_bugbug_timeout(monkeypatch, responses, params, tasks):
+def test_bugbug_timeout(monkeypatch, responses, params):
     query = "/push/{branch}/{head_rev}/schedules".format(**params)
-    url = BugBugPushSchedules.BUGBUG_BASE_URL + query
+    url = BUGBUG_BASE_URL + query
     responses.add(
         responses.GET,
         url,
@@ -175,33 +235,57 @@ def test_bugbug_timeout(monkeypatch, responses, params, tasks):
 
     opt = BugBugPushSchedules(0.5)
     with pytest.raises(BugbugTimeoutException):
-        opt.should_remove_task(tasks[0], params, None)
+        opt.should_remove_task(default_tasks[0], params, None)
 
 
-def test_backstop(params, tasks):
-    all_labels = {t.label for t in tasks}
+def test_bugbug_fallback(monkeypatch, responses, params):
+    query = "/push/{branch}/{head_rev}/schedules".format(**params)
+    url = BUGBUG_BASE_URL + query
+    responses.add(
+        responses.GET,
+        url,
+        json={"ready": False},
+        status=202,
+    )
+
+    # Make sure the test runs fast.
+    monkeypatch.setattr(time, 'sleep', lambda i: None)
+
+    monkeypatch.setattr(seta, 'is_low_value_task', lambda l, p: l == default_tasks[0].label)
+
+    opt = BugBugPushSchedules(0.5, fallback=True)
+    assert opt.should_remove_task(default_tasks[0], params, None)
+
+    # Make sure we don't hit bugbug more than once.
+    responses.reset()
+
+    assert not opt.should_remove_task(default_tasks[1], params, None)
+
+
+def test_backstop(params):
+    all_labels = {t.label for t in default_tasks}
     opt = Backstop(10, 60)  # every 10th push or 1 hour
 
     # If there's no previous push date, run tasks
     params['pushlog_id'] = 8
-    scheduled = {t.label for t in tasks if not opt.should_remove_task(t, params, None)}
+    scheduled = {t.label for t in default_tasks if not opt.should_remove_task(t, params, None)}
     assert scheduled == all_labels
 
     # Only multiples of 10 schedule tasks. Pushdate from push 8 was cached.
     params['pushlog_id'] = 9
     params['pushdate'] += 3599
-    scheduled = {t.label for t in tasks if not opt.should_remove_task(t, params, None)}
+    scheduled = {t.label for t in default_tasks if not opt.should_remove_task(t, params, None)}
     assert scheduled == set()
 
     params['pushlog_id'] = 10
     params['pushdate'] += 1
-    scheduled = {t.label for t in tasks if not opt.should_remove_task(t, params, None)}
+    scheduled = {t.label for t in default_tasks if not opt.should_remove_task(t, params, None)}
     assert scheduled == all_labels
 
     # Tasks are also scheduled if an hour has passed.
     params['pushlog_id'] = 11
     params['pushdate'] += 3600
-    scheduled = {t.label for t in tasks if not opt.should_remove_task(t, params, None)}
+    scheduled = {t.label for t in default_tasks if not opt.should_remove_task(t, params, None)}
     assert scheduled == all_labels
 
 

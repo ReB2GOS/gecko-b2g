@@ -92,10 +92,6 @@ function prepareMessage(packet, idGenerator) {
  * Transforms a packet from Firefox RDP structure to Chrome RDP structure.
  */
 function transformPacket(packet) {
-  if (packet._type) {
-    packet = convertCachedPacket(packet);
-  }
-
   switch (packet.type) {
     case "consoleAPICall": {
       return transformConsoleAPICallPacket(packet);
@@ -334,17 +330,18 @@ function transformPageErrorPacket(packet) {
     frame,
     errorMessageName: pageError.errorMessageName,
     exceptionDocURL: pageError.exceptionDocURL,
+    hasException: pageError.hasException,
+    parameters: pageError.hasException ? [pageError.exception] : null,
     timeStamp: pageError.timeStamp,
     notes: pageError.notes,
     private: pageError.private,
     chromeContext: pageError.chromeContext,
     cssSelectors: pageError.cssSelectors,
+    isPromiseRejection: pageError.isPromiseRejection,
   });
 }
 
-function transformNetworkEventPacket(packet) {
-  const { networkEvent } = packet;
-
+function transformNetworkEventPacket(networkEvent) {
   return new NetworkEventMessage({
     actor: networkEvent.actor,
     isXHR: networkEvent.isXHR,
@@ -370,6 +367,7 @@ function transformEvaluationResultPacket(packet) {
     exceptionDocURL,
     exception,
     exceptionStack,
+    hasException,
     frame,
     result,
     helperResult,
@@ -377,22 +375,27 @@ function transformEvaluationResultPacket(packet) {
     notes,
   } = packet;
 
-  const parameter =
-    helperResult && helperResult.object ? helperResult.object : result;
+  let parameter;
 
-  if (helperResult && helperResult.type === "error") {
+  if (hasException) {
+    // If we have an exception, we prefix it, and we reset the exception message, as we're
+    // not going to use it.
+    parameter = exception;
+    exceptionMessage = null;
+  } else if (helperResult?.object) {
+    parameter = helperResult.object;
+  } else if (helperResult?.type === "error") {
     try {
       exceptionMessage = l10n.getStr(helperResult.message);
     } catch (ex) {
       exceptionMessage = helperResult.message;
     }
-  } else if (typeof exception === "string") {
-    // Wrap thrown strings in Error objects, so `throw "foo"` outputs "Error: foo"
-    exceptionMessage = new Error(exceptionMessage).toString();
+  } else {
+    parameter = result;
   }
 
   const level =
-    typeof exceptionMessage !== "undefined" && exceptionMessage !== null
+    typeof exceptionMessage !== "undefined" && packet.exceptionMessage !== null
       ? MESSAGE_LEVEL.ERROR
       : MESSAGE_LEVEL.LOG;
 
@@ -402,6 +405,7 @@ function transformEvaluationResultPacket(packet) {
     helperType: helperResult ? helperResult.type : null,
     level,
     messageText: exceptionMessage,
+    hasException,
     parameters: [parameter],
     errorMessageName,
     exceptionDocURL,
@@ -442,30 +446,6 @@ function getRepeatId(message) {
       return value;
     }
   );
-}
-
-function convertCachedPacket(packet) {
-  // The devtools server provides cached message packets in a different shape, so we
-  // transform them here.
-  let convertPacket = {};
-  if (packet._type === "ConsoleAPI") {
-    convertPacket.message = packet;
-    convertPacket.type = "consoleAPICall";
-  } else if (packet._type === "PageError") {
-    convertPacket.pageError = packet;
-    convertPacket.type = "pageError";
-  } else if (packet._type === "NetworkEvent") {
-    convertPacket.networkEvent = packet;
-    convertPacket.type = "networkEvent";
-  } else if (packet._type === "LogMessage") {
-    convertPacket = {
-      ...packet,
-      type: "logMessage",
-    };
-  } else {
-    throw new Error("Unexpected packet type: " + packet._type);
-  }
-  return convertPacket;
 }
 
 /**

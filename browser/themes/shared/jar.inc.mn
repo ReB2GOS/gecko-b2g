@@ -80,6 +80,7 @@
   skin/classic/browser/notification-icons/microphone-blocked.svg            (../shared/notification-icons/microphone-blocked.svg)
   skin/classic/browser/notification-icons/microphone-detailed.svg           (../shared/notification-icons/microphone-detailed.svg)
   skin/classic/browser/notification-icons/microphone.svg                    (../shared/notification-icons/microphone.svg)
+  skin/classic/browser/notification-icons/minimize.svg                      (../shared/notification-icons/minimize.svg)
   skin/classic/browser/notification-icons/persistent-storage-blocked.svg    (../shared/notification-icons/persistent-storage-blocked.svg)
   skin/classic/browser/notification-icons/persistent-storage.svg            (../shared/notification-icons/persistent-storage.svg)
   skin/classic/browser/notification-icons/plugin-badge.svg                  (../shared/notification-icons/plugin-badge.svg)
@@ -111,6 +112,9 @@
 #endif
   skin/classic/browser/panel-icon-retry.svg                    (../shared/panel-icon-retry.svg)
   skin/classic/browser/toolbar-drag-indicator.svg              (../shared/toolbar-drag-indicator.svg)
+
+  skin/classic/browser/protections/resolved-breach.svg         (../shared/protections/resolved-breach.svg)
+  skin/classic/browser/protections/breached-password.svg       (../shared/protections/breached-password.svg)
 
   skin/classic/browser/preferences/bookmark.svg                (../shared/preferences/bookmark.svg)
   skin/classic/browser/preferences/critters-postcard.jpg       (../shared/preferences/critters-postcard.jpg)
@@ -204,7 +208,6 @@
   skin/classic/browser/pin-12.svg                     (../shared/icons/pin-12.svg)
   skin/classic/browser/pin-tab.svg                    (../shared/icons/pin-tab.svg)
   skin/classic/browser/pocket.svg                     (../shared/icons/pocket.svg)
-  skin/classic/browser/pocket-animation.svg           (../shared/icons/pocket-animation.svg)
   skin/classic/browser/pocket-outline.svg             (../shared/icons/pocket-outline.svg)
   skin/classic/browser/print.svg                      (../shared/icons/print.svg)
   skin/classic/browser/private-browsing.svg           (../shared/icons/private-browsing.svg)
@@ -292,4 +295,4 @@
   skin/classic/browser/privatebrowsing/private-browsing.svg    (../shared/privatebrowsing/private-browsing.svg)
   skin/classic/browser/install-ssb.svg                         (../shared/install-ssb.svg)
   skin/classic/browser/critical.svg                            (../shared/icons/critical.svg)
-  
+  skin/classic/browser/webRTC-indicator.css                    (../shared/webRTC-indicator.css)

@@ -8,17 +8,23 @@ interface URI;
 interface nsIDocShell;
 interface RemoteTab;
 interface nsITransportSecurityInfo;
+interface nsIContentParent;
 
 [Exposed=Window, ChromeOnly]
 interface WindowContext {
+  readonly attribute BrowsingContext? browsingContext;
+
   readonly attribute unsigned long long innerWindowId;
+
+  readonly attribute WindowContext? parentWindowContext;
+
+  readonly attribute WindowContext topWindowContext;
 };
 
 [Exposed=Window, ChromeOnly]
 interface WindowGlobalParent : WindowContext {
   readonly attribute boolean isClosed;
   readonly attribute boolean isInProcess;
-  readonly attribute CanonicalBrowsingContext browsingContext;
 
   readonly attribute boolean isCurrentGlobal;
 
@@ -47,6 +53,7 @@ interface WindowGlobalParent : WindowContext {
   readonly attribute Principal documentPrincipal;
   readonly attribute Principal? contentBlockingAllowListPrincipal;
   readonly attribute URI? documentURI;
+  readonly attribute DOMString documentTitle;
 
   // Bit mask containing content blocking events that are recorded in
   // the document's content blocking log.

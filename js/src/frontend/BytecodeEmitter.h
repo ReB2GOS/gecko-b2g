@@ -42,7 +42,6 @@
 #include "js/RootingAPI.h"                 // JS::Rooted, JS::Handle
 #include "js/TypeDecls.h"                  // jsbytecode
 #include "vm/BytecodeUtil.h"               // JSOp
-#include "vm/CheckIsCallableKind.h"        // CheckIsCallableKind
 #include "vm/CheckIsObjectKind.h"          // CheckIsObjectKind
 #include "vm/FunctionPrefixKind.h"         // FunctionPrefixKind
 #include "vm/GeneratorResumeKind.h"        // GeneratorResumeKind
@@ -259,7 +258,11 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
       return true;
     }
 
-    uint32_t index = perScriptData().atomIndices()->count();
+    uint32_t index;
+    if (!perScriptData().gcThingList().append(atom, &index)) {
+      return false;
+    }
+
     if (!perScriptData().atomIndices()->add(p, atom, index)) {
       ReportOutOfMemory(cx);
       return false;
@@ -406,9 +409,6 @@ struct MOZ_STACK_CLASS BytecodeEmitter {
 
   // Helper to emit JSOp::CheckIsObj.
   MOZ_MUST_USE bool emitCheckIsObj(CheckIsObjectKind kind);
-
-  // Helper to emit JSOp::CheckIsCallable.
-  MOZ_MUST_USE bool emitCheckIsCallable(CheckIsCallableKind kind);
 
   // Push whether the value atop of the stack is non-undefined and non-null.
   MOZ_MUST_USE bool emitPushNotUndefinedOrNull();

@@ -15,6 +15,8 @@ XPCOMUtils.defineLazyModuleGetters(this, {
   AddonTestUtils: "resource://testing-common/AddonTestUtils.jsm",
   AppConstants: "resource://gre/modules/AppConstants.jsm",
   HttpServer: "resource://testing-common/httpd.js",
+  PlacesSearchAutocompleteProvider:
+    "resource://gre/modules/PlacesSearchAutocompleteProvider.jsm",
   PlacesTestUtils: "resource://testing-common/PlacesTestUtils.jsm",
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
   PromiseUtils: "resource://gre/modules/PromiseUtils.jsm",
@@ -128,6 +130,10 @@ class TestProvider extends UrlbarTestUtils.TestProvider {
   }
 }
 
+function convertToUtf8(str) {
+  return String.fromCharCode(...new TextEncoder().encode(str));
+}
+
 /**
  * Helper function to clear the existing providers and register a basic provider
  * that returns only the results given.
@@ -220,6 +226,56 @@ async function addTestSuggestionsEngine(suggestionsFn = null) {
 }
 
 /**
+ * Sets up a search engine that provides some tail suggestions by creating an
+ * array that mimics Google's tail suggestion responses.
+ *
+ * @param {function} suggestionsFn
+ *        A function that returns an array that mimics Google's tail suggestion
+ *        responses. See bug 1626897.
+ *        NOTE: Consumers specifying suggestionsFn must include searchStr as a
+ *              part of the array returned by suggestionsFn.
+ * @returns {nsISearchEngine} The new engine.
+ */
+async function addTestTailSuggestionsEngine(suggestionsFn = null) {
+  // This port number should match the number in engine-tail-suggestions.xml.
+  let server = makeTestServer(9001);
+  server.registerPathHandler("/suggest", (req, resp) => {
+    // URL query params are x-www-form-urlencoded, which converts spaces into
+    // plus signs, so un-convert any plus signs back to spaces.
+    let searchStr = decodeURIComponent(req.queryString.replace(/\+/g, " "));
+    let suggestions = suggestionsFn
+      ? suggestionsFn(searchStr)
+      : [
+          "what time is it in t",
+          ["what is the time today texas"].concat(
+            ["toronto", "tunisia"].map(s => searchStr + s.slice(1))
+          ),
+          [],
+          {
+            "google:irrelevantparameter": [],
+            "google:suggestdetail": [{}].concat(
+              ["toronto", "tunisia"].map(s => ({
+                mp: "… ",
+                t: s,
+              }))
+            ),
+          },
+        ];
+    let data = suggestions;
+    let jsonString = JSON.stringify(data);
+    // This script must be evaluated as UTF-8 for this to write out the bytes of
+    // the string in UTF-8.  If it's evaluated as Latin-1, the written bytes
+    // will be the result of UTF-8-encoding the result-string *twice*, which
+    // will break the "… " match prefixes.
+    let stringOfUtf8Bytes = convertToUtf8(jsonString);
+    resp.setHeader("Content-Type", "application/json", false);
+    resp.write(stringOfUtf8Bytes);
+  });
+  let engine = await addTestEngine("engine-tail-suggestions.xml", server);
+  return engine;
+}
+
+/**
  * Creates a UrlbarResult for a search result.
  * @param {UrlbarQueryContext} queryContext
  *   The context that this result will be displayed in.
@@ -247,6 +303,9 @@ function makeSearchResult(
   queryContext,
   {
     suggestion,
+    tailPrefix,
+    tail,
+    tailOffsetIndex,
     engineName,
     alias,
     query,
@@ -266,12 +325,24 @@ function makeSearchResult(
     }
   }
 
+  // Tail suggestion common cases, handled here to reduce verbosity in tests.
+  if (tail && !tailPrefix) {
+    tailPrefix = "… ";
+  }
+
+  if (!tailOffsetIndex) {
+    tailOffsetIndex = tail ? suggestion.indexOf(tail) : -1;
+  }
+
   let result = new UrlbarResult(
     UrlbarUtils.RESULT_TYPE.SEARCH,
     UrlbarUtils.RESULT_SOURCE.SEARCH,
     ...UrlbarResult.payloadAndSimpleHighlights(queryContext.tokens, {
       engine: [engineName, UrlbarUtils.HIGHLIGHT.TYPED],
       suggestion: [suggestion, UrlbarUtils.HIGHLIGHT.SUGGESTED],
+      tailPrefix,
+      tail: [tail, UrlbarUtils.HIGHLIGHT.SUGGESTED],
+      tailOffsetIndex,
       keyword: [alias, UrlbarUtils.HIGHLIGHT.TYPED],
       // Check against undefined so consumers can pass in the empty string.
       query: [

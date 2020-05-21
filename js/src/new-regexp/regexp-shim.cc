@@ -10,6 +10,7 @@
 
 #include <iostream>
 
+#include "new-regexp/regexp-macro-assembler.h"
 #include "new-regexp/regexp-shim.h"
 #include "new-regexp/regexp-stack.h"
 
@@ -161,6 +162,12 @@ bool Isolate::init() {
   return true;
 }
 
+Isolate::~Isolate() {
+  if (regexpStack_) {
+    js_delete(regexpStack_);
+  }
+}
+
 byte* Isolate::top_of_regexp_stack() const {
   return reinterpret_cast<byte*>(regexpStack_->memory_top_address_address());
 }
@@ -183,7 +190,7 @@ Handle<ByteArray> Isolate::NewByteArray(int length, AllocationType alloc) {
 
 Handle<FixedArray> Isolate::NewFixedArray(int length) {
   MOZ_RELEASE_ASSERT(length >= 0);
-  MOZ_CRASH("TODO");
+  return Handle<FixedArray>::fromHandleValue(JS::UndefinedHandleValue);
 }
 
 template <typename CharT>
@@ -200,6 +207,9 @@ template Handle<String>
 Isolate::InternalizeString(const Vector<const uint8_t>& str);
 template Handle<String>
 Isolate::InternalizeString(const Vector<const char16_t>& str);
+
+static_assert(JSRegExp::RegistersForCaptureCount(JSRegExp::kMaxCaptures) <=
+              RegExpMacroAssembler::kMaxRegisterCount);
 
 }  // namespace internal
 }  // namespace v8

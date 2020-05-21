@@ -9,11 +9,10 @@
 
 #include "Telephony.h"
 #include "mozilla/dom/MMICall.h"
-//#include "mozilla/dom/MozMobileConnectionBinding.h"
+//#include "mozilla/dom/MobileConnectionBinding.h"
 #include "mozilla/dom/Promise.h"
 #include "mozilla/dom/ToJSValue.h"
 #include "mozilla/dom/telephony/TelephonyCallback.h"
-#include "nsAutoPtr.h"
 #include "nsCOMPtr.h"
 #include "nsITelephonyService.h"
 #include "nsJSUtils.h"

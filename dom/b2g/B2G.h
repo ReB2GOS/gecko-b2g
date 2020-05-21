@@ -11,6 +11,7 @@
 #include "nsPIDOMWindow.h"
 #include "nsWrapperCache.h"
 #include "mozilla/dom/AlarmManager.h"
+#include "mozilla/dom/FlashlightManager.h"
 #include "mozilla/dom/TetheringManagerBinding.h"
 
 #ifdef MOZ_B2G_RIL
@@ -32,14 +33,20 @@
 #ifdef MOZ_B2G_CAMERA
 #  include "DOMCameraManager.h"
 #endif
-#ifndef DISABLE_WIFI
+#if defined(MOZ_WIDGET_GONK) && !defined(DISABLE_WIFI)
 #  include "mozilla/dom/WifiManagerBinding.h"
 #endif
 #ifdef MOZ_AUDIO_CHANNEL_MANAGER
 #  include "AudioChannelManager.h"
 #endif
+#ifdef MOZ_B2G_FM
+#  include "mozilla/dom/FMRadio.h"
+#endif
 
 #include "mozilla/dom/DownloadManagerBinding.h"
+
+#include "mozilla/dom/WakeLock.h"
+#include "mozilla/dom/power/PowerManagerService.h"
 
 namespace mozilla {
 namespace dom {
@@ -58,6 +65,7 @@ class B2G final : public nsISupports, public nsWrapperCache {
                                JS::Handle<JSObject*> aGivenProto) override;
 
   AlarmManager* GetAlarmManager(ErrorResult& aRv);
+  already_AddRefed<Promise> GetFlashlightManager(ErrorResult& aRv);
   TetheringManager* GetTetheringManager(ErrorResult& aRv);
 
 #ifdef MOZ_B2G_RIL
@@ -79,7 +87,7 @@ class B2G final : public nsISupports, public nsWrapperCache {
 #ifdef MOZ_B2G_CAMERA
   nsDOMCameraManager* GetCameras(ErrorResult& aRv);
 #endif
-#ifndef DISABLE_WIFI
+#if defined(MOZ_WIDGET_GONK) && !defined(DISABLE_WIFI)
   WifiManager* GetWifiManager(ErrorResult& aRv);
 #endif
   static bool HasCameraSupport(JSContext* /* unused */, JSObject* aGlobal);
@@ -89,7 +97,16 @@ class B2G final : public nsISupports, public nsWrapperCache {
 
 #ifdef MOZ_AUDIO_CHANNEL_MANAGER
   system::AudioChannelManager* GetAudioChannelManager(ErrorResult& aRv);
-#endif  // MOZ_AUDIO_CHANNEL_MANAGER
+#endif
+#ifdef MOZ_B2G_FM
+  FMRadio* GetFmRadio(ErrorResult& aRv);
+#endif
+
+  static
+  bool HasWakeLockSupport(JSContext* /* unused*/, JSObject* /*unused */);
+
+  already_AddRefed<WakeLock>
+  RequestWakeLock(const nsAString &aTopic, ErrorResult& aRv);
 
   // Shutting down.
   void Shutdown();
@@ -97,6 +114,7 @@ class B2G final : public nsISupports, public nsWrapperCache {
  private:
   ~B2G();
   RefPtr<AlarmManager> mAlarmManager;
+  RefPtr<FlashlightManager> mFlashlightManager;
   RefPtr<TetheringManager> mTetheringManager;
 #ifdef MOZ_B2G_RIL
   RefPtr<CellBroadcast> mCellBroadcast;
@@ -117,13 +135,16 @@ class B2G final : public nsISupports, public nsWrapperCache {
 #ifdef MOZ_B2G_CAMERA
   RefPtr<nsDOMCameraManager> mCameraManager;
 #endif
-#ifndef DISABLE_WIFI
+#if defined(MOZ_WIDGET_GONK) && !defined(DISABLE_WIFI)
   RefPtr<WifiManager> mWifiManager;
 #endif
 
   RefPtr<DownloadManager> mDownloadManager;
 #ifdef MOZ_AUDIO_CHANNEL_MANAGER
   RefPtr<system::AudioChannelManager> mAudioChannelManager;
+#endif
+#ifdef MOZ_B2G_FM
+  RefPtr<FMRadio> mFMRadio;
 #endif
 };
 
