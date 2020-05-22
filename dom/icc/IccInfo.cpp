@@ -200,9 +200,7 @@ void IccInfo::GetIccInfo(nsIIccInfo** aIccInfo) const {
 
 JSObject* IccInfo::WrapObject(JSContext* aCx,
                               JS::Handle<JSObject*> aGivenProto) {
-  // FIXME
-  // return IccInfo_Binding::Wrap(aCx, this, aGivenProto);
-  return IccInfo_Binding::GetConstructorObject(aCx);
+  return IccInfo_Binding::Wrap(aCx, this, aGivenProto);
 }
 
 Nullable<IccType> IccInfo::GetIccType() const {
@@ -253,11 +251,21 @@ bool IccInfo::IsDisplaySpnRequired() const {
 }
 
 // GsmIccInfo
+NS_IMPL_CYCLE_COLLECTION_CLASS(GsmIccInfo)
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(GsmIccInfo,
+                                                  IccInfo)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(GsmIccInfo,
+                                                IccInfo)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(GsmIccInfo)
 NS_INTERFACE_MAP_END_INHERITING(IccInfo)
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(GsmIccInfo)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(GsmIccInfo)
+NS_IMPL_ADDREF_INHERITED(GsmIccInfo, IccInfo)
+NS_IMPL_RELEASE_INHERITED(GsmIccInfo, IccInfo)
 
 GsmIccInfo::GsmIccInfo(nsPIDOMWindowInner* aWindow) : IccInfo(aWindow) {
   mIccInfo = new nsGsmIccInfo();
@@ -296,11 +304,21 @@ void GsmIccInfo::GetMsisdn(nsAString& aMsisdn) const {
 }
 
 // CdmaIccInfo
+NS_IMPL_CYCLE_COLLECTION_CLASS(CdmaIccInfo)
+
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_BEGIN_INHERITED(CdmaIccInfo,
+                                                  IccInfo)
+NS_IMPL_CYCLE_COLLECTION_TRAVERSE_END
+
+NS_IMPL_CYCLE_COLLECTION_UNLINK_BEGIN_INHERITED(CdmaIccInfo,
+                                                IccInfo)
+NS_IMPL_CYCLE_COLLECTION_UNLINK_END
+
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(CdmaIccInfo)
 NS_INTERFACE_MAP_END_INHERITING(IccInfo)
 
-NS_IMPL_CYCLE_COLLECTING_ADDREF(CdmaIccInfo)
-NS_IMPL_CYCLE_COLLECTING_RELEASE(CdmaIccInfo)
+NS_IMPL_ADDREF_INHERITED(CdmaIccInfo, IccInfo)
+NS_IMPL_RELEASE_INHERITED(CdmaIccInfo, IccInfo)
 
 CdmaIccInfo::CdmaIccInfo(nsPIDOMWindowInner* aWindow) : IccInfo(aWindow) {
   mIccInfo = new nsCdmaIccInfo();
@@ -326,7 +344,7 @@ void CdmaIccInfo::GetMdn(nsAString& aMdn) const {
 }
 
 int32_t CdmaIccInfo::PrlVersion() const {
-  int32_t version;
+  int32_t version = 0;
   nsCOMPtr<nsICdmaIccInfo> iccInfo = do_QueryInterface(mIccInfo);
   if (iccInfo) {
     iccInfo->GetPrlVersion(&version);
