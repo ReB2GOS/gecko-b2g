@@ -101,9 +101,15 @@ esac
 
 export ARCH_ABI
 
-export CROSS_TOOLCHAIN_LINKER_PATH=${CROSS_TOOLCHAIN_LINKER_PATH=:-$GONK_PATH/prebuilts/gcc/linux-x86/$ARCH_NAME/$TARGET_ARCH-linux-$ARCH_ABI-$TARGET_GCC_VERSION/$TARGET_ARCH-linux-$ARCH_ABI/bin}
-
-export PATH=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin:$GONK_PATH/prebuilts/linux-x86_64/bin/:$CLANG_PATH:$PYTHON_PATH:$CROSS_TOOLCHAIN_LINKER_PATH:$PATH
+if [ "$HOST_OS" == "Darwin" ]; then
+	export CROSS_TOOLCHAIN_LINKER_PATH=${CROSS_TOOLCHAIN_LINKER_PATH=:-$GONK_PATH/prebuilts/gcc/darwin-x86/$ARCH_NAME/$TARGET_ARCH-linux-$ARCH_ABI-$TARGET_GCC_VERSION/$TARGET_ARCH-linux-$ARCH_ABI/bin}
+	export PATH=$ANDROID_NDK/toolchains/llvm/prebuilt/darwin-x86_64/bin:$GONK_PATH/prebuilts/darwin-x86_64/bin/:$CLANG_PATH:$PYTHON_PATH:$CROSS_TOOLCHAIN_LINKER_PATH:$PATH
+	GCC_LIB="-L$GONK_PATH/prebuilts/gcc/darwin-x86/$ARCH_NAME/$TARGET_ARCH-linux-$ARCH_ABI-4.9/lib/gcc/$TARGET_ARCH-linux-$ARCH_ABI/4.9.x/"
+else
+	export CROSS_TOOLCHAIN_LINKER_PATH=${CROSS_TOOLCHAIN_LINKER_PATH=:-$GONK_PATH/prebuilts/gcc/linux-x86/$ARCH_NAME/$TARGET_ARCH-linux-$ARCH_ABI-$TARGET_GCC_VERSION/$TARGET_ARCH-linux-$ARCH_ABI/bin}
+	export PATH=$ANDROID_NDK/toolchains/llvm/prebuilt/linux-x86_64/bin:$GONK_PATH/prebuilts/linux-x86_64/bin/:$CLANG_PATH:$PYTHON_PATH:$CROSS_TOOLCHAIN_LINKER_PATH:$PATH
+	GCC_LIB="-L$GONK_PATH/prebuilts/gcc/linux-x86/$ARCH_NAME/$TARGET_ARCH-linux-$ARCH_ABI-4.9/lib/gcc/$TARGET_ARCH-linux-$ARCH_ABI/4.9.x/"
+fi
 
 SYSROOT=$ANDROID_NDK/platforms/$ANDROID_PLATFORM/$ARCH_DIR/
 GONK_LIBS=$GONK_PATH/out/target/product/$GONK_PRODUCT_NAME/obj/lib/
@@ -164,8 +170,6 @@ $CFLAGS"
 export CXXFLAGS="$CPPFLAGS -std=c++17"
 
 # export RUSTC_OPT_LEVEL=z
-
-GCC_LIB="-L$GONK_PATH/prebuilts/gcc/linux-x86/$ARCH_NAME/$TARGET_ARCH-linux-$ARCH_ABI-4.9/lib/gcc/$TARGET_ARCH-linux-$ARCH_ABI/4.9.x/"
 
 export ANDROID_PLATFORM=$ANDROID_PLATFORM
 
