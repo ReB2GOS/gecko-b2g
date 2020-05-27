@@ -9,13 +9,14 @@
 
 #include "mozilla/ContentBlockingLog.h"
 #include "mozilla/ContentBlockingNotifier.h"
+#include "mozilla/Maybe.h"
 #include "mozilla/RefPtr.h"
 #include "mozilla/dom/ClientInfo.h"
 #include "mozilla/dom/ClientIPCTypes.h"
 #include "mozilla/dom/DOMRect.h"
 #include "mozilla/dom/PWindowGlobalParent.h"
-#include "mozilla/dom/BrowserParent.h"
 #include "mozilla/dom/WindowContext.h"
+#include "nsDataHashtable.h"
 #include "nsRefPtrHashtable.h"
 #include "nsWrapperCache.h"
 #include "nsISupports.h"
@@ -36,6 +37,7 @@ class CrossProcessPaint;
 
 namespace dom {
 
+class BrowserParent;
 class WindowGlobalChild;
 class JSWindowActorParent;
 class JSActorMessageMeta;
@@ -184,6 +186,15 @@ class WindowGlobalParent final : public WindowContext,
 
   bool GetDocumentUpgradeInsecureRequests() { return mUpgradeInsecureRequests; }
 
+  void DidBecomeCurrentWindowGlobal(bool aCurrent);
+
+  uint32_t HttpsOnlyStatus() { return mHttpsOnlyStatus; }
+
+  void AddMixedContentSecurityState(uint32_t aStateFlags);
+  uint32_t GetMixedContentSecurityFlags() { return mMixedContentSecurityState; }
+
+  nsITransportSecurityInfo* GetSecurityInfo() { return mSecurityInfo; }
+
  protected:
   const nsAString& GetRemoteType() override;
   JSActor::Type GetSide() override { return JSActor::Type::Parent; }
@@ -205,10 +216,13 @@ class WindowGlobalParent final : public WindowContext,
   mozilla::ipc::IPCResult RecvUpdateDocumentCspSettings(
       bool aBlockAllMixedContent, bool aUpgradeInsecureRequests);
   mozilla::ipc::IPCResult RecvUpdateDocumentTitle(const nsString& aTitle);
+  mozilla::ipc::IPCResult RecvUpdateHttpsOnlyStatus(uint32_t aHttpsOnlyStatus);
   mozilla::ipc::IPCResult RecvSetIsInitialDocument(bool aIsInitialDocument) {
     mIsInitialDocument = aIsInitialDocument;
     return IPC_OK();
   }
+  mozilla::ipc::IPCResult RecvUpdateDocumentSecurityInfo(
+      nsITransportSecurityInfo* aSecurityInfo);
   mozilla::ipc::IPCResult RecvSetHasBeforeUnload(bool aHasBeforeUnload);
   mozilla::ipc::IPCResult RecvSetClientInfo(
       const IPCClientInfo& aIPCClientInfo);
@@ -239,6 +253,8 @@ class WindowGlobalParent final : public WindowContext,
 
   ~WindowGlobalParent();
 
+  bool ShouldTrackSiteOriginTelemetry();
+
   // NOTE: This document principal doesn't reflect possible |document.domain|
   // mutations which may have been made in the actual document.
   nsCOMPtr<nsIPrincipal> mDocumentPrincipal;
@@ -257,14 +273,35 @@ class WindowGlobalParent final : public WindowContext,
   // includes the activity log for all of the nested subdocuments as well.
   ContentBlockingLog mContentBlockingLog;
 
+  uint32_t mMixedContentSecurityState = 0;
+
   Maybe<ClientInfo> mClientInfo;
   // Fields being mirrored from the corresponding document
   nsCOMPtr<nsICookieJarSettings> mCookieJarSettings;
+  nsCOMPtr<nsITransportSecurityInfo> mSecurityInfo;
+
   uint32_t mSandboxFlags;
+
+  struct OriginCounter {
+    void UpdateSiteOriginsFrom(WindowGlobalParent* aParent, bool aIncrease);
+    void Accumulate();
+
+    nsDataHashtable<nsCStringHashKey, int32_t> mOriginMap;
+    uint32_t mMaxOrigins = 0;
+  };
+
+  // Used to collect unique site origin telemetry.
+  //
+  // Is only Some() on top-level content windows.
+  Maybe<OriginCounter> mOriginCounter;
+
   bool mDocumentHasLoaded;
   bool mDocumentHasUserInteracted;
   bool mBlockAllMixedContent;
   bool mUpgradeInsecureRequests;
+
+  // HTTPS-Only Mode flags
+  uint32_t mHttpsOnlyStatus;
 };
 
 }  // namespace dom

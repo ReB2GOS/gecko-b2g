@@ -10,6 +10,7 @@
 #include "mozilla/dom/PBrowserBridgeParent.h"
 #include "mozilla/Tuple.h"
 #include "mozilla/dom/ipc/IdType.h"
+#include "mozilla/dom/WindowGlobalTypes.h"
 
 namespace mozilla {
 
@@ -31,8 +32,8 @@ class BrowserBridgeParent : public PBrowserBridgeParent {
 
   BrowserBridgeParent();
 
-  nsresult InitWithProcess(ContentParent* aContentParent,
-                           const nsString& aPresentationURL,
+  nsresult InitWithProcess(BrowserParent* aParentBrowser,
+                           ContentParent* aContentParent,
                            const WindowGlobalInit& aWindowInit,
                            uint32_t aChromeFlags, TabId aTabId);
 

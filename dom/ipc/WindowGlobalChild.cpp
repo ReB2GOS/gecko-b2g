@@ -59,6 +59,20 @@ WindowGlobalChild::WindowGlobalChild(dom::WindowContext* aWindowContext,
   if (!mDocumentURI) {
     NS_NewURI(getter_AddRefs(mDocumentURI), "about:blank");
   }
+
+#ifdef MOZ_GECKO_PROFILER
+  // Registers a DOM Window with the profiler. It re-registers the same Inner
+  // Window ID with different URIs because when a Browsing context is first
+  // loaded, the first url loaded in it will be about:blank. This call keeps the
+  // first non-about:blank registration of window and discards the previous one.
+  uint64_t embedderInnerWindowID = 0;
+  if (BrowsingContext()->GetParent()) {
+    embedderInnerWindowID = BrowsingContext()->GetEmbedderInnerWindowId();
+  }
+  profiler_register_page(BrowsingContext()->Id(), InnerWindowId(),
+                         aDocumentURI->GetSpecOrDefault(),
+                         embedderInnerWindowID);
+#endif
 }
 
 already_AddRefed<WindowGlobalChild> WindowGlobalChild::Create(
@@ -158,10 +172,22 @@ void WindowGlobalChild::OnNewDocument(Document* aDocument) {
   MOZ_RELEASE_ASSERT(aDocument);
 
   // Send a series of messages to update document-specific state on
-  // WindowGlobalParent.
+  // WindowGlobalParent, when we change documents on an existing WindowGlobal.
+  // This data is also all sent when we construct a WindowGlobal, so anything
+  // added here should also be added to WindowGlobalActor::WindowInitializer.
+
   // FIXME: Perhaps these should be combined into a smaller number of messages?
   SetDocumentURI(aDocument->GetDocumentURI());
   SetDocumentPrincipal(aDocument->NodePrincipal());
+
+  nsCOMPtr<nsITransportSecurityInfo> securityInfo;
+  if (nsCOMPtr<nsIChannel> channel = aDocument->GetChannel()) {
+    nsCOMPtr<nsISupports> securityInfoSupports;
+    channel->GetSecurityInfo(getter_AddRefs(securityInfoSupports));
+    securityInfo = do_QueryInterface(securityInfoSupports);
+  }
+  SendUpdateDocumentSecurityInfo(securityInfo);
+
   SendUpdateDocumentCspSettings(aDocument->GetBlockAllMixedContent(false),
                                 aDocument->GetUpgradeInsecureRequests(false));
   SendUpdateSandboxFlags(aDocument->GetSandboxFlags());
@@ -174,6 +200,8 @@ void WindowGlobalChild::OnNewDocument(Document* aDocument) {
         "Failed to update document's cookie jar settings on the "
         "WindowGlobalParent");
   }
+
+  SendUpdateHttpsOnlyStatus(aDocument->HttpsOnlyStatus());
 
   // Update window context fields for the newly loaded Document.
   WindowContext::Transaction txn;
@@ -350,7 +378,7 @@ mozilla::ipc::IPCResult WindowGlobalChild::RecvMakeFrameLocal(
 mozilla::ipc::IPCResult WindowGlobalChild::RecvMakeFrameRemote(
     const MaybeDiscarded<dom::BrowsingContext>& aFrameContext,
     ManagedEndpoint<PBrowserBridgeChild>&& aEndpoint, const TabId& aTabId,
-    MakeFrameRemoteResolver&& aResolve) {
+    const LayersId& aLayersId, MakeFrameRemoteResolver&& aResolve) {
   MOZ_DIAGNOSTIC_ASSERT(XRE_IsContentProcess());
 
   MOZ_LOG(BrowsingContext::GetLog(), LogLevel::Debug,
@@ -358,6 +386,10 @@ mozilla::ipc::IPCResult WindowGlobalChild::RecvMakeFrameRemote(
 
   // Immediately resolve the promise, acknowledging the request.
   aResolve(true);
+
+  if (!aLayersId.IsValid()) {
+    return IPC_FAIL(this, "Received an invalid LayersId");
+  }
 
   // Get a BrowsingContext if we're not null or discarded. We don't want to
   // early-return before we connect the BrowserBridgeChild, as otherwise we'll
@@ -370,7 +402,7 @@ mozilla::ipc::IPCResult WindowGlobalChild::RecvMakeFrameRemote(
   // Immediately construct the BrowserBridgeChild so we can destroy it cleanly
   // if the process switch fails.
   RefPtr<BrowserBridgeChild> bridge =
-      new BrowserBridgeChild(frameContext, aTabId);
+      new BrowserBridgeChild(frameContext, aTabId, aLayersId);
   RefPtr<BrowserChild> manager = GetBrowserChild();
   if (NS_WARN_IF(
           !manager->BindPBrowserBridgeEndpoint(std::move(aEndpoint), bridge))) {

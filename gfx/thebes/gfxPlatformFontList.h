@@ -260,13 +260,16 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
     return mSharedFontList.get();
   }
 
-  // The aPid and aOut parameters are declared here with generic types
-  // because (on Windows) we cannot include the proper headers, as they
-  // result in build failure due to (indirect) inclusion of windows.h
-  // in generated bindings code.
+  // Create a handle for a single shmem block (identified by index) ready to
+  // be shared to the given processId.
   void ShareFontListShmBlockToProcess(uint32_t aGeneration, uint32_t aIndex,
                                       base::ProcessId aPid,
                                       base::SharedMemoryHandle* aOut);
+
+  // Populate the array aBlocks with the complete list of shmem handles ready
+  // to be shared to the given processId.
+  void ShareFontListToProcess(nsTArray<base::SharedMemoryHandle>* aBlocks,
+                              base::ProcessId aPid);
 
   void SetCharacterMap(uint32_t aGeneration,
                        const mozilla::fontlist::Pointer& aFacePtr,
@@ -681,7 +684,10 @@ class gfxPlatformFontList : public gfxFontInfoLoader {
   // for font list changes that affect all documents
   void ForceGlobalReflow();
 
-  void RebuildLocalFonts();
+  // If aForgetLocalFaces is true, all gfxFontEntries for src:local fonts must
+  // be discarded (not potentially reused to satisfy the rebuilt rules),
+  // because they may no longer be valid.
+  void RebuildLocalFonts(bool aForgetLocalFaces = false);
 
   void ResolveGenericFontNames(mozilla::StyleGenericFontFamily aGenericType,
                                eFontPrefLang aPrefLang,

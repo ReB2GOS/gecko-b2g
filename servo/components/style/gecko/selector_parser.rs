@@ -229,17 +229,6 @@ impl NonTSPseudoClass {
                       NonTSPseudoClass::MozLWThemeDarkText
             )
     }
-
-    /// Returns true if the evaluation of the pseudo-class depends on the
-    /// element's attributes.
-    pub fn is_attr_based(&self) -> bool {
-        matches!(
-            *self,
-            NonTSPseudoClass::MozTableBorderNonzero |
-                NonTSPseudoClass::MozBrowserFrame |
-                NonTSPseudoClass::Lang(..)
-        )
-    }
 }
 
 impl ::selectors::parser::NonTSPseudoClass for NonTSPseudoClass {
@@ -354,7 +343,7 @@ impl<'a, 'i> ::selectors::Parser<'i> for SelectorParser<'a> {
 
     #[inline]
     fn parse_is_and_where(&self) -> bool {
-        static_prefs::pref!("layout.css.is-where-selectors.enabled")
+        self.in_user_agent_stylesheet() || static_prefs::pref!("layout.css.is-where-selectors.enabled")
     }
 
     #[inline]

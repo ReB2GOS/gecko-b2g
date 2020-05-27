@@ -21,7 +21,7 @@ from __future__ import absolute_import, print_function, unicode_literals
 
 import copy
 import logging
-from six import text_type
+from six import string_types, text_type
 
 from mozbuild.schedules import INCLUSIVE_COMPONENTS
 from moztest.resolve import TEST_SUITES
@@ -45,7 +45,9 @@ from taskgraph.util.schema import (
     Schema,
 )
 from taskgraph.util.chunking import (
-    get_chunked_manifests,
+    chunk_manifests,
+    get_manifests,
+    get_runtimes,
     guess_mozinfo_from_task,
 )
 from taskgraph.util.taskcluster import (
@@ -166,7 +168,9 @@ TEST_VARIANTS = {
     'geckoview-e10s-multi': {
         'description': "{description} with e10s-multi enabled",
         'filterfn': gv_e10s_multi_filter,
-        'run-on-projects': ['trunk'],
+        'replace': {
+            'run-on-projects': ['trunk'],
+        },
         'suffix': 'e10s-multi',
         'merge': {
             'mozharness': {
@@ -201,6 +205,19 @@ TEST_VARIANTS = {
                 'extra-options': [
                     '--setpref=media.peerconnection.mtransport_process=true',
                     '--setpref=network.process.enabled=true',
+                ],
+            }
+        }
+    },
+    'socketprocess_networking': {
+        'description': "{description} with networking on socket process enabled",
+        'suffix': 'spi-nw',
+        'merge': {
+            'mozharness': {
+                'extra-options': [
+                    '--setpref=network.process.enabled=true',
+                    '--setpref=network.http.network_access_on_socket_process.enabled=true',
+                    '--setpref=network.ssl_tokens_cache_enabled=true',
                 ],
             }
         }
@@ -246,6 +263,10 @@ CHUNK_SUITES_BLACKLIST = (
     'web-platform-tests-wdspec',
 )
 """These suites will be chunked at test runtime rather than here in the taskgraph."""
+
+
+DYNAMIC_CHUNK_DURATION = 20 * 60  # seconds
+"""The approximate time each test chunk should take to run."""
 
 
 logger = logging.getLogger(__name__)
@@ -335,7 +356,7 @@ test_description_schema = Schema({
     # test platform is not found, the key 'default' will be tried.
     Required('chunks'): optionally_keyed_by(
         'test-platform',
-        int),
+        Any(int, 'dynamic')),
 
     # the time (with unit) after which this task is deleted; default depends on
     # the branch (see below)
@@ -473,7 +494,10 @@ test_description_schema = Schema({
     },
 
     # The set of test manifests to run.
-    Optional('test-manifests'): [text_type],
+    Optional('test-manifests'): Any(
+        [text_type],
+        {'active': [text_type], 'skipped': [text_type]},
+    ),
 
     # The current chunk (if chunking is enabled).
     Optional('this-chunk'): int,
@@ -530,7 +554,10 @@ test_description_schema = Schema({
 
     # The SCHEDULES component for this task; this defaults to the suite
     # (not including the flavor) but can be overridden here.
-    Exclusive(Optional('schedules-component'), 'optimization'): text_type,
+    Exclusive(Optional('schedules-component'), 'optimization'): Any(
+        text_type,
+        [text_type],
+    ),
 
     Optional('worker-type'): optionally_keyed_by(
         'test-platform',
@@ -860,7 +887,6 @@ def set_tier(config, tasks):
         if 'tier' not in task or task['tier'] == 'default':
             if task['test-platform'] in [
                 'linux64/opt',
-                'linux64-nightly/opt',
                 'linux64/debug',
                 'linux64-pgo/opt',
                 'linux64-shippable/opt',
@@ -882,7 +908,6 @@ def set_tier(config, tasks):
                 'windows7-32/opt',
                 'windows7-32-pgo/opt',
                 'windows7-32-devedition/opt',
-                'windows7-32-nightly/opt',
                 'windows7-32-shippable/opt',
                 'windows10-aarch64/opt',
                 'windows10-64/debug',
@@ -890,7 +915,6 @@ def set_tier(config, tasks):
                 'windows10-64-pgo/opt',
                 'windows10-64-shippable/opt',
                 'windows10-64-devedition/opt',
-                'windows10-64-nightly/opt',
                 'windows10-64-asan/opt',
                 'windows10-64-qr/opt',
                 'windows10-64-qr/debug',
@@ -898,7 +922,6 @@ def set_tier(config, tasks):
                 'windows10-64-shippable-qr/opt',
                 'macosx1014-64/opt',
                 'macosx1014-64/debug',
-                'macosx1014-64-nightly/opt',
                 'macosx1014-64-shippable/opt',
                 'macosx1014-64-devedition/opt',
                 'macosx1014-64-qr/opt',
@@ -1296,7 +1319,7 @@ def ensure_spi_disabled_on_all_but_spi(config, tasks):
                        'junit' not in task['suite'] and
                        'raptor' not in task['suite'])
 
-        if has_setpref and variant != 'socketprocess':
+        if has_setpref and variant != 'socketprocess' and variant != 'socketprocess_networking':
             task['mozharness']['extra-options'].append(
                     '--setpref=media.peerconnection.mtransport_process=false')
             task['mozharness']['extra-options'].append(
@@ -1355,24 +1378,68 @@ def set_test_verify_chunks(config, tasks):
 
 
 @transforms.add
-def set_chunked_manifests(config, tasks):
-    """Determine the set of test manifests that should run against this task
-    and divide them into chunks.
-    """
+def set_test_manifests(config, tasks):
+    """Determine the set of test manifests that should run in this task."""
 
     for task in tasks:
-        if taskgraph.fast or task['suite'] in CHUNK_SUITES_BLACKLIST:
+        if task['suite'] in CHUNK_SUITES_BLACKLIST:
+            yield task
+            continue
+
+        if taskgraph.fast:
+            # We want to avoid evaluating manifests when taskgraph.fast is set. But
+            # manifests are required for dynamic chunking. Just set the number of
+            # chunks to one in this case.
+            if task['chunks'] == 'dynamic':
+                task['chunks'] = 1
+            yield task
+            continue
+
+        manifests = task.get('test-manifests')
+        if manifests:
+            if isinstance(manifests, list):
+                task['test-manifests'] = {'active': manifests, 'skipped': []}
             yield task
             continue
 
         suite_definition = TEST_SUITES[task['suite']]
         mozinfo = guess_mozinfo_from_task(task)
-        task['chunked-manifests'] = get_chunked_manifests(
+        task['test-manifests'] = get_manifests(
             suite_definition['build_flavor'],
             suite_definition.get('kwargs', {}).get('subsuite', 'undefined'),
-            task['chunks'],
             frozenset(mozinfo.items()),
         )
+
+        yield task
+
+
+@transforms.add
+def resolve_dynamic_chunks(config, tasks):
+    """Determine how many chunks are needed to handle the given set of manifests."""
+
+    for task in tasks:
+        if task['chunks'] != "dynamic":
+            yield task
+            continue
+
+        if not task.get('test-manifests'):
+            raise Exception(
+                "{} must define 'test-manifests' to use dynamic chunking!".format(
+                    task['test-name']))
+
+        runtimes = {m: r for m, r in get_runtimes(task['test-platform']).items()
+                    if m in task['test-manifests']['active']}
+
+        times = list(runtimes.values())
+        avg = round(sum(times) / len(times), 2) if times else 0
+        total = sum(times)
+
+        # If there are manifests missing from the runtimes data, fill them in
+        # with the average of all present manifests.
+        missing = [m for m in task['test-manifests']['active'] if m not in runtimes]
+        total += avg * len(missing)
+
+        task['chunks'] = int(round(total / DYNAMIC_CHUNK_DURATION)) or 1
         yield task
 
 
@@ -1384,7 +1451,24 @@ def split_chunks(config, tasks):
     """
 
     for task in tasks:
-        chunked_manifests = task.pop('chunked-manifests', None)
+        # If test-manifests are set, chunk them ahead of time to avoid running
+        # the algorithm more than once.
+        chunked_manifests = None
+        if 'test-manifests' in task:
+            suite_definition = TEST_SUITES[task['suite']]
+            manifests = task['test-manifests']
+            chunked_manifests = chunk_manifests(
+                suite_definition['build_flavor'],
+                suite_definition.get('kwargs', {}).get('subsuite', 'undefined'),
+                task['test-platform'],
+                task['chunks'],
+                manifests['active'],
+            )
+
+            # Add all skipped manifests to the first chunk so they still show up in the
+            # logs. They won't impact runtime much.
+            chunked_manifests[0].extend(manifests['skipped'])
+
         for i in range(task['chunks']):
             this_chunk = i + 1
 
@@ -1549,6 +1633,37 @@ def set_worker_type(config, tasks):
 
 
 @transforms.add
+def set_schedules_components(config, tasks):
+    for task in tasks:
+        if 'optimization' in task:
+            yield task
+            continue
+
+        category = task['attributes']['unittest_category']
+        schedules = task.get('schedules-component', category)
+        if isinstance(schedules, string_types):
+            schedules = [schedules]
+
+        schedules = set(schedules)
+        if schedules & set(INCLUSIVE_COMPONENTS):
+            # if this is an "inclusive" test, then all files which might
+            # cause it to run are annotated with SCHEDULES in moz.build,
+            # so do not include the platform or any other components here
+            task['schedules-component'] = sorted(schedules)
+            yield task
+            continue
+
+        schedules.add(category)
+        schedules.add(platform_family(task['build-platform']))
+
+        if task['webrender']:
+            schedules.add('webrender')
+
+        task['schedules-component'] = sorted(schedules)
+        yield task
+
+
+@transforms.add
 def make_job_description(config, tasks):
     """Convert *test* descriptions to *job* descriptions (input to
     taskgraph.transforms.job)"""
@@ -1619,18 +1734,7 @@ def make_job_description(config, tasks):
             'platform': task.get('treeherder-machine-platform', task['build-platform']),
         }
 
-        category = task.get('schedules-component', attributes['unittest_category'])
-        if category in INCLUSIVE_COMPONENTS:
-            # if this is an "inclusive" test, then all files which might
-            # cause it to run are annotated with SCHEDULES in moz.build,
-            # so do not include the platform or any other components here
-            schedules = [category]
-        else:
-            schedules = [attributes['unittest_category'], platform_family(task['build-platform'])]
-            component = task.get('schedules-component')
-            if component:
-                schedules.append(component)
-
+        schedules = task.get('schedules-component', [])
         if task.get('when'):
             # This may still be used by comm-central.
             jobdesc['when'] = task['when']
@@ -1639,7 +1743,7 @@ def make_job_description(config, tasks):
         # Pushes generated by `mach try auto` should use the non-try optimizations.
         elif config.params.is_try() and config.params['try_mode'] != 'try_auto':
             jobdesc['optimization'] = {'test-try': schedules}
-        elif category in INCLUSIVE_COMPONENTS:
+        elif set(schedules) & set(INCLUSIVE_COMPONENTS):
             jobdesc['optimization'] = {'test-inclusive': schedules}
         else:
             # First arg goes to 'skip-unless-schedules', second goes to the

@@ -8,6 +8,7 @@
 #include "HTMLEditorEventListener.h"
 #include "HTMLEditUtils.h"
 #include "JoinNodeTransaction.h"
+#include "ReplaceTextTransaction.h"
 #include "SplitNodeTransaction.h"
 #include "TypeInState.h"
 #include "WSRunObject.h"
@@ -857,7 +858,7 @@ void HTMLEditor::IsPrevCharInNodeWhitespace(nsIContent* aContent,
   }
 }
 
-bool HTMLEditor::IsVisibleBRElement(nsINode* aNode) {
+bool HTMLEditor::IsVisibleBRElement(const nsINode* aNode) {
   MOZ_ASSERT(aNode);
   if (!aNode->IsHTMLElement(nsGkAtoms::br)) {
     return false;
@@ -3258,6 +3259,122 @@ nsresult HTMLEditor::DeleteTextWithTransaction(Text& aTextNode,
   return rv;
 }
 
+nsresult HTMLEditor::ReplaceTextWithTransaction(
+    Text& aTextNode, uint32_t aOffset, uint32_t aLength,
+    const nsAString& aStringToInsert) {
+  MOZ_ASSERT(IsEditActionDataAvailable());
+  MOZ_ASSERT(aLength > 0 || !aStringToInsert.IsEmpty());
+
+  if (aStringToInsert.IsEmpty()) {
+    nsresult rv = DeleteTextWithTransaction(aTextNode, aOffset, aLength);
+    if (NS_WARN_IF(Destroyed())) {
+      return NS_ERROR_EDITOR_DESTROYED;
+    }
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                         "HTMLEditor::DeleteTextWithTransaction() failed");
+    return rv;
+  }
+
+  if (!aLength) {
+    RefPtr<Document> document = GetDocument();
+    if (NS_WARN_IF(!document)) {
+      return NS_ERROR_NOT_INITIALIZED;
+    }
+    nsresult rv = InsertTextWithTransaction(
+        *document, aStringToInsert, EditorRawDOMPoint(&aTextNode, aOffset));
+    if (NS_WARN_IF(Destroyed())) {
+      return NS_ERROR_EDITOR_DESTROYED;
+    }
+    NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                         "HTMLEditor::InsertTextWithTransaction() failed");
+    return rv;
+  }
+
+  if (NS_WARN_IF(!HTMLEditUtils::IsSimplyEditableNode(aTextNode))) {
+    return NS_ERROR_FAILURE;
+  }
+
+  // This should emulates inserting text for better undo/redo behavior.
+  IgnoredErrorResult ignoredError;
+  AutoEditSubActionNotifier startToHandleEditSubAction(
+      *this, EditSubAction::eInsertText, nsIEditor::eNext, ignoredError);
+  if (NS_WARN_IF(ignoredError.ErrorCodeIs(NS_ERROR_EDITOR_DESTROYED))) {
+    return EditorBase::ToGenericNSResult(ignoredError.StealNSResult());
+  }
+  NS_WARNING_ASSERTION(
+      !ignoredError.Failed(),
+      "TextEditor::OnStartToHandleTopLevelEditSubAction() failed, but ignored");
+
+  // FYI: Create the insertion point before changing the DOM tree because
+  //      the point may become invalid offset after that.
+  EditorDOMPointInText pointToInsert(&aTextNode, aOffset);
+
+  // `ReplaceTextTransaction()` removes the replaced text first, then,
+  // insert new text.  Therefore, if selection is in the text node, the
+  // range is moved to start of the range and deletion and never adjusted
+  // for the inserting text since the change occurs after the range.
+  // Therefore, we might need to save/restore selection here.
+  Maybe<AutoSelectionRestorer> restoreSelection;
+  if (!AllowsTransactionsToChangeSelection() && !ArePreservingSelection()) {
+    for (uint32_t i = 0; i < SelectionRefPtr()->RangeCount(); i++) {
+      const nsRange* range = SelectionRefPtr()->GetRangeAt(i);
+      if (!range) {
+        continue;
+      }
+      if ((range->GetStartContainer() == &aTextNode &&
+           range->StartOffset() >= aOffset) ||
+          (range->GetEndContainer() == &aTextNode &&
+           range->EndOffset() >= aOffset)) {
+        restoreSelection.emplace(*this);
+        break;
+      }
+    }
+  }
+
+  RefPtr<ReplaceTextTransaction> transaction = ReplaceTextTransaction::Create(
+      *this, aStringToInsert, aTextNode, aOffset, aLength);
+  MOZ_ASSERT(transaction);
+
+  if (aLength && !mActionListeners.IsEmpty()) {
+    for (auto& listener : mActionListeners.Clone()) {
+      DebugOnly<nsresult> rvIgnored =
+          listener->WillDeleteText(&aTextNode, aOffset, aLength);
+      NS_WARNING_ASSERTION(
+          NS_SUCCEEDED(rvIgnored),
+          "nsIEditActionListener::WillDeleteText() failed, but ignored");
+    }
+  }
+
+  nsresult rv = DoTransactionInternal(transaction);
+  NS_WARNING_ASSERTION(NS_SUCCEEDED(rv),
+                       "EditorBase::DoTransactionInternal() failed");
+
+  if (pointToInsert.IsSet()) {
+    EditorDOMPointInText begin, end;
+    Tie(begin, end) = ComputeInsertedRange(pointToInsert, aStringToInsert);
+    if (begin.IsSet() && end.IsSet()) {
+      TopLevelEditSubActionDataRef().DidDeleteText(*this, begin);
+      TopLevelEditSubActionDataRef().DidInsertText(*this, begin, end);
+    }
+  }
+
+  // Now, restores selection for allowing the following listeners to modify
+  // selection.
+  restoreSelection.reset();
+
+  if (!mActionListeners.IsEmpty()) {
+    for (auto& listener : mActionListeners.Clone()) {
+      DebugOnly<nsresult> rvIgnored =
+          listener->DidInsertText(&aTextNode, aOffset, aStringToInsert, rv);
+      NS_WARNING_ASSERTION(
+          NS_SUCCEEDED(rvIgnored),
+          "nsIEditActionListener::DidInsertText() failed, but ignored");
+    }
+  }
+
+  return NS_WARN_IF(Destroyed()) ? NS_ERROR_EDITOR_DESTROYED : rv;
+}
+
 nsresult HTMLEditor::InsertTextWithTransaction(
     Document& aDocument, const nsAString& aStringToInsert,
     const EditorRawDOMPoint& aPointToInsert,
@@ -4848,7 +4965,7 @@ nsIContent* HTMLEditor::GetNextHTMLSibling(nsINode* aNode,
 }
 
 nsIContent* HTMLEditor::GetPreviousHTMLElementOrTextInternal(
-    nsINode& aNode, bool aNoBlockCrossing) const {
+    const nsINode& aNode, bool aNoBlockCrossing) const {
   if (NS_WARN_IF(!GetActiveEditingHost())) {
     return nullptr;
   }
@@ -4886,7 +5003,7 @@ nsIContent* HTMLEditor::GetPreviousEditableHTMLNodeInternal(
 }
 
 nsIContent* HTMLEditor::GetNextHTMLElementOrTextInternal(
-    nsINode& aNode, bool aNoBlockCrossing) const {
+    const nsINode& aNode, bool aNoBlockCrossing) const {
   if (NS_WARN_IF(!GetActiveEditingHost())) {
     return nullptr;
   }

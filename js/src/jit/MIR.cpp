@@ -772,6 +772,28 @@ MDefinition* MDefinition::maybeSingleDefUse() const {
   return useDef;
 }
 
+MDefinition* MDefinition::maybeMostRecentDefUse() const {
+  MUseDefIterator use(this);
+  if (!use) {
+    // No def-uses.
+    return nullptr;
+  }
+
+  MDefinition* mostRecentUse = use.def();
+
+  // This function relies on addUse adding new uses to the front of the list.
+  // Check this invariant by asserting the next few uses are 'older'.
+#ifdef DEBUG
+  static constexpr size_t NumUsesToCheck = 3;
+  use++;
+  for (size_t i = 0; use && i < NumUsesToCheck; i++, use++) {
+    MOZ_ASSERT(use.def()->id() <= mostRecentUse->id());
+  }
+#endif
+
+  return mostRecentUse;
+}
+
 void MDefinition::replaceAllUsesWith(MDefinition* dom) {
   for (size_t i = 0, e = numOperands(); i < e; ++i) {
     getOperand(i)->setUseRemovedUnchecked();
@@ -1454,29 +1476,39 @@ bool MParameter::congruentTo(const MDefinition* ins) const {
 }
 
 WrappedFunction::WrappedFunction(JSFunction* fun)
-    : fun_(fun),
-      nargs_(fun->nargs()),
-      isNative_(fun->isNative()),
-      isNativeWithJitEntry_(fun->isNativeWithJitEntry()),
-      isConstructor_(fun->isConstructor()),
-      isClassConstructor_(fun->isClassConstructor()),
-      isSelfHostedBuiltin_(fun->isSelfHostedBuiltin()),
-      isExtended_(fun->isExtended()),
-      hasJitInfo_(fun->hasJitInfo()) {}
+    : fun_(fun), nargs_(fun->nargs()), flags_(fun->flags()) {}
 
-MCall* MCall::New(TempAllocator& alloc, JSFunction* target, size_t maxArgc,
+WrappedFunction::WrappedFunction(JSFunction* fun, uint16_t nargs,
+                                 FunctionFlags flags)
+    : fun_(fun), nargs_(nargs), flags_(flags) {
+#ifdef DEBUG
+  // If we are not running off-main thread we can assert that the
+  // metadata is consistent.
+  if (!CanUseExtraThreads()) {
+    MOZ_ASSERT(fun->nargs() == nargs);
+
+    MOZ_ASSERT(fun->isNative() == isNative());
+    MOZ_ASSERT(fun->isBuiltinNative() == isBuiltinNative());
+    MOZ_ASSERT(fun->isNativeWithJitEntry() == isNativeWithJitEntry());
+    // isNativeWithCppEntry is derived.
+    MOZ_ASSERT(fun->isInterpreted() == isInterpreted());
+    MOZ_ASSERT(fun->isConstructor() == isConstructor());
+    MOZ_ASSERT(fun->isClassConstructor() == isClassConstructor());
+  }
+#endif
+}
+
+MCall* MCall::New(TempAllocator& alloc, WrappedFunction* target, size_t maxArgc,
                   size_t numActualArgs, bool construct, bool ignoresReturnValue,
                   bool isDOMCall, DOMObjectKind objectKind) {
-  WrappedFunction* wrappedTarget =
-      target ? new (alloc) WrappedFunction(target) : nullptr;
   MOZ_ASSERT(maxArgc >= numActualArgs);
   MCall* ins;
   if (isDOMCall) {
     MOZ_ASSERT(!construct);
-    ins = new (alloc) MCallDOMNative(wrappedTarget, numActualArgs, objectKind);
+    ins = new (alloc) MCallDOMNative(target, numActualArgs, objectKind);
   } else {
-    ins = new (alloc)
-        MCall(wrappedTarget, numActualArgs, construct, ignoresReturnValue);
+    ins =
+        new (alloc) MCall(target, numActualArgs, construct, ignoresReturnValue);
   }
   if (!ins->init(alloc, maxArgc + NumNonArgumentOperands)) {
     return nullptr;
@@ -5589,6 +5621,18 @@ MDefinition* MGuardObjectIdentity::foldsTo(TempAllocator& alloc) {
   } else {
     if (obj != other) {
       return object();
+    }
+  }
+
+  return this;
+}
+
+MDefinition* MGuardSpecificFunction::foldsTo(TempAllocator& alloc) {
+  if (function()->isConstant()) {
+    JSObject* fun = &function()->toConstant()->toObject();
+    JSObject* other = &expected()->toConstant()->toObject();
+    if (fun == other) {
+      return function();
     }
   }
 

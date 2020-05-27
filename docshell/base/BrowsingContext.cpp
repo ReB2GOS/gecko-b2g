@@ -9,6 +9,7 @@
 #include "ipc/IPCMessageUtils.h"
 
 #include "mozilla/dom/CanonicalBrowsingContext.h"
+#include "mozilla/dom/BrowserParent.h"
 #include "mozilla/dom/BrowsingContextGroup.h"
 #include "mozilla/dom/BrowsingContextBinding.h"
 #include "mozilla/dom/ContentChild.h"
@@ -2123,6 +2124,7 @@ bool BrowsingContext::CanSet(FieldIndex<IDX_CurrentInnerWindowId>,
 }
 
 void BrowsingContext::DidSet(FieldIndex<IDX_CurrentInnerWindowId>) {
+  RefPtr<WindowContext> prevWindowContext = mCurrentWindowContext.forget();
   mCurrentWindowContext = WindowContext::GetById(GetCurrentInnerWindowId());
   MOZ_ASSERT(
       !mCurrentWindowContext || mWindowContexts.Contains(mCurrentWindowContext),
@@ -2133,6 +2135,14 @@ void BrowsingContext::DidSet(FieldIndex<IDX_CurrentInnerWindowId>) {
   BrowsingContext_Binding::ClearCachedChildrenValue(this);
 
   if (XRE_IsParentProcess()) {
+    if (prevWindowContext != mCurrentWindowContext) {
+      if (prevWindowContext) {
+        prevWindowContext->Canonical()->DidBecomeCurrentWindowGlobal(false);
+      }
+      if (mCurrentWindowContext) {
+        mCurrentWindowContext->Canonical()->DidBecomeCurrentWindowGlobal(true);
+      }
+    }
     BrowserParent::UpdateFocusFromBrowsingContext();
   }
 }
@@ -2374,6 +2384,7 @@ void IPDLParamTraits<dom::BrowsingContext::IPCInitializer>::Write(
   WriteIPDLParam(aMessage, aActor, aInit.mUseRemoteTabs);
   WriteIPDLParam(aMessage, aActor, aInit.mUseRemoteSubframes);
   WriteIPDLParam(aMessage, aActor, aInit.mOriginAttributes);
+  WriteIPDLParam(aMessage, aActor, aInit.mRequestContextId);
   WriteIPDLParam(aMessage, aActor, aInit.mFields);
 }
 
@@ -2388,6 +2399,7 @@ bool IPDLParamTraits<dom::BrowsingContext::IPCInitializer>::Read(
       !ReadIPDLParam(aMessage, aIterator, aActor,
                      &aInit->mUseRemoteSubframes) ||
       !ReadIPDLParam(aMessage, aIterator, aActor, &aInit->mOriginAttributes) ||
+      !ReadIPDLParam(aMessage, aIterator, aActor, &aInit->mRequestContextId) ||
       !ReadIPDLParam(aMessage, aIterator, aActor, &aInit->mFields)) {
     return false;
   }

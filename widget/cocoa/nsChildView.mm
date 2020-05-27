@@ -2237,31 +2237,6 @@ void nsChildView::LookUpDictionary(const nsAString& aText,
   NS_OBJC_END_TRY_ABORT_BLOCK;
 }
 
-nsresult nsChildView::SetPrefersReducedMotionOverrideForTest(bool aValue) {
-  LookAndFeel::SetPrefersReducedMotionOverrideForTest(aValue);
-
-  if (nsCocoaFeatures::OnMojaveOrLater() &&
-      NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification) {
-    [[[NSWorkspace sharedWorkspace] notificationCenter]
-        postNotificationName:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
-                      object:nil];
-  } else if (nsCocoaFeatures::OnYosemiteOrLater() &&
-             NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification) {
-    [[NSNotificationCenter defaultCenter]
-        postNotificationName:NSWorkspaceAccessibilityDisplayOptionsDidChangeNotification
-                      object:nil];
-  } else {
-    return NS_ERROR_FAILURE;
-  }
-
-  return NS_OK;
-}
-
-nsresult nsChildView::ResetPrefersReducedMotionOverrideForTest() {
-  LookAndFeel::ResetPrefersReducedMotionOverrideForTest();
-  return NS_OK;
-}
-
 #ifdef ACCESSIBILITY
 already_AddRefed<a11y::Accessible> nsChildView::GetDocumentAccessible() {
   if (!mozilla::a11y::ShouldA11yBeEnabled()) return nullptr;
@@ -3614,7 +3589,14 @@ static gfx::IntPoint GetIntegerDeltaForEvent(NSEvent* aEvent) {
 
   WidgetMouseEvent geckoEvent(true, eContextMenu, mGeckoChild, WidgetMouseEvent::eReal);
   [self convertCocoaMouseEvent:theEvent toGeckoEvent:&geckoEvent];
-  geckoEvent.mButton = MouseButton::eRight;
+  if (StaticPrefs::dom_event_treat_ctrl_click_as_right_click_disabled() &&
+      [theEvent type] == NSLeftMouseDown) {
+    geckoEvent.mContextMenuTrigger = WidgetMouseEvent::eControlClick;
+    geckoEvent.mButton = MouseButton::eLeft;
+  } else {
+    geckoEvent.mButton = MouseButton::eRight;
+  }
+
   mGeckoChild->DispatchInputEvent(&geckoEvent);
   if (!mGeckoChild) return nil;
 

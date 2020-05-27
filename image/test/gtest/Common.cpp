@@ -52,6 +52,9 @@ AutoInitializeImageLib::AutoInitializeImageLib() {
   // Ensure gfxPlatform is initialized.
   gfxPlatform::GetPlatform();
 
+  // Ensure we always color manage images with gtests.
+  gfxPlatform::SetCMSModeOverride(eCMSMode_All);
+
   // Depending on initialization order, it is possible that our pref changes
   // have not taken effect yet because there are pending gfx-related events on
   // the main thread.
@@ -431,6 +434,14 @@ ImageTestCase GreenWebPTestCase() {
 // See bug 1634741
 ImageTestCase GreenAVIFTestCase() {
   return ImageTestCase("green.avif", "image/avif", IntSize(100, 100))
+      .WithSurfaceFlags(SurfaceFlags::TO_SRGB_COLORSPACE);
+}
+
+// Forcing sRGB is required until nsAVIFDecoder supports ICC profiles
+// See bug 1634741
+ImageTestCase StackCheckAVIFTestCase() {
+  return ImageTestCase("stackcheck.avif", "image/avif", IntSize(4096, 2924),
+                       TEST_CASE_IGNORE_OUTPUT)
       .WithSurfaceFlags(SurfaceFlags::TO_SRGB_COLORSPACE);
 }
 

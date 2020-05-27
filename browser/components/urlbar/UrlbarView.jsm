@@ -510,9 +510,8 @@ class UrlbarView {
             trimmedValue.length != 1)
       );
 
-      // The input field applies autofill on input, without waiting for results.
-      // Once we get results, we can ask it to correct wrong predictions.
-      this.input.maybeClearAutofillPlaceholder(firstResult);
+      // Notify the input, so it can make adjustments based on the first result.
+      this.input.onFirstResult(firstResult);
     }
 
     if (
@@ -897,7 +896,7 @@ class UrlbarView {
       result.type == UrlbarUtils.RESULT_TYPE.SEARCH ||
       result.type == UrlbarUtils.RESULT_TYPE.KEYWORD
     ) {
-      favicon.src = result.payload.icon || UrlbarUtils.ICON.SEARCH_GLASS;
+      favicon.src = this._iconForSearchResult(result);
     } else {
       favicon.src = result.payload.icon || UrlbarUtils.ICON.DEFAULT;
     }
@@ -1025,6 +1024,18 @@ class UrlbarView {
     }
 
     item._elements.get("titleSeparator").hidden = !action && !setURL;
+  }
+
+  _iconForSearchResult(result, engineOverride = null) {
+    return (
+      (result.source == UrlbarUtils.RESULT_SOURCE.HISTORY &&
+        UrlbarUtils.ICON.HISTORY) ||
+      (engineOverride &&
+        engineOverride.iconURI &&
+        engineOverride.iconURI.spec) ||
+      result.payload.icon ||
+      UrlbarUtils.ICON.SEARCH_GLASS
+    );
   }
 
   _updateRowForTip(item, result) {
@@ -1447,8 +1458,9 @@ class UrlbarView {
     let engine =
       this.oneOffSearchButtons.selectedButton &&
       this.oneOffSearchButtons.selectedButton.engine;
-    for (let i = 0; i < this._queryContext.results.length; i++) {
-      let result = this._queryContext.results[i];
+
+    for (let item of this._rows.children) {
+      let result = item.result;
       if (
         result.type != UrlbarUtils.RESULT_TYPE.SEARCH ||
         (!result.heuristic &&
@@ -1466,7 +1478,6 @@ class UrlbarView {
         result.payload.engine = result.payload.originalEngine;
         delete result.payload.originalEngine;
       }
-      let item = this._rows.children[i];
       // If a one-off button is the only selection, force the heuristic result
       // to show its action text, so the engine name is visible.
       if (result.heuristic && engine && !this.selectedElement) {
@@ -1493,6 +1504,7 @@ class UrlbarView {
       } else if (!engine) {
         favicon.src = result.payload.icon || UrlbarUtils.ICON.SEARCH_GLASS;
       }
+      favicon.src = this._iconForSearchResult(result, engine);
     }
   }
 

@@ -3347,21 +3347,6 @@ mozilla::ipc::IPCResult BrowserChild::RecvUIResolutionChanged(
   return IPC_OK();
 }
 
-mozilla::ipc::IPCResult BrowserChild::RecvThemeChanged(
-    nsTArray<LookAndFeelInt>&& aLookAndFeelIntCache) {
-  nsCOMPtr<Document> document(GetTopLevelDocument());
-  if (!document) {
-    return IPC_OK();
-  }
-
-  LookAndFeel::SetIntCache(aLookAndFeelIntCache);
-  RefPtr<nsPresContext> presContext = document->GetPresContext();
-  if (presContext) {
-    presContext->ThemeChanged();
-  }
-  return IPC_OK();
-}
-
 mozilla::ipc::IPCResult BrowserChild::RecvSafeAreaInsetsChanged(
     const mozilla::ScreenIntMargin& aSafeAreaInsets) {
   mPuppetWidget->UpdateSafeAreaInsets(aSafeAreaInsets);
@@ -3895,56 +3880,9 @@ NS_IMETHODIMP BrowserChild::OnStatusChange(nsIWebProgress* aWebProgress,
 NS_IMETHODIMP BrowserChild::OnSecurityChange(nsIWebProgress* aWebProgress,
                                              nsIRequest* aRequest,
                                              uint32_t aState) {
-  if (!IPCOpen() || !mShouldSendWebProgressEventsToParent) {
-    return NS_OK;
-  }
-
-  Maybe<WebProgressData> webProgressData;
-  RequestData requestData;
-
-  MOZ_TRY(PrepareProgressListenerData(aWebProgress, aRequest, webProgressData,
-                                      requestData));
-
-  Maybe<WebProgressSecurityChangeData> securityChangeData;
-
-  if (aWebProgress && webProgressData->isTopLevel()) {
-    nsCOMPtr<nsIDocShell> docShell = do_GetInterface(WebNavigation());
-    if (!docShell) {
-      return NS_OK;
-    }
-
-    nsCOMPtr<nsITransportSecurityInfo> securityInfo;
-    {
-      nsCOMPtr<nsISecureBrowserUI> securityUI;
-      MOZ_TRY(docShell->GetSecurityUI(getter_AddRefs(securityUI)));
-
-      if (securityUI) {
-        MOZ_TRY(securityUI->GetSecInfo(getter_AddRefs(securityInfo)));
-      }
-    }
-
-    bool isSecureContext = false;
-    {
-      nsCOMPtr<nsPIDOMWindowOuter> outerWindow = do_GetInterface(docShell);
-      if (!outerWindow) {
-        return NS_OK;
-      }
-
-      if (nsPIDOMWindowInner* window = outerWindow->GetCurrentInnerWindow()) {
-        isSecureContext = window->IsSecureContext();
-      } else {
-        return NS_OK;
-      }
-    }
-
-    securityChangeData.emplace();
-    securityChangeData->securityInfo() = ToRefPtr(std::move(securityInfo));
-    securityChangeData->isSecureContext() = isSecureContext;
-  }
-
-  Unused << SendOnSecurityChange(webProgressData, requestData, aState,
-                                 securityChangeData);
-
+  // Security changes are now handled entirely in the parent process
+  // so we don't need to worry about forwarding them (and we shouldn't
+  // be receiving any to forward).
   return NS_OK;
 }
 

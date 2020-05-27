@@ -349,6 +349,13 @@ typedef enum {
   MOZ_GTK_WIDGET_NODE_COUNT
 } WidgetNodeType;
 
+/* ButtonLayout represents a GTK CSD button and whether its on the left or
+ * right side of the tab bar */
+struct ButtonLayout {
+  WidgetNodeType mType;
+  bool mAtRight;
+};
+
 /*** General library functions ***/
 /**
  * Initializes the drawing library.  You must call this function
@@ -541,10 +548,11 @@ void moz_gtk_get_arrow_size(WidgetNodeType widgetType, gint* width,
 
 /**
  * Get the minimum height of a entry widget
- * size:    [OUT] the minimum height
- *
+ * min_content_height:    [OUT] the minimum height of the content box.
+ * border_padding_height: [OUT] the size of borders and paddings.
  */
-void moz_gtk_get_entry_min_height(gint* height);
+void moz_gtk_get_entry_min_height(gint* min_content_height,
+                                  gint* border_padding_height);
 
 /**
  * Get the desired size of a toolbar separator
@@ -610,8 +618,7 @@ const ToolbarButtonGTKMetrics* GetToolbarButtonMetrics(
  *
  * returns:    Number of returned entries at aButtonLayout.
  */
-int GetGtkHeaderBarButtonLayout(WidgetNodeType* aButtonLayout,
-                                int aMaxButtonNums,
+int GetGtkHeaderBarButtonLayout(ButtonLayout* aButtonLayout, int aMaxButtonNums,
                                 bool* aReversedButtonsPlacement);
 
 /**

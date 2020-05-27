@@ -417,6 +417,7 @@ nsWindow::nsWindow() {
   mSizeState = nsSizeMode_Normal;
   mBoundsAreValid = true;
   mAspectRatio = 0.0f;
+  mAspectRatioSaved = 0.0f;
   mLastSizeMode = nsSizeMode_Normal;
   mSizeConstraints.mMaxSize = GetSafeWindowSize(mSizeConstraints.mMaxSize);
 
@@ -2084,6 +2085,10 @@ LayoutDeviceIntRect nsWindow::GetClientBounds() {
 void nsWindow::UpdateClientOffsetFromFrameExtents() {
   AUTO_PROFILER_LABEL("nsWindow::UpdateClientOffsetFromFrameExtents", OTHER);
 
+  if (mCSDSupportLevel == CSD_SUPPORT_CLIENT) {
+    return;
+  }
+
   if (!mIsTopLevel || !mShell ||
       gtk_window_get_window_type(GTK_WINDOW(mShell)) == GTK_WINDOW_POPUP) {
     mClientOffset = nsIntPoint(0, 0);
@@ -2964,16 +2969,6 @@ gboolean nsWindow::OnConfigureEvent(GtkWidget* aWidget,
     OnSizeAllocate(&allocation);
   }
 
-  // Client offset are updated by _NET_FRAME_EXTENTS on X11 when system titlebar
-  // is enabled. In ither cases (Wayland or system titlebar is off on X11)
-  // we don't get _NET_FRAME_EXTENTS X11 property notification so we derive
-  // it from mContainer position.
-  if (mCSDSupportLevel == CSD_SUPPORT_CLIENT) {
-    if (!mIsX11Display || (mIsX11Display && mDrawInTitlebar)) {
-      UpdateClientOffsetFromCSDWindow();
-    }
-  }
-
   return FALSE;
 }
 
@@ -2994,6 +2989,16 @@ void nsWindow::OnSizeAllocate(GtkAllocation* aAllocation) {
   LOG(("nsWindow::OnSizeAllocate [%p] %d,%d -> %d x %d\n", (void*)this,
        aAllocation->x, aAllocation->y, aAllocation->width,
        aAllocation->height));
+
+  // Client offset are updated by _NET_FRAME_EXTENTS on X11 when system titlebar
+  // is enabled. In either cases (Wayland or system titlebar is off on X11)
+  // we don't get _NET_FRAME_EXTENTS X11 property notification so we derive
+  // it from mContainer position.
+  if (mCSDSupportLevel == CSD_SUPPORT_CLIENT) {
+    if (!mIsX11Display || (mIsX11Display && mDrawInTitlebar)) {
+      UpdateClientOffsetFromCSDWindow();
+    }
+  }
 
   mBoundsAreValid = true;
 
@@ -5984,6 +5989,11 @@ nsresult nsWindow::MakeFullScreen(bool aFullScreen, nsIScreen* aTargetScreen) {
 
     if (mIsPIPWindow) {
       gtk_window_set_type_hint(GTK_WINDOW(mShell), GDK_WINDOW_TYPE_HINT_NORMAL);
+      if (gUseAspectRatio) {
+        mAspectRatioSaved = mAspectRatio;
+        mAspectRatio = 0.0f;
+        ApplySizeConstraints();
+      }
     }
 
     gtk_window_fullscreen(GTK_WINDOW(mShell));
@@ -5994,6 +6004,10 @@ nsresult nsWindow::MakeFullScreen(bool aFullScreen, nsIScreen* aTargetScreen) {
     if (mIsPIPWindow) {
       gtk_window_set_type_hint(GTK_WINDOW(mShell),
                                GDK_WINDOW_TYPE_HINT_UTILITY);
+      if (gUseAspectRatio) {
+        mAspectRatio = mAspectRatioSaved;
+        // ApplySizeConstraints();
+      }
     }
   }
 
@@ -7868,12 +7882,13 @@ bool nsWindow::HideTitlebarByDefault() {
   hideTitlebar =
       (currentDesktop && GetSystemCSDSupportLevel() != CSD_SUPPORT_NONE);
 
-  // Disable system titlebar for Gnome only for now. It uses window
+  // Disable system titlebar for Gnome/ElementaryOS only for now. It uses window
   // manager decorations and does not suffer from CSD Bugs #1525850, #1527837.
   if (hideTitlebar) {
     hideTitlebar =
         (strstr(currentDesktop, "GNOME-Flashback:GNOME") != nullptr ||
-         strstr(currentDesktop, "GNOME") != nullptr);
+         strstr(currentDesktop, "GNOME") != nullptr ||
+         strstr(currentDesktop, "Pantheon") != nullptr);
   }
 
   // We use shape mask to render the titlebar by default so check for it.
@@ -8195,22 +8210,6 @@ void nsWindow::LockAspectRatio(bool aShouldLock) {
   }
 
   ApplySizeConstraints();
-}
-
-nsresult nsWindow::SetPrefersReducedMotionOverrideForTest(bool aValue) {
-  LookAndFeel::SetPrefersReducedMotionOverrideForTest(aValue);
-
-  // Notify as if the corresponding setting changed.
-  g_object_notify(G_OBJECT(gtk_settings_get_default()),
-                  "gtk-enable-animations");
-
-  return NS_OK;
-}
-
-nsresult nsWindow::ResetPrefersReducedMotionOverrideForTest() {
-  LookAndFeel::ResetPrefersReducedMotionOverrideForTest();
-
-  return NS_OK;
 }
 
 #ifdef MOZ_WAYLAND

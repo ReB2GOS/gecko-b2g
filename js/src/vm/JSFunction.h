@@ -461,10 +461,6 @@ class JSFunction : public js::NativeObject {
 
   js::Scope* enclosingScope() const { return baseScript()->enclosingScope(); }
 
-  void setEnclosingScope(js::Scope* enclosingScope) {
-    baseScript()->setEnclosingScope(enclosingScope);
-  }
-
   void setEnclosingLazyScript(js::BaseScript* enclosingScript) {
     baseScript()->setEnclosingScript(enclosingScript);
   }
@@ -519,6 +515,10 @@ class JSFunction : public js::NativeObject {
     MOZ_ASSERT(isNative());
     return u.native.func_;
   }
+  JSNative nativeUnchecked() const {
+    // Called by Ion off-main thread.
+    return u.native.func_;
+  }
 
   JSNative maybeNative() const { return isInterpreted() ? nullptr : native(); }
 
@@ -534,6 +534,10 @@ class JSFunction : public js::NativeObject {
   }
   const JSJitInfo* jitInfo() const {
     MOZ_ASSERT(hasJitInfo());
+    return u.native.extra.jitInfo_;
+  }
+  const JSJitInfo* jitInfoUnchecked() const {
+    // Called by Ion off-main thread.
     return u.native.extra.jitInfo_;
   }
   void setJitInfo(const JSJitInfo* data) {

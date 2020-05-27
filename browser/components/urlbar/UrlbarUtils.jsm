@@ -22,11 +22,13 @@ const { XPCOMUtils } = ChromeUtils.import(
 );
 XPCOMUtils.defineLazyModuleGetters(this, {
   BrowserUtils: "resource://gre/modules/BrowserUtils.jsm",
+  BrowserWindowTracker: "resource:///modules/BrowserWindowTracker.jsm",
   PrivateBrowsingUtils: "resource://gre/modules/PrivateBrowsingUtils.jsm",
   PlacesUIUtils: "resource:///modules/PlacesUIUtils.jsm",
   PlacesUtils: "resource://gre/modules/PlacesUtils.jsm",
   Services: "resource://gre/modules/Services.jsm",
   UrlbarPrefs: "resource:///modules/UrlbarPrefs.jsm",
+  UrlbarProvidersManager: "resource:///modules/UrlbarProvidersManager.jsm",
 });
 
 var UrlbarUtils = {
@@ -98,6 +100,7 @@ var UrlbarUtils = {
   // This defines icon locations that are commonly used in the UI.
   ICON: {
     // DEFAULT is defined lazily so it doesn't eagerly initialize PlacesUtils.
+    HISTORY: "chrome://browser/skin/history.svg",
     SEARCH_GLASS: "chrome://browser/skin/search-glass.svg",
     TIP: "chrome://browser/skin/tip.svg",
   },
@@ -568,6 +571,37 @@ var UrlbarUtils = {
     let str = value.trim();
     return this.REGEXP_SINGLE_WORD.test(str);
   },
+
+  /**
+   * Runs a search for the given string, and returns the heuristic result.
+   * @param {string} searchString The string to search for.
+   * @param {nsIDOMWindow} window The window requesting it.
+   * @returns {UrlbarResult} an heuristic result.
+   */
+  async getHeuristicResultFor(
+    searchString,
+    window = BrowserWindowTracker.getTopWindow()
+  ) {
+    if (!searchString) {
+      throw new Error("Must pass a non-null search string");
+    }
+    let context = new UrlbarQueryContext({
+      allowAutofill: false,
+      isPrivate: PrivateBrowsingUtils.isWindowPrivate(window),
+      maxResults: 1,
+      searchString,
+      userContextId: window.gBrowser.selectedBrowser.getAttribute(
+        "usercontextid"
+      ),
+      allowSearchSuggestions: false,
+      providers: ["UnifiedComplete"],
+    });
+    await UrlbarProvidersManager.startQuery(context);
+    if (!context.heuristicResult) {
+      throw new Error("There should always be an heuristic result");
+    }
+    return context.heuristicResult;
+  },
 };
 
 XPCOMUtils.defineLazyGetter(UrlbarUtils.ICON, "DEFAULT", () => {
@@ -618,13 +652,16 @@ UrlbarUtils.RESULT_PAYLOAD_SCHEMA = {
       icon: {
         type: "string",
       },
-      isPinned: {
-        type: "boolean",
-      },
       inPrivateWindow: {
         type: "boolean",
       },
+      isPinned: {
+        type: "boolean",
+      },
       isPrivateEngine: {
+        type: "boolean",
+      },
+      isSearchHistory: {
         type: "boolean",
       },
       keyword: {
@@ -633,11 +670,11 @@ UrlbarUtils.RESULT_PAYLOAD_SCHEMA = {
       keywordOffer: {
         type: "number", // UrlbarUtils.KEYWORD_OFFER
       },
-      query: {
+      lowerCaseSuggestion: {
         type: "string",
       },
-      isSearchHistory: {
-        type: "boolean",
+      query: {
+        type: "string",
       },
       suggestion: {
         type: "string",
@@ -857,6 +894,8 @@ class UrlbarQueryContext {
    *   false, suggestions will not be fetched, but when true, some other
    *   condition may still prohibit suggestions, like private browsing mode.
    *   Defaults to true.
+   * @param {string} [options.formHistoryName]
+   *   The name under which the local form history is registered.
    */
   constructor(options = {}) {
     this._checkRequiredOptions(options, [
@@ -874,11 +913,12 @@ class UrlbarQueryContext {
 
     // Manage optional properties of options.
     for (let [prop, checkFn, defaultValue] of [
+      ["allowSearchSuggestions", v => true, true],
+      ["currentPage", v => typeof v == "string" && !!v.length],
+      ["engineName", v => typeof v == "string" && !!v.length],
+      ["formHistoryName", v => typeof v == "string" && !!v.length],
       ["providers", v => Array.isArray(v) && v.length],
       ["sources", v => Array.isArray(v) && v.length],
-      ["engineName", v => typeof v == "string" && !!v.length],
-      ["currentPage", v => typeof v == "string" && !!v.length],
-      ["allowSearchSuggestions", v => true, true],
     ]) {
       if (prop in options) {
         if (!checkFn(options[prop])) {

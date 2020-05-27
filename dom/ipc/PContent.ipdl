@@ -50,7 +50,6 @@ include protocol PTelephony;
 include protocol PVoicemail;
 #endif
 include protocol PTestShell;
-include protocol PJavaScript;
 include protocol PRemoteSpellcheckEngine;
 include protocol PWebBrowserPersistDocument;
 include protocol PWebrtcGlobal;
@@ -66,7 +65,7 @@ include protocol PSessionStorageObserver;
 include protocol PSystemMessageService;
 include protocol PBenchmarkStorage;
 include DOMTypes;
-include JavaScriptTypes;
+include WindowGlobalTypes;
 include IPCBlob;
 include IPCStream;
 include PTabContext;
@@ -597,7 +596,6 @@ nested(upto inside_cpow) sync protocol PContent
     manages PVoicemail;
 #endif
     manages PTestShell;
-    manages PJavaScript;
     manages PRemoteSpellcheckEngine;
     manages PWebBrowserPersistDocument;
     manages PWebrtcGlobal;
@@ -753,6 +751,12 @@ child:
 
     async NotifyVisited(VisitedQueryResult[] uri);
 
+    /**
+     * Tell the child that the system theme has changed, and that a repaint
+     * is necessary.
+     */
+    async ThemeChanged(LookAndFeelInt[] lookAndFeelIntCache);
+
     async PreferenceUpdate(Pref pref);
     async VarUpdate(GfxVarUpdate var);
 
@@ -861,7 +865,8 @@ child:
                                     /* used on MacOSX/Linux/Android only: */
                                     SystemFontListEntry[] systemFontList,
                                     SharedMemoryHandle? sharedUASheetHandle,
-                                    uintptr_t sharedUASheetAddress);
+                                    uintptr_t sharedUASheetAddress,
+                                    SharedMemoryHandle[] sharedFontListBlocks);
 
     // Notify child that last-pb-context-exited notification was observed
     async LastPrivateDocShellDestroyed();
@@ -1150,8 +1155,6 @@ parent:
     sync LaunchRDDProcess()
         returns (nsresult rv, Endpoint<PRemoteDecoderManagerChild> aEndpoint);
 
-    async PJavaScript();
-
     async PRemoteSpellcheckEngine();
     async PDeviceStorageRequest(DeviceStorageParams params);
 
@@ -1246,6 +1249,8 @@ parent:
     async DisableNotifications(Principal principal);
 
     async OpenNotificationSettings(Principal principal);
+
+    async AddMixedContentSecurityState(MaybeDiscardedWindowContext aContext, uint32_t aStateFlags);
 
     // Request that the ServiceWorkerManager in the parent process create a
     // notification "click" or "close" event and dispatch it on the relevant
@@ -1664,7 +1669,7 @@ parent:
      */
     sync GetHyphDict(nsIURI aURI) returns (Handle aHandle, uint32_t aSize);
 
-    async CreateWindow(nullable PBrowser aThisTab,
+    async CreateWindow(PBrowser aThisTab,
                        MaybeDiscardedBrowsingContext aParent,
                        PBrowser aNewTab,
                        uint32_t aChromeFlags,

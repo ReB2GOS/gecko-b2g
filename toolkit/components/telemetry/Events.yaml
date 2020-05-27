@@ -443,7 +443,7 @@ urlbar:
         type of the selected result in the urlbar panel. One of:
           "autofill", "visit", "bookmark", "history", "keyword", "search",
           "searchsuggestion", "switchtab", "remotetab", "extension", "oneoff",
-          "keywordoffer", "canonized", "tip", "tiphelp", "none"
+          "keywordoffer", "canonized", "tip", "tiphelp", "formhistory", "none"
   abandonment:
     objects: ["blur"]
     release_channel_collection: opt-out
@@ -729,6 +729,19 @@ pwmgr:
     record_in_processes: ["main"]
     release_channel_collection: opt-out
     expiry_version: never
+  saved_login_used:
+    objects: ["form_login", "form_password", "auth_login", "prompt_login"]
+    description: >
+      Each time a saved login is used in a form or authentication dialog.
+    bug_numbers: [1631130]
+    notification_emails: ["loines@mozilla.com", "passwords-dev@mozilla.org"]
+    products:
+      - "firefox"
+    record_in_processes: ["main"]
+    release_channel_collection: opt-out
+    expiry_version: never
+    extra_keys:
+      filled: Whether the browser filled the login details for the user vs. typing saved values.
 
 fxa:
   connect:
@@ -1620,8 +1633,8 @@ devtools.main:
       mode: No throttling, GPRS, Regular 2G, Good 2G, Regular 3G, Good 3G, Regular 4G / LTE, DSL or WI-FI.
       session_id: The toolbox session start time e.g. 13963.
   tool_timer:
-    objects: ["animationinspector", "computedview", "changesview", "fontinspector", "layoutview", "ruleview"]
-    bug_numbers: [1483817]
+    objects: ["animationinspector", "compatibilityview", "computedview", "changesview", "fontinspector", "layoutview", "ruleview"]
+    bug_numbers: [1483817, 1639454]
     notification_emails: ["dev-developer-tools@lists.mozilla.org", "hkirschner@mozilla.com"]
     products:
       - "firefox"
@@ -1708,7 +1721,6 @@ security.ui.protections:
       "lw_open_button",
       "lw_sync_link",
       "lw_about_link",
-      "mtr_report_link",
       "mtr_about_link",
       "mtr_signup_button",
       "trackers_about_link",

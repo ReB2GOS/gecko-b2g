@@ -784,6 +784,12 @@ class MDefinition : public MNode {
   // use's definition. Else returns nullptr.
   MDefinition* maybeSingleDefUse() const;
 
+  // Returns the most recent use (ignoring MResumePoints) for this MDefinition.
+  // Returns nullptr if there are no uses. Note that this relies on addUse
+  // adding new uses to the front of the list, and should only be called during
+  // MIR building (before optimization passes make changes to the uses).
+  MDefinition* maybeMostRecentDefUse() const;
+
   void addUse(MUse* use) {
     MOZ_ASSERT(use->producer() == this);
     uses_.pushFront(use);
@@ -2627,34 +2633,39 @@ class MInitElemGetterSetter
 class WrappedFunction : public TempObject {
   CompilerFunction fun_;
   uint16_t nargs_;
-  bool isNative_ : 1;
-  bool isNativeWithJitEntry_ : 1;
-  bool isConstructor_ : 1;
-  bool isClassConstructor_ : 1;
-  bool isSelfHostedBuiltin_ : 1;
-  bool isExtended_ : 1;
-  bool hasJitInfo_ : 1;
+  js::FunctionFlags flags_;
 
  public:
   explicit WrappedFunction(JSFunction* fun);
+  WrappedFunction(JSFunction* fun, uint16_t nargs, FunctionFlags flags);
+
+  // Note: When adding new accessors be sure to add consistency asserts
+  // to the constructor.
+
   size_t nargs() const { return nargs_; }
 
-  bool isNative() const { return isNative_; }
-  bool isNativeWithJitEntry() const { return isNativeWithJitEntry_; }
+  bool isNative() const { return flags_.isNative(); }
+  bool isBuiltinNative() const { return flags_.isBuiltinNative(); }
+  bool isNativeWithJitEntry() const { return flags_.isNativeWithJitEntry(); }
   bool isNativeWithCppEntry() const {
     return isNative() && !isNativeWithJitEntry();
   }
+  bool isInterpreted() const { return flags_.isInterpreted(); }
+  bool isConstructor() const { return flags_.isConstructor(); }
+  bool isClassConstructor() const { return flags_.isClassConstructor(); }
 
-  bool isConstructor() const { return isConstructor_; }
-  bool isClassConstructor() const { return isClassConstructor_; }
-  bool isSelfHostedBuiltin() const { return isSelfHostedBuiltin_; }
-  bool isExtended() const { return isExtended_; }
-  bool hasJitInfo() const { return hasJitInfo_; }
-
-  // fun->native() and fun->jitInfo() can safely be called off-thread: these
-  // fields never change.
-  JSNative native() const { return fun_->native(); }
-  const JSJitInfo* jitInfo() const { return fun_->jitInfo(); }
+  // These fields never change, they can be accessed off-main thread.
+  JSNative native() const {
+    MOZ_ASSERT(isNative());
+    return fun_->nativeUnchecked();
+  }
+  bool hasJitInfo() const {
+    return flags_.isBuiltinNative() && fun_->jitInfoUnchecked();
+  }
+  const JSJitInfo* jitInfo() const {
+    MOZ_ASSERT(hasJitInfo());
+    return fun_->jitInfoUnchecked();
+  }
 
   JSFunction* rawJSFunction() const { return fun_; }
 
@@ -2663,13 +2674,12 @@ class WrappedFunction : public TempObject {
 
 class MCall : public MVariadicInstruction, public CallPolicy::Data {
  private:
-  // An MCall uses the MPrepareCall, MDefinition for the function, and
-  // MPassArg instructions. They are stored in the same list.
-  static const size_t FunctionOperandIndex = 0;
+  // The callee, this, and the actual arguments are all operands of MCall.
+  static const size_t CalleeOperandIndex = 0;
   static const size_t NumNonArgumentOperands = 1;
 
  protected:
-  // Monomorphic cache of single target from TI, or nullptr.
+  // Monomorphic cache for MCalls with a single JSFunction target.
   WrappedFunction* target_;
 
   // Original value of argc from the bytecode.
@@ -2702,14 +2712,12 @@ class MCall : public MVariadicInstruction, public CallPolicy::Data {
 
  public:
   INSTRUCTION_HEADER(Call)
-  static MCall* New(TempAllocator& alloc, JSFunction* target, size_t maxArgc,
-                    size_t numActualArgs, bool construct,
+  static MCall* New(TempAllocator& alloc, WrappedFunction* target,
+                    size_t maxArgc, size_t numActualArgs, bool construct,
                     bool ignoresReturnValue, bool isDOMCall,
                     DOMObjectKind objectKind);
 
-  void initFunction(MDefinition* func) {
-    initOperand(FunctionOperandIndex, func);
-  }
+  void initCallee(MDefinition* func) { initOperand(CalleeOperandIndex, func); }
 
   bool needsArgCheck() const { return needsArgCheck_; }
   void disableArgCheck() { needsArgCheck_ = false; }
@@ -2726,9 +2734,9 @@ class MCall : public MVariadicInstruction, public CallPolicy::Data {
     needsThisCheck_ = true;
   }
 
-  MDefinition* getFunction() const { return getOperand(FunctionOperandIndex); }
-  void replaceFunction(MInstruction* newfunc) {
-    replaceOperand(FunctionOperandIndex, newfunc);
+  MDefinition* getCallee() const { return getOperand(CalleeOperandIndex); }
+  void replaceCallee(MInstruction* newfunc) {
+    replaceOperand(CalleeOperandIndex, newfunc);
   }
 
   void addArg(size_t argnum, MDefinition* arg);
@@ -2745,7 +2753,7 @@ class MCall : public MVariadicInstruction, public CallPolicy::Data {
     return NumNonArgumentOperands + index;
   }
 
-  // For TI-informed monomorphic callsites.
+  // For monomorphic callsites.
   WrappedFunction* getSingleTarget() const { return target_; }
 
   bool isConstructing() const { return construct_; }
@@ -2806,7 +2814,7 @@ class MCallDOMNative : public MCall {
     }
   }
 
-  friend MCall* MCall::New(TempAllocator& alloc, JSFunction* target,
+  friend MCall* MCall::New(TempAllocator& alloc, WrappedFunction* target,
                            size_t maxArgc, size_t numActualArgs, bool construct,
                            bool ignoresReturnValue, bool isDOMCall,
                            DOMObjectKind objectKind);
@@ -9163,9 +9171,49 @@ class MGuardObjectIdentity : public MBinaryInstruction,
     }
     return congruentIfOperandsEqual(ins);
   }
-  AliasSet getAliasSet() const override {
-    return AliasSet::Load(AliasSet::ObjectFields);
+  AliasSet getAliasSet() const override { return AliasSet::None(); }
+};
+
+// Guard on a specific JSFunction. Used instead of MGuardObjectIdentity,
+// so we can store some metadata related to the expected function.
+class MGuardSpecificFunction : public MBinaryInstruction,
+                               public SingleObjectPolicy::Data {
+  uint16_t nargs_;
+  FunctionFlags flags_;
+
+  MGuardSpecificFunction(MDefinition* obj, MDefinition* expected,
+                         uint16_t nargs, FunctionFlags flags)
+      : MBinaryInstruction(classOpcode, obj, expected),
+        nargs_(nargs),
+        flags_(flags) {
+    MOZ_ASSERT(expected->isConstant());
+    setGuard();
+    setMovable();
+    setResultType(MIRType::Object);
   }
+
+ public:
+  INSTRUCTION_HEADER(GuardSpecificFunction)
+  TRIVIAL_NEW_WRAPPERS
+  NAMED_OPERANDS((0, function), (1, expected))
+
+  uint16_t nargs() const { return nargs_; }
+  FunctionFlags flags() const { return flags_; }
+
+  MDefinition* foldsTo(TempAllocator& alloc) override;
+  bool congruentTo(const MDefinition* ins) const override {
+    if (!ins->isGuardSpecificFunction()) {
+      return false;
+    }
+
+    auto* other = ins->toGuardSpecificFunction();
+    if (nargs() != other->nargs() ||
+        flags().toRaw() != other->flags().toRaw()) {
+      return false;
+    }
+    return congruentIfOperandsEqual(other);
+  }
+  AliasSet getAliasSet() const override { return AliasSet::None(); }
 };
 
 class MGuardSpecificAtom : public MUnaryInstruction,

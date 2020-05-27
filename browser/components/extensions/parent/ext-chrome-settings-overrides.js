@@ -267,7 +267,7 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
   static async onUninstall(id) {
     let searchStartupPromise = pendingSearchSetupTasks.get(id);
     if (searchStartupPromise) {
-      await searchStartupPromise;
+      await searchStartupPromise.catch(Cu.reportError);
     }
     // Note: We do not have to deal with homepage here as it is managed by
     // the ExtensionPreferencesManager.
@@ -351,6 +351,9 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
             pendingSearchSetupTasks.get(extension.id) === searchStartupPromise
           ) {
             pendingSearchSetupTasks.delete(extension.id);
+            // This is primarily for tests so that we know when an extension
+            // has finished initialising.
+            ExtensionParent.apiManager.emit("searchEngineProcessed", extension);
           }
         }
       );
@@ -376,12 +379,8 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
 
     let engineName = searchProvider.name.trim();
     if (searchProvider.is_default) {
-      let engine = Services.search.getEngineByName(engineName);
-      if (engine && engine.isAppProvided) {
-        // Needs to be called every time to handle reenabling, but
-        // only sets default for install or enable.
+      if (await Services.search.maybeSetAndOverrideDefault(extension)) {
         await this.setDefault(engineName);
-        // For built in search engines, we don't do anything further
         return;
       }
     }
@@ -427,7 +426,7 @@ this.chrome_settings_overrides = class extends ExtensionAPI {
       } else {
         // Needs to be called every time to handle reenabling, but
         // only sets default for install or enable.
-        this.setDefault(engineName);
+        await this.setDefault(engineName);
       }
     }
   }

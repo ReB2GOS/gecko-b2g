@@ -126,7 +126,6 @@ class AboutWelcome extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComp
     };
     this.fetchFxAFlowUri = this.fetchFxAFlowUri.bind(this);
     this.handleStartBtnClick = this.handleStartBtnClick.bind(this);
-    this.messageId = "ABOUT_WELCOME";
   }
 
   async fetchFxAFlowUri() {
@@ -136,20 +135,14 @@ class AboutWelcome extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComp
   }
 
   componentDidMount() {
-    if (this.props.experiment && this.props.branchId) {
-      this.messageId = `ABOUT_WELCOME_${this.props.experiment}_${this.props.branchId}`.toUpperCase();
-    } else if (this.props.id && this.props.screens) {
-      this.messageId = this.props.id;
-    }
-
     this.fetchFxAFlowUri();
     window.AWSendEventTelemetry({
       event: "IMPRESSION",
-      message_id: this.messageId
+      message_id: this.props.messageId
     }); // Captures user has seen about:welcome by setting
     // firstrun.didSeeAboutWelcome pref to true and capturing welcome UI unique messageId
 
-    window.AWSendToParent("SET_WELCOME_MESSAGE_SEEN", this.messageId);
+    window.AWSendToParent("SET_WELCOME_MESSAGE_SEEN", this.props.messageId);
   }
 
   handleStartBtnClick() {
@@ -160,7 +153,7 @@ class AboutWelcome extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComp
         source: this.props.startButton.message_id,
         page: "about:welcome"
       },
-      message_id: this.messageId,
+      message_id: this.props.messageId,
       id: "ABOUT_WELCOME"
     };
     window.AWSendEventTelemetry(ping);
@@ -176,11 +169,12 @@ class AboutWelcome extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComp
 
     if (props.screens) {
       return react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(_components_MultiStageAboutWelcome__WEBPACK_IMPORTED_MODULE_2__["MultiStageAboutWelcome"], {
-        screens: props.screens
+        screens: props.screens,
+        metricsFlowUri: this.state.metricsFlowUri,
+        message_id: props.messageId
       });
     }
 
-    let UTMTerm = this.props.experiment && this.props.branchId ? `${this.props.experiment}-${this.props.branchId}` : "default";
     return react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", {
       className: "outer-wrapper welcomeContainer"
     }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", {
@@ -192,7 +186,7 @@ class AboutWelcome extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComp
       cards: props.cards,
       metricsFlowUri: this.state.metricsFlowUri,
       sendTelemetry: window.AWSendEventTelemetry,
-      utm_term: UTMTerm
+      utm_term: props.UTMTerm
     }), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(_components_MSLocalized__WEBPACK_IMPORTED_MODULE_5__["Localized"], {
       text: props.startButton.label
     }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("button", {
@@ -204,6 +198,25 @@ class AboutWelcome extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComp
 }
 
 AboutWelcome.defaultProps = _lib_aboutwelcome_utils__WEBPACK_IMPORTED_MODULE_6__["DEFAULT_WELCOME_CONTENT"];
+
+function ComputeMessageId(experimentId, branchId, settings) {
+  let messageId = "ABOUT_WELCOME";
+  let UTMTerm = "default";
+
+  if (settings.id && settings.screens) {
+    messageId = settings.id.toUpperCase();
+  }
+
+  if (experimentId && branchId) {
+    messageId += `_${experimentId}_${branchId}`.toUpperCase();
+    UTMTerm = `${experimentId}-${branchId}`.toLowerCase();
+  }
+
+  return {
+    messageId,
+    UTMTerm
+  };
+}
 
 async function mount() {
   const {
@@ -217,9 +230,13 @@ async function mount() {
     settings = await window.AWGetMultiStageScreens();
   }
 
+  let {
+    messageId,
+    UTMTerm
+  } = ComputeMessageId(slug, branch && branch.slug, settings);
   react_dom__WEBPACK_IMPORTED_MODULE_1___default.a.render(react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(AboutWelcome, _extends({
-    experiment: slug,
-    branchId: branch && branch.slug
+    messageId: messageId,
+    UTMTerm: UTMTerm
   }, settings)), document.getElementById("root"));
 }
 
@@ -244,6 +261,7 @@ module.exports = ReactDOM;
 "use strict";
 __webpack_require__.r(__webpack_exports__);
 /* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "MultiStageAboutWelcome", function() { return MultiStageAboutWelcome; });
+/* harmony export (binding) */ __webpack_require__.d(__webpack_exports__, "WelcomeScreen", function() { return WelcomeScreen; });
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(1);
 /* harmony import */ var react__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(react__WEBPACK_IMPORTED_MODULE_0__);
 /* harmony import */ var _MSLocalized__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(4);
@@ -255,7 +273,15 @@ __webpack_require__.r(__webpack_exports__);
 
 
 const MultiStageAboutWelcome = props => {
-  const [index, setScreenIndex] = Object(react__WEBPACK_IMPORTED_MODULE_0__["useState"])(0); // Transition to next screen, opening about:home on last screen button CTA
+  const [index, setScreenIndex] = Object(react__WEBPACK_IMPORTED_MODULE_0__["useState"])(0);
+  Object(react__WEBPACK_IMPORTED_MODULE_0__["useEffect"])(() => {
+    // Send impression ping when respective screen first renders
+    props.screens.forEach(screen => {
+      if (index === screen.order) {
+        _lib_aboutwelcome_utils__WEBPACK_IMPORTED_MODULE_2__["AboutWelcomeUtils"].sendImpressionTelemetry(`${props.message_id}_${screen.id}`);
+      }
+    });
+  }, [index]); // Transition to next screen, opening about:home on last screen button CTA
 
   const handleTransition = index < props.screens.length ? Object(react__WEBPACK_IMPORTED_MODULE_0__["useCallback"])(() => setScreenIndex(prevState => prevState + 1), []) : _lib_aboutwelcome_utils__WEBPACK_IMPORTED_MODULE_2__["AboutWelcomeUtils"].handleUserAction({
     type: "OPEN_ABOUT_PAGE",
@@ -264,29 +290,108 @@ const MultiStageAboutWelcome = props => {
       where: "current"
     }
   });
+  const [topSites] = Object(react__WEBPACK_IMPORTED_MODULE_0__["useState"])(["resource://activity-stream/data/content/tippytop/images/youtube-com@2x.png", "resource://activity-stream/data/content/tippytop/images/facebook-com@2x.png", "resource://activity-stream/data/content/tippytop/images/amazon@2x.png", "resource://activity-stream/data/content/tippytop/images/reddit-com@2x.png", "resource://activity-stream/data/content/tippytop/images/wikipedia-org@2x.png", "resource://activity-stream/data/content/tippytop/images/twitter-com@2x.png"]);
   return react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(react__WEBPACK_IMPORTED_MODULE_0___default.a.Fragment, null, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", {
-    className: `welcomeCardGrid`
+    className: `multistageContainer`
   }, props.screens.map(screen => {
     return index === screen.order ? react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(WelcomeScreen, {
-      key: screen.id,
       id: screen.id,
+      totalNumberOfScreens: props.screens.length,
+      order: screen.order,
       content: screen.content,
-      navigate: handleTransition
+      navigate: handleTransition,
+      topSites: topSites
     }) : null;
   })));
 };
+class WelcomeScreen extends react__WEBPACK_IMPORTED_MODULE_0___default.a.PureComponent {
+  constructor(props) {
+    super(props);
+    this.handleAction = this.handleAction.bind(this);
+  }
 
-const WelcomeScreen = props => {
-  return react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", {
-    className: `${props.id}`
-  }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(_MSLocalized__WEBPACK_IMPORTED_MODULE_1__["Localized"], {
-    text: props.content.title
-  }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("h1", null)), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(_MSLocalized__WEBPACK_IMPORTED_MODULE_1__["Localized"], {
-    text: props.content.primary_button.label
-  }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("button", {
-    onClick: props.navigate
-  })));
-};
+  handleAction(event) {
+    let targetContent = this.props.content[event.target.value];
+
+    if (!(targetContent && targetContent.action)) {
+      return;
+    }
+
+    if (targetContent.action.type) {
+      _lib_aboutwelcome_utils__WEBPACK_IMPORTED_MODULE_2__["AboutWelcomeUtils"].handleUserAction(targetContent.action);
+    }
+
+    if (targetContent.action.navigate) {
+      this.props.navigate();
+    }
+  }
+
+  renderSecondaryCTA(className) {
+    return react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", {
+      className: `secondary-cta ${className}`
+    }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(_MSLocalized__WEBPACK_IMPORTED_MODULE_1__["Localized"], {
+      text: this.props.content.secondary_button.text
+    }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("span", null)), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(_MSLocalized__WEBPACK_IMPORTED_MODULE_1__["Localized"], {
+      text: this.props.content.secondary_button.label
+    }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("button", {
+      className: "secondary",
+      value: "secondary_button",
+      onClick: this.handleAction
+    })));
+  }
+
+  renderTiles() {
+    return this.props.content.tiles && this.props.topSites ? react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", {
+      className: "tiles-section"
+    }, this.props.topSites.slice(0, 5).map(icon => react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", {
+      className: "icon",
+      key: icon,
+      style: {
+        backgroundImage: `url(${icon})`
+      }
+    }))) : null;
+  }
+
+  renderStepsIndicator() {
+    let steps = [];
+
+    for (let i = 0; i < this.props.totalNumberOfScreens; i++) {
+      let className = i === this.props.order ? "current" : "";
+      steps.push(react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", {
+        key: i,
+        className: `indicator ${className}`
+      }));
+    }
+
+    return steps;
+  }
+
+  render() {
+    const {
+      content
+    } = this.props;
+    return react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("main", {
+      className: `screen ${this.props.id}`
+    }, content.secondary_button && content.secondary_button.position === "top" ? this.renderSecondaryCTA("top") : null, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", {
+      className: "brand-logo"
+    }), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", {
+      className: "welcome-text"
+    }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(_MSLocalized__WEBPACK_IMPORTED_MODULE_1__["Localized"], {
+      text: content.title
+    }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("h1", null)), react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(_MSLocalized__WEBPACK_IMPORTED_MODULE_1__["Localized"], {
+      text: content.subtitle
+    }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("h2", null))), content.tiles ? this.renderTiles() : null, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", null, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement(_MSLocalized__WEBPACK_IMPORTED_MODULE_1__["Localized"], {
+      text: content.primary_button ? content.primary_button.label : null
+    }, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("button", {
+      className: "primary",
+      value: "primary_button",
+      onClick: this.handleAction
+    }))), content.secondary_button && content.secondary_button.position !== "top" ? this.renderSecondaryCTA() : null, react__WEBPACK_IMPORTED_MODULE_0___default.a.createElement("div", {
+      className: "steps"
+    }, this.renderStepsIndicator()));
+  }
+
+}
 
 /***/ }),
 /* 4 */
@@ -358,18 +463,14 @@ __webpack_require__.r(__webpack_exports__);
  * You can obtain one at http://mozilla.org/MPL/2.0/. */
 const AboutWelcomeUtils = {
   handleUserAction(action) {
-    switch (action.type) {
-      case "OPEN_ABOUT_PAGE":
-      case "OPEN_AWESOME_BAR":
-      case "OPEN_PRIVATE_BROWSER_WINDOW":
-      case "SHOW_MIGRATION_WIZARD":
-        window.AWSendToParent("SPECIAL_ACTION", action);
-        break;
+    window.AWSendToParent("SPECIAL_ACTION", action);
+  },
 
-      case "OPEN_URL":
-        window.open(action.data.args);
-        break;
-    }
+  sendImpressionTelemetry(messageId) {
+    window.AWSendEventTelemetry({
+      event: "IMPRESSION",
+      message_id: messageId
+    });
   },
 
   sendEvent(type, detail) {

@@ -50,7 +50,6 @@ EXPORTS.mozilla.dom += [
     'ContentParent.h',
     'ContentProcess.h',
     'ContentProcessManager.h',
-    'CPOWManagerGetter.h',
     'CSPMessageUtils.h',
     'DocShellMessageUtils.h',
     'EffectsInfo.h',
@@ -175,6 +174,7 @@ IPDL_SOURCES += [
     'PURLClassifierLocal.ipdl',
     'PWindowGlobal.ipdl',
     'ServiceWorkerConfiguration.ipdlh',
+    'WindowGlobalTypes.ipdlh',
 ]
 
 include('/ipc/chromium/chromium-config.mozbuild')

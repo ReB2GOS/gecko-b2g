@@ -38,6 +38,38 @@ UNCOMMON_TRY_TASK_LABELS = [
     # Test tasks
     r'web-platform-tests.*backlog',  # hide wpt jobs that are not implemented yet - bug 1572820
     r'-ccov/',
+    # Shippable build tests, except those that don't have opt versions - bug 1638014
+    # blacklist tasks on these platforms that aren't part of the named test suites,
+    # which are known to only run on shippable builds
+    r'(linux1804-64|windows10-64|windows7-32)-shippable(?!.*(awsy|browsertime|marionette-headless|raptor|talos|web-platform-tests-wdspec-headless))',  # noqa - too long
+]
+
+
+# These are live site performance tests we run three times a week
+LIVE_SITES = [
+    "amazon-search",
+    "bbc",
+    "booking-sf",
+    "cnn-ampstories",
+    "discord",
+    "espn",
+    "expedia",
+    "facebook-cristiano",
+    "fashionbeans",
+    "google",
+    "google-accounts",
+    "imdb-firefox",
+    "jianshu",
+    "medium-article",
+    "microsoft-support",
+    "nytimes",
+    "people-article",
+    "reddit-thread",
+    "rumble-fox",
+    "stackoverflow-question",
+    "urbandictionary-define",
+    "wikia-marvel",
+    "youtube-watch"
 ]
 
 
@@ -53,8 +85,9 @@ def get_method(method):
     return _target_task_methods[method]
 
 
-def filter_out_nightly(task, parameters):
+def filter_out_shipping_phase(task, parameters):
     return (
+        # nightly still here because of geckodriver
         not task.attributes.get('nightly') and
         task.attributes.get('shipping_phase') in (None, 'build')
         )
@@ -232,7 +265,7 @@ def target_tasks_try_auto(full_task_graph, parameters, graph_config):
     parameters = Parameters(**params)
     return [l for l, t in six.iteritems(full_task_graph.tasks)
             if standard_filter(t, parameters)
-            and filter_out_nightly(t, parameters)
+            and filter_out_shipping_phase(t, parameters)
             and filter_by_uncommon_try_tasks(t.label)]
 
 
@@ -242,7 +275,7 @@ def target_tasks_default(full_task_graph, parameters, graph_config):
     via the `run_on_projects` attributes."""
     return [l for l, t in six.iteritems(full_task_graph.tasks)
             if standard_filter(t, parameters)
-            and filter_out_nightly(t, parameters)
+            and filter_out_shipping_phase(t, parameters)
             and filter_out_devedition(t, parameters)]
 
 
@@ -433,8 +466,8 @@ def target_tasks_pine(full_task_graph, parameters, graph_config):
         # disable asan
         if platform == 'linux64-asan':
             return False
-        # disable non-pine and nightly tasks
-        if standard_filter(task, parameters) or filter_out_nightly(task, parameters):
+        # disable non-pine and tasks with a shipping phase
+        if standard_filter(task, parameters) or filter_out_shipping_phase(task, parameters):
             return True
     return [l for l, t in six.iteritems(full_task_graph.tasks) if filter(t)]
 
@@ -489,6 +522,40 @@ def target_tasks_fennec_v68(full_task_graph, parameters, graph_config):
     return [l for l, t in six.iteritems(full_task_graph.tasks) if filter(t)]
 
 
+@_target_task("live_site_perf_testing")
+def target_tasks_live_site_perf_testing(full_task_graph, parameters, graph_config):
+    """
+    Select browsertime live site tasks that should only run once a week.
+    """
+    def filter(task):
+        platform = task.attributes.get('build_platform')
+        attributes = task.attributes
+        vismet = attributes.get('kind') == 'visual-metrics-dep'
+        if attributes.get('unittest_suite') != 'raptor' and not vismet:
+            return False
+        try_name = attributes.get('raptor_try_name')
+        if vismet:
+            platform = task.task.get('extra').get('treeherder-platform')
+            try_name = task.label
+
+        if 'android' not in platform:
+            return False
+        if 'fenix' not in try_name:
+            return False
+        if ('browsertime' not in try_name or
+            'shippable' not in platform or
+            'live' not in try_name):
+            return False
+        for test in LIVE_SITES:
+            if try_name.endswith(test) or try_name.endswith(test + "-e10s"):
+                # These tests run 3 times a week, ignore them
+                return False
+
+        return True
+
+    return [l for l, t in six.iteritems(full_task_graph.tasks) if filter(t)]
+
+
 @_target_task('general_perf_testing')
 def target_tasks_general_perf_testing(full_task_graph, parameters, graph_config):
     """
@@ -510,8 +577,8 @@ def target_tasks_general_perf_testing(full_task_graph, parameters, graph_config)
         # Run chrome and chromium on all platforms available
         if '-chrome' in try_name:
             if 'android' in platform:
-                # Run only on pgo android builds
-                if 'pgo' in platform:
+                # Run only on shippable android builds
+                if 'shippable' in platform:
                     return True
                 else:
                     return False
@@ -522,7 +589,7 @@ def target_tasks_general_perf_testing(full_task_graph, parameters, graph_config)
             return True
 
         # Run raptor scn-power-idle and speedometer for fenix and fennec68
-        if 'pgo' in platform:
+        if 'shippable' in platform:
             if 'raptor-scn-power-idle' in try_name \
                     and ('-fenix' in try_name or '-fennec68' in try_name):
                 return True
@@ -535,11 +602,15 @@ def target_tasks_general_perf_testing(full_task_graph, parameters, graph_config)
                 return True
 
         # Select browsertime tasks
-        if 'browsertime' in try_name and 'pgo' in platform:
+        if 'browsertime' in try_name and 'shippable' in platform:
             if 'speedometer' in try_name:
                 return True
             if '-live' in try_name:
-                return True
+                # We only want to select those which should run 3 times
+                # a week here, other live site tests should be removed
+                for test in LIVE_SITES:
+                    if try_name.endswith(test) or try_name.endswith(test + "-e10s"):
+                        return True
             return False
 
         # Run the following tests on android geckoview
@@ -555,7 +626,7 @@ def target_tasks_general_perf_testing(full_task_graph, parameters, graph_config)
         if power_task and cpu_n_memory_task:
             return False
         if power_task or cpu_n_memory_task:
-            if 'pgo' not in platform:
+            if 'shippable' not in platform:
                 return False
             if '-speedometer-' in try_name:
                 return True
@@ -572,10 +643,7 @@ def make_desktop_nightly_filter(platforms):
         return all([
             filter_on_platforms(task, platforms),
             filter_for_project(task, parameters),
-            any([
-                task.attributes.get('nightly', False),
-                task.attributes.get('shippable', False),
-            ]),
+            task.attributes.get('shippable', False),
             # Tests and nightly only builds don't have `shipping_product` set
             task.attributes.get('shipping_product') in {None, "firefox", "thunderbird"},
             task.kind not in {'l10n'},  # no on-change l10n
@@ -589,7 +657,7 @@ def target_tasks_nightly_linux(full_task_graph, parameters, graph_config):
     nightly build process involves a pipeline of builds, signing,
     and, eventually, uploading the tasks to balrog."""
     filter = make_desktop_nightly_filter({
-        'linux64-nightly', 'linux-nightly', 'linux64-shippable', 'linux-shippable'
+        'linux64-shippable', 'linux-shippable'
         })
     return [l for l, t in six.iteritems(full_task_graph.tasks) if filter(t, parameters)]
 
@@ -599,7 +667,7 @@ def target_tasks_nightly_macosx(full_task_graph, parameters, graph_config):
     """Select the set of tasks required for a nightly build of macosx. The
     nightly build process involves a pipeline of builds, signing,
     and, eventually, uploading the tasks to balrog."""
-    filter = make_desktop_nightly_filter({'macosx64-nightly', 'macosx64-shippable'})
+    filter = make_desktop_nightly_filter({'macosx64-shippable'})
     return [l for l, t in six.iteritems(full_task_graph.tasks) if filter(t, parameters)]
 
 
@@ -608,7 +676,7 @@ def target_tasks_nightly_win32(full_task_graph, parameters, graph_config):
     """Select the set of tasks required for a nightly build of win32 and win64.
     The nightly build process involves a pipeline of builds, signing,
     and, eventually, uploading the tasks to balrog."""
-    filter = make_desktop_nightly_filter({'win32-nightly', 'win32-shippable'})
+    filter = make_desktop_nightly_filter({'win32-shippable'})
     return [l for l, t in six.iteritems(full_task_graph.tasks) if filter(t, parameters)]
 
 
@@ -617,7 +685,7 @@ def target_tasks_nightly_win64(full_task_graph, parameters, graph_config):
     """Select the set of tasks required for a nightly build of win32 and win64.
     The nightly build process involves a pipeline of builds, signing,
     and, eventually, uploading the tasks to balrog."""
-    filter = make_desktop_nightly_filter({'win64-nightly', 'win64-shippable'})
+    filter = make_desktop_nightly_filter({'win64-shippable'})
     return [l for l, t in six.iteritems(full_task_graph.tasks) if filter(t, parameters)]
 
 
@@ -626,7 +694,7 @@ def target_tasks_nightly_win64_aarch64(full_task_graph, parameters, graph_config
     """Select the set of tasks required for a nightly build of win32 and win64.
     The nightly build process involves a pipeline of builds, signing,
     and, eventually, uploading the tasks to balrog."""
-    filter = make_desktop_nightly_filter({'win64-aarch64-nightly', 'win64-aarch64-shippable'})
+    filter = make_desktop_nightly_filter({'win64-aarch64-shippable'})
     return [l for l, t in six.iteritems(full_task_graph.tasks) if filter(t, parameters)]
 
 
@@ -847,7 +915,7 @@ def target_tasks_raptor_tp6m(full_task_graph, parameters, graph_config):
         if attributes.get('unittest_suite') != 'raptor':
             return False
         try_name = attributes.get('raptor_try_name')
-        if '-cold' in try_name and 'pgo' in platform:
+        if '-cold' in try_name and 'shippable' in platform:
             if '-1-refbrow-' in try_name:
                 return True
             # Get browsertime amazon smoke tests

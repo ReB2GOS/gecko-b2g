@@ -2083,6 +2083,16 @@ static nsresult SelectProfile(nsToolkitProfileService* aProfileSvc,
     gDoMigration = true;
   }
 
+#if defined(XP_WIN)
+  // This arg is only used to indicate to telemetry that a profile refresh
+  // (reset+migration) was requested from the uninstaller, pass this along
+  // via an environment variable for simplicity.
+  ar = CheckArg("uninstaller-profile-refresh");
+  if (ar == ARG_FOUND) {
+    SaveToEnv("MOZ_UNINSTALLER_PROFILE_REFRESH=1");
+  }
+#endif
+
   if (EnvHasValue("XRE_RESTART_TO_PROFILE_MANAGER")) {
     return ShowProfileManager(aProfileSvc, aNative);
   }
@@ -3585,16 +3595,25 @@ static void ReadAheadSystemDll(const wchar_t* dllName) {
   }
 }
 
+#  ifdef NIGHTLY_BUILD
 static void ReadAheadPackagedDll(const wchar_t* dllName,
                                  const wchar_t* aGREDir) {
   wchar_t dllPath[MAX_PATH];
   swprintf(dllPath, MAX_PATH, L"%s\\%s", aGREDir, dllName);
   ReadAheadLib(dllPath);
 }
+#  endif
 
 static void PR_CALLBACK ReadAheadDlls_ThreadStart(void* arg) {
   UniquePtr<wchar_t[]> greDir(static_cast<wchar_t*>(arg));
 
+  // In Bug 1628903, we investigated which DLLs we should prefetch in
+  // order to reduce disk I/O and improve startup on Windows machines.
+  // Our ultimate goal is to measure the impact of these improvements on
+  // retention (see Bug 1640087). Before we place this within a pref,
+  // we should ensure this feature only ships to the nightly channel
+  // and monitor results from that subset.
+#  ifdef NIGHTLY_BUILD
   // Prefetch the DLLs shipped with firefox
   ReadAheadPackagedDll(L"libegl.dll", greDir.get());
   ReadAheadPackagedDll(L"libGLESv2.dll", greDir.get());
@@ -3605,6 +3624,21 @@ static void PR_CALLBACK ReadAheadDlls_ThreadStart(void* arg) {
   // Prefetch the system DLLs
   ReadAheadSystemDll(L"DWrite.dll");
   ReadAheadSystemDll(L"D3DCompiler_47.dll");
+#  else
+  // Load DataExchange.dll and twinapi.appcore.dll for
+  // nsWindow::EnableDragDrop
+  ReadAheadSystemDll(L"DataExchange.dll");
+  ReadAheadSystemDll(L"twinapi.appcore.dll");
+
+  // Load twinapi.dll for WindowsUIUtils::UpdateTabletModeState
+  ReadAheadSystemDll(L"twinapi.dll");
+
+  // Load explorerframe.dll for WinTaskbar::Initialize
+  ReadAheadSystemDll(L"ExplorerFrame.dll");
+
+  // Load WinTypes.dll for nsOSHelperAppService::GetApplicationDescription
+  ReadAheadSystemDll(L"WinTypes.dll");
+#  endif
 }
 #endif
 

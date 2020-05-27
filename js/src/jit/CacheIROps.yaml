@@ -241,6 +241,15 @@
     obj: ObjId
     expected: ObjectField
 
+- name: GuardSpecificFunction
+  shared: false
+  transpile: true
+  custom_writer: true
+  args:
+    obj: ObjId
+    expected: ObjectField
+    nargsAndFlags: RawWordField
+
 - name: GuardSpecificAtom
   shared: false
   transpile: true
@@ -656,6 +665,12 @@
   args:
     obj: ObjId
 
+- name: IsObjectResult
+  shared: true
+  transpile: true
+  args:
+    input: ValId
+
 - name: MathAbsInt32Result
   shared: true
   transpile: true
@@ -669,6 +684,18 @@
     input: NumberId
 
 - name: MathSqrtNumberResult
+  shared: true
+  transpile: true
+  args:
+    input: NumberId
+
+- name: MathFloorToInt32Result
+  shared: true
+  transpile: true
+  args:
+    input: NumberId
+
+- name: MathCeilToInt32Result
   shared: true
   transpile: true
   args:
@@ -782,7 +809,7 @@
 
 - name: CallScriptedFunction
   shared: false
-  transpile: false
+  transpile: true
   args:
     callee: ObjId
     argc: Int32Id
@@ -790,11 +817,8 @@
 
 - name: CallNativeFunction
   shared: false
-#ifdef JS_SIMULATOR
   transpile: false
-#else
   transpile: true
-#endif
   custom_writer: true
   args:
     callee: ObjId
@@ -819,7 +843,7 @@
 # Meta ops generate no code, but contain data for BaselineInspector.
 - name: MetaTwoByte
   shared: true
-  transpile: false
+  transpile: true
   custom_writer: true
   args:
     kind: MetaTwoByteKindImm
@@ -1281,7 +1305,7 @@
 
 - name: Int32URightShiftResult
   shared: true
-  transpile: false
+  transpile: true
   args:
     lhs: Int32Id
     rhs: Int32Id

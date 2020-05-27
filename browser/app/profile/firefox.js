@@ -282,7 +282,11 @@ pref("browser.urlbar.maxRichResults", 10);
 pref("browser.urlbar.delay", 50);
 
 // The maximum number of historical search results to show.
+#ifdef EARLY_BETA_OR_EARLIER
+pref("browser.urlbar.maxHistoricalSearchSuggestions", 2);
+#else
 pref("browser.urlbar.maxHistoricalSearchSuggestions", 0);
+#endif
 
 // When true, URLs in the user's history that look like search result pages
 // are styled to look like search engine results instead of the usual history
@@ -1625,6 +1629,7 @@ pref("browser.contentblocking.report.monitor.sign_in_url", "https://monitor.fire
 pref("browser.contentblocking.report.monitor.preferences_url", "https://monitor.firefox.com/user/preferences");
 pref("browser.contentblocking.report.monitor.home_page_url", "https://monitor.firefox.com/user/dashboard");
 pref("browser.contentblocking.report.manage_devices.url", "https://accounts.firefox.com/settings/clients");
+pref("browser.contentblocking.report.endpoint_url", "https://monitor.firefox.com/user/breach-stats?includeResolved=true");
 pref("browser.contentblocking.report.proxy_extension.url", "https://fpn.firefox.com/browser?utm_source=firefox-desktop&utm_medium=referral&utm_campaign=about-protections&utm_content=about-protections");
 pref("browser.contentblocking.report.lockwise.mobile-ios.url", "https://apps.apple.com/app/id1314000270");
 pref("browser.contentblocking.report.lockwise.mobile-android.url", "https://play.google.com/store/apps/details?id=mozilla.lockbox&referrer=utm_source%3Dprotection_report%26utm_content%3Dmobile_promotion");
@@ -1706,9 +1711,6 @@ pref("browser.tabs.crashReporting.email", "");
 // If true, unprivileged extensions may use experimental APIs on
 // nightly and developer edition.
 pref("extensions.experiments.enabled", false);
-
-// Causes access on unsafe CPOWs from browser code to throw by default.
-pref("dom.ipc.cpows.forbid-unsafe-from-browser", true);
 
 #if defined(XP_WIN)
   // Allows us to deprioritize the processes of background tabs at an OS level

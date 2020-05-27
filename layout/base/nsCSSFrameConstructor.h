@@ -359,6 +359,20 @@ class nsCSSFrameConstructor final : public nsFrameManager {
 
   already_AddRefed<ComputedStyle> ResolveComputedStyle(nsIContent* aContent);
 
+  enum class ItemFlag : uint8_t {
+    // Allow page-break before and after items to be created if the
+    // style asks for them.
+    AllowPageBreak,
+    IsGeneratedContent,
+    IsWithinSVGText,
+    // The item allows items to be created for SVG <textPath> children.
+    AllowTextPathChild,
+    // The item is content created by an nsIAnonymousContentCreator frame.
+    IsAnonymousContentCreatorContent,
+  };
+
+  using ItemFlags = mozilla::EnumSet<ItemFlag>;
+
   // Add the frame construction items for the given aContent and aParentFrame
   // to the list.  This might add more than one item in some rare cases.
   // If aSuppressWhiteSpaceOptimizations is true, optimizations that
@@ -369,7 +383,7 @@ class nsCSSFrameConstructor final : public nsFrameManager {
                                  bool aSuppressWhiteSpaceOptimizations,
                                  const InsertionPoint& aInsertion,
                                  FrameConstructionItemList& aItems,
-                                 uint32_t aFlags = 0);
+                                 ItemFlags = {});
 
   // Helper method for AddFrameConstructionItems etc.
   // Unsets the need-frame/restyle bits on aContent.
@@ -386,11 +400,11 @@ class nsCSSFrameConstructor final : public nsFrameManager {
                                    bool aSuppressWhiteSpaceOptimizations,
                                    nsContainerFrame* aParentFrame,
                                    FrameConstructionItemList& aItems,
-                                   uint32_t aFlags = 0);
+                                   ItemFlags = {});
 
   // Construct the frames for the document element.  This can return null if the
-  // document element is display:none, or if the document element has a
-  // not-yet-loaded XBL binding, or if it's an SVG element that's not <svg>.
+  // document element is display:none, or if it's an SVG element that's not
+  // <svg>, etc.
   nsIFrame* ConstructDocElementFrame(Element* aDocElement);
 
   // Set up our mDocElementContainingBlock correctly for the given root
@@ -749,18 +763,18 @@ class nsCSSFrameConstructor final : public nsFrameManager {
 
   const FrameConstructionData* FindDataForContent(nsIContent&, ComputedStyle&,
                                                   nsIFrame* aParentFrame,
-                                                  uint32_t aFlags);
+                                                  ItemFlags aFlags);
 
   // aParentFrame might be null.  If it is, that means it was an inline frame.
   static const FrameConstructionData* FindTextData(const Text&,
                                                    nsIFrame* aParentFrame);
   const FrameConstructionData* FindElementData(const Element&, ComputedStyle&,
                                                nsIFrame* aParentFrame,
-                                               uint32_t aFlags);
+                                               ItemFlags aFlags);
   const FrameConstructionData* FindElementTagData(const Element&,
                                                   ComputedStyle&,
                                                   nsIFrame* aParentFrame,
-                                                  uint32_t aFlags);
+                                                  ItemFlags aFlags);
 
   /* A function that takes an integer, content, style, and array of
      FrameConstructionDataByInts and finds the appropriate frame construction
@@ -801,12 +815,12 @@ class nsCSSFrameConstructor final : public nsFrameManager {
     void SetLineBoundaryAtEnd(bool aBoundary) {
       mLineBoundaryAtEnd = aBoundary;
     }
-    void SetParentHasNoXBLChildren(bool aHasNoXBLChildren) {
-      mParentHasNoXBLChildren = aHasNoXBLChildren;
+    void SetParentHasNoShadowDOM(bool aValue) {
+      mParentHasNoShadowDOM = aValue;
     }
     bool HasLineBoundaryAtStart() { return mLineBoundaryAtStart; }
     bool HasLineBoundaryAtEnd() { return mLineBoundaryAtEnd; }
-    bool ParentHasNoXBLChildren() { return mParentHasNoXBLChildren; }
+    bool ParentHasNoShadowDOM() { return mParentHasNoShadowDOM; }
     bool IsEmpty() const { return mItems.isEmpty(); }
     bool AnyItemsNeedBlockParent() const { return mLineParticipantCount != 0; }
     bool AreAllItemsInline() const { return mInlineCount == mItemCount; }
@@ -968,7 +982,7 @@ class nsCSSFrameConstructor final : public nsFrameManager {
           mItemCount(0),
           mLineBoundaryAtStart(false),
           mLineBoundaryAtEnd(false),
-          mParentHasNoXBLChildren(false) {
+          mParentHasNoShadowDOM(false) {
       MOZ_COUNT_CTOR(FrameConstructionItemList);
       memset(mDesiredParentCounts, 0, sizeof(mDesiredParentCounts));
     }
@@ -1023,8 +1037,8 @@ class nsCSSFrameConstructor final : public nsFrameManager {
     // True if there is guaranteed to be a line boundary after the
     // frames created by these items
     bool mLineBoundaryAtEnd;
-    // True if the parent is guaranteed to have no XBL anonymous children
-    bool mParentHasNoXBLChildren;
+    // True if the parent is guaranteed to have no shadow tree.
+    bool mParentHasNoShadowDOM;
   };
 
   /* A struct representing a list of FrameConstructionItems on the stack. */
@@ -1062,7 +1076,6 @@ class nsCSSFrameConstructor final : public nsFrameManager {
           mSuppressWhiteSpaceOptimizations(aSuppressWhiteSpaceOptimizations),
           mIsText(false),
           mIsGeneratedContent(false),
-          mIsAnonymousContentCreatorContent(false),
           mIsRootPopupgroup(false),
           mIsAllInline(false),
           mIsBlock(false),
@@ -1123,8 +1136,6 @@ class nsCSSFrameConstructor final : public nsFrameManager {
     // Whether this is a generated content container.
     // If it is, mContent is a strong pointer.
     bool mIsGeneratedContent : 1;
-    // Whether this is an item for nsIAnonymousContentCreator content.
-    bool mIsAnonymousContentCreatorContent : 1;
     // Whether this is an item for the root popupgroup.
     bool mIsRootPopupgroup : 1;
     // Whether construction from this item will create only frames that are
@@ -1374,20 +1385,6 @@ class nsCSSFrameConstructor final : public nsFrameManager {
                                       nsContainerFrame* aParentFrame,
                                       nsFrameList& aFrameList);
 
-  // possible flags for AddFrameConstructionItemInternal's aFlags argument
-  /* Allow xbl:base to affect the tag/namespace used. */
-#define ITEM_ALLOW_XBL_BASE 0x1
-  /* Allow page-break before and after items to be created if the
-     style asks for them. */
-#define ITEM_ALLOW_PAGE_BREAK 0x2
-  /* The item is a generated content item. */
-#define ITEM_IS_GENERATED_CONTENT 0x4
-  /* The item is within an SVG text block frame. */
-#define ITEM_IS_WITHIN_SVG_TEXT 0x8
-  /* The item allows items to be created for SVG <textPath> children. */
-#define ITEM_ALLOWS_TEXT_PATH_CHILD 0x10
-  /* The item is content created by an nsIAnonymousContentCreator frame */
-#define ITEM_IS_ANONYMOUSCONTENTCREATOR_CONTENT 0x20
   // The guts of AddFrameConstructionItems
   // aParentFrame might be null.  If it is, that means it was an
   // inline frame.
@@ -1395,8 +1392,7 @@ class nsCSSFrameConstructor final : public nsFrameManager {
                                          nsIContent* aContent,
                                          nsContainerFrame* aParentFrame,
                                          bool aSuppressWhiteSpaceOptimizations,
-                                         ComputedStyle* aComputedStyle,
-                                         uint32_t aFlags,
+                                         ComputedStyle*, ItemFlags,
                                          FrameConstructionItemList& aItems);
 
   /**
@@ -1436,9 +1432,6 @@ class nsCSSFrameConstructor final : public nsFrameManager {
 
   // Function to find FrameConstructionData for an element.  Will return
   // null if the element is not XUL.
-  //
-  // NOTE(emilio): This gets the overloaded tag and namespace id since they can
-  // be overriden by extends="" in XBL.
   static const FrameConstructionData* FindXULTagData(const Element&,
                                                      ComputedStyle&);
   // XUL data-finding helper functions and structures
@@ -1545,13 +1538,16 @@ class nsCSSFrameConstructor final : public nsFrameManager {
   void AddFCItemsForAnonymousContent(
       nsFrameConstructorState& aState, nsContainerFrame* aFrame,
       const nsTArray<nsIAnonymousContentCreator::ContentInfo>& aAnonymousItems,
-      FrameConstructionItemList& aItemsToConstruct, uint32_t aExtraFlags = 0);
+      FrameConstructionItemList& aItemsToConstruct, ItemFlags aExtraFlags = {});
 
   /**
    * Construct the frames for the children of aContent.  "children" is defined
    * as "whatever FlattenedChildIterator returns for aContent".  This means
-   * we're basically operating on children in the "flattened tree" per
-   * sXBL/XBL2. This method will also handle constructing ::before, ::after,
+   * we're basically operating on children in the "flattened tree":
+   *
+   *   https://drafts.csswg.org/css-scoping/#flat-tree
+   *
+   * This method will also handle constructing ::before, ::after,
    * ::first-letter, and ::first-line frames, as needed and if allowed.
    *
    * If the parent is a float containing block, this method will handle pushing
@@ -2030,8 +2026,8 @@ class nsCSSFrameConstructor final : public nsFrameManager {
   // The skip parameters are used to ignore a range of children when looking
   // for a sibling. All nodes starting from aStartSkipChild and up to but not
   // including aEndSkipChild will be skipped over when looking for sibling
-  // frames. Skipping a range can deal with XBL but not when there are multiple
-  // insertion points.
+  // frames. Skipping a range can deal with shadow DOM, but not when there are
+  // multiple insertion points.
   nsIFrame* GetInsertionPrevSibling(InsertionPoint* aInsertion,  // inout
                                     nsIContent* aChild, bool* aIsAppend,
                                     bool* aIsRangeInsertSafe,

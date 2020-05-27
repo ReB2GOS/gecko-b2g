@@ -10,6 +10,10 @@
   position: relative;
 }
 
+.network-monitor .headers-panel-container .treeTable {
+  overflow: hidden;
+}
+
 .network-monitor .headers-panel-container .panel-container {
   position: absolute;
   top: calc(var(--theme-toolbar-height) + 1px);
@@ -20,7 +24,7 @@
 }
 
 .network-monitor .headers-panel-container .devtools-button {
-  padding: 2px;
+  padding: 0;
 }
 .network-monitor .headers-panel-container .devtools-dropdown-button {
   padding: 0;
@@ -35,7 +39,7 @@
 }
 
 .network-monitor .headers-overview .summary {
-  padding: 10px 20px;
+  padding: 6px 16px 2px;
 }
 
 .network-monitor .headers-summary,
@@ -51,10 +55,6 @@
   justify-content: flex-end;
   align-items: center;
   cursor: pointer;
-}
-
-.network-monitor .accordion-header-label {
-  color: var(--theme-icon-dimmed-color)
 }
 
 .network-monitor .raw-headers-toggle .headers-summary-label {
@@ -127,49 +127,32 @@
   margin-inline-start: 4px;
 }
 
-/* Status codes */
-
-.headers-overview .summary .status .status-code {
+.network-monitor .accordion .properties-view tr.treeRow {
+  padding: 3px 0 0 0;
+}
+.network-monitor .accordion .properties-view tr.treeRow .treeLabelCell {
+  float: left;
+  margin-right: -33px;
+  margin-left: 5px;
+  padding: 0;
+  
+}
+.network-monitor .accordion .properties-view tr.treeRow .treeValueCell {
   display: inline;
-  margin-right: 5px;
-  background-color: transparent;
-  color: inherit;
+  word-break: break-all;
+  box-decoration-break: clone;
+  padding-left: 39px;
+  padding-right: 20px;
 }
 
-.headers-overview .summary .status[data-code^="1"] {
-  color: var(--status-code-color-1xx);
-}
-
-.headers-overview .summary .status[data-code^="2"] {
-  color: var(--status-code-color-2xx);
-}
-
-.headers-overview .summary .status[data-code^="3"] {
-  color: inherit;
-}
-
-.headers-overview .summary .status[data-code^="4"] {
-  color: var(--status-code-color-4xx);
-}
-
-.headers-overview .summary .status[data-code^="5"] {
-  color: var(--status-code-color-5xx);
-}
-
-/* Non-standard status codes are styled like 5XX */
-.headers-overview .summary .status[data-code^="0"],
-.headers-overview .summary .status[data-code^="6"],
-.headers-overview .summary .status[data-code^="7"],
-.headers-overview .summary .status[data-code^="8"],
-.headers-overview .summary .status[data-code^="9"] {
-  color: var(--status-code-color-5xx);
+.network-monitor .accordion .properties-view tr.treeRow .treeValueCell div {
+  display: inline;
 }
 
 /* Summary tabpanel */
 
 .network-monitor .tabpanel-summary-container {
   flex-wrap: wrap;
-  padding: 1px;
   padding-inline-start: 4px;
   margin-bottom: 5px;
 }
@@ -183,13 +166,14 @@
 .network-monitor .tabpanel-summary-label {
   display: inline-block;
   padding-inline-end: 3px;
-  min-width: 70px;
+  min-width: 90px;
   color: var(--theme-icon-dimmed-color);
 }
 
 .network-monitor .tabpanel-summary-value {
   color: inherit;
   padding-inline-start: 3px;
+  unicode-bidi: plaintext;
 }
 
 .network-monitor .tabpanel-summary-value  strong {

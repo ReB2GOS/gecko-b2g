@@ -376,7 +376,7 @@ import_sibling_modules()
 
 # Register composite strategies.
 register_strategy('build', args=('skip-unless-schedules',))(Alias)
-register_strategy('build-fuzzing', args=('backstop',))(Alias)
+register_strategy('build-fuzzing', args=('push-interval-10',))(Alias)
 register_strategy('test', args=(
     Any('skip-unless-schedules', 'bugbug-reduced-fallback', split_args=tuple),
     'backstop',
@@ -488,5 +488,5 @@ class ExperimentalOverride(object):
 
 tryselect = ExperimentalOverride(experimental, {
     'build': Any('skip-unless-schedules', 'bugbug-reduced', split_args=tuple),
-    'build-fuzzing': Any('skip-unless-schedules', 'bugbug-reduced', split_args=tuple),
+    'build-fuzzing': Alias('bugbug-reduced'),
 })

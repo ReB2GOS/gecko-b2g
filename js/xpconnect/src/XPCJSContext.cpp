@@ -44,7 +44,6 @@
 #include "mozilla/dom/ScriptLoader.h"
 #include "mozilla/dom/WindowBinding.h"
 #include "mozilla/extensions/WebExtensionPolicy.h"
-#include "mozilla/jsipc/CrossProcessObjectWrappers.h"
 #include "mozilla/Atomics.h"
 #include "mozilla/Attributes.h"
 #include "mozilla/ProcessHangMonitor.h"
@@ -759,6 +758,7 @@ static mozilla::Atomic<bool> sStreamsEnabled(false);
 
 static mozilla::Atomic<bool> sPropertyErrorMessageFixEnabled(false);
 static mozilla::Atomic<bool> sWeakRefsEnabled(false);
+static mozilla::Atomic<bool> sIteratorHelpersEnabled(false);
 
 void xpc::SetPrefableRealmOptions(JS::RealmOptions& options) {
   options.creationOptions()
@@ -770,7 +770,8 @@ void xpc::SetPrefableRealmOptions(JS::RealmOptions& options) {
       .setWritableStreamsEnabled(
           StaticPrefs::javascript_options_writable_streams())
       .setPropertyErrorMessageFixEnabled(sPropertyErrorMessageFixEnabled)
-      .setWeakRefsEnabled(sWeakRefsEnabled);
+      .setWeakRefsEnabled(sWeakRefsEnabled)
+      .setIteratorHelpersEnabled(sIteratorHelpersEnabled);
 }
 
 static void LoadStartupJSPrefs(XPCJSContext* xpccx) {
@@ -948,6 +949,8 @@ static void ReloadPrefsCallback(const char* pref, void* aXpccx) {
 #ifdef NIGHTLY_BUILD
   sWeakRefsEnabled =
       Preferences::GetBool(JS_OPTIONS_DOT_STR "experimental.weakrefs");
+  sIteratorHelpersEnabled =
+      Preferences::GetBool(JS_OPTIONS_DOT_STR "experimental.iterator_helpers");
 #endif
 
 #ifdef JS_GC_ZEAL
@@ -1341,7 +1344,6 @@ void XPCJSContext::AfterProcessTask(uint32_t aNewRecursionDepth) {
   MOZ_ASSERT(NS_IsMainThread());
   nsJSContext::MaybePokeCC();
   CycleCollectedJSContext::AfterProcessTask(aNewRecursionDepth);
-  mozilla::jsipc::AfterProcessTask();
 
   // This exception might have been set if we called an XPCWrappedJS that threw,
   // but now we're returning to the event loop, so nothing is going to look at
