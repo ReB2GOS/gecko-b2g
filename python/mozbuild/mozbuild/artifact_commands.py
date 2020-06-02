@@ -300,7 +300,7 @@ class PackageFrontend(MachCommandBase):
             from taskgraph.parameters import Parameters
             from taskgraph.generator import load_tasks_for_kind
             params = Parameters(
-                level=six.ensure_text(os.environ.get('MOZ_SCM_LEVEL', '3')),
+                level=six.ensure_text(os.environ.get('MOZ_SCM_LEVEL', '2')),
                 strict=False,
             )
 
@@ -443,7 +443,11 @@ class PackageFrontend(MachCommandBase):
                 try:
                     unpack_file(local)
                 except ImportError as e:
-                    if e.name != "zstandard":
+                    # Need to do this branch while this code is still exercised
+                    # by Python 2.
+                    if six.PY3 and e.name != "zstandard":
+                        raise
+                    elif six.PY2 and e.message != 'No module named zstandard':
                         raise
                     self._ensure_zstd()
                     unpack_file(local)

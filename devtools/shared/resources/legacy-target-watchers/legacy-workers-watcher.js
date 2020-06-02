@@ -133,10 +133,10 @@ class LegacyWorkersWatcher {
     } else if (this._isServiceWorkerWatcher) {
       this._legacyProcessesWatcher = new LegacyProcessesWatcher(
         this.targetList,
-        targetFront => {
+        async targetFront => {
           // Service workers only live in content processes.
           if (!targetFront.isParentProcess) {
-            this._onProcessAvailable({ targetFront });
+            await this._onProcessAvailable({ targetFront });
           }
         },
         targetFront => {
@@ -158,7 +158,7 @@ class LegacyWorkersWatcher {
   }
 
   _getProcessTargets() {
-    return this.targetList.getAllTargets(TargetList.TYPES.PROCESS);
+    return this.targetList.getAllTargets([TargetList.TYPES.PROCESS]);
   }
 
   unlisten() {

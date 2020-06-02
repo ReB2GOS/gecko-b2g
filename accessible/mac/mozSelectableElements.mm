@@ -9,132 +9,46 @@
 
 @implementation mozSelectableAccessible
 
-- (NSArray*)accessibilityAttributeNames {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
-  static NSMutableArray* attributes = nil;
-
-  if (!attributes) {
-    attributes = [[super accessibilityAttributeNames] mutableCopy];
-    [attributes addObject:NSAccessibilitySelectedChildrenAttribute];
-  }
-
-  return attributes;
-  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
-}
-
-- (BOOL)accessibilityIsAttributeSettable:(NSString*)attribute {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_RETURN;
-
-  if ([attribute isEqualToString:NSAccessibilitySelectedChildrenAttribute]) {
-    return YES;
-  }
-
-  return [super accessibilityIsAttributeSettable:attribute];
-
-  NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(NO);
-}
-
-- (void)accessibilitySetValue:(id)value forAttribute:(NSString*)attribute {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
-
-  if ([attribute isEqualToString:NSAccessibilitySelectedChildrenAttribute] &&
-      [value isKindOfClass:[NSArray class]]) {
-    for (id child in [self selectableChildren]) {
-      BOOL selected = [value indexOfObjectIdenticalTo:child] != NSNotFound;
-      [child setSelected:selected];
-    }
-  } else {
-    [super accessibilitySetValue:value forAttribute:attribute];
-  }
-
-  NS_OBJC_END_TRY_ABORT_BLOCK;
-}
-
-- (id)accessibilityAttributeValue:(NSString*)attribute {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
-  if ([attribute isEqualToString:NSAccessibilitySelectedChildrenAttribute]) {
-    return [self selectedChildren];
-  }
-
-  return [super accessibilityAttributeValue:attribute];
-  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
-}
-
 /**
  * Return the mozAccessibles that are selectable.
  */
 - (NSArray*)selectableChildren {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
-
-  return [[self children]
+  return [[self moxChildren]
       filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(mozAccessible* child,
                                                                         NSDictionary* bindings) {
         return [child isKindOfClass:[mozSelectableChildAccessible class]];
       }]];
+}
 
-  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
+- (void)moxSetSelectedChildren:(NSArray*)selectedChildren {
+  for (id child in [self selectableChildren]) {
+    BOOL selected = [selectedChildren indexOfObjectIdenticalTo:child] != NSNotFound;
+    [child moxSetSelected:@(selected)];
+  }
 }
 
 /**
  * Return the mozAccessibles that are actually selected.
  */
-- (NSArray*)selectedChildren {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
-
-  return [[self children]
+- (NSArray*)moxSelectedChildren {
+  return [[self moxChildren]
       filteredArrayUsingPredicate:[NSPredicate predicateWithBlock:^BOOL(mozAccessible* child,
                                                                         NSDictionary* bindings) {
         // Return mozSelectableChildAccessibles that have are selected (truthy value).
         return [child isKindOfClass:[mozSelectableChildAccessible class]] &&
-               [(mozSelectableChildAccessible*)child isSelected];
+               [[(mozSelectableChildAccessible*)child moxSelected] boolValue];
       }]];
-
-  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
 }
 
 @end
 
 @implementation mozSelectableChildAccessible
 
-- (id)accessibilityAttributeValue:(NSString*)attribute {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
-  if ([attribute isEqualToString:NSAccessibilitySelectedAttribute]) {
-    return [NSNumber numberWithBool:[self isSelected]];
-  }
-
-  return [super accessibilityAttributeValue:attribute];
-  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
+- (NSNumber*)moxSelected {
+  return @([self stateWithMask:states::SELECTED] != 0);
 }
 
-- (BOOL)accessibilityIsAttributeSettable:(NSString*)attribute {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_RETURN;
-
-  if ([attribute isEqualToString:NSAccessibilitySelectedAttribute]) {
-    return YES;
-  }
-
-  return [super accessibilityIsAttributeSettable:attribute];
-
-  NS_OBJC_END_TRY_ABORT_BLOCK_RETURN(NO);
-}
-
-- (void)accessibilitySetValue:(id)value forAttribute:(NSString*)attribute {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK;
-
-  if ([attribute isEqualToString:NSAccessibilitySelectedAttribute]) {
-    [self setSelected:[value boolValue]];
-  } else {
-    [super accessibilitySetValue:value forAttribute:attribute];
-  }
-
-  NS_OBJC_END_TRY_ABORT_BLOCK;
-}
-
-- (BOOL)isSelected {
-  return [self stateWithMask:states::SELECTED] != 0;
-}
-
-- (void)setSelected:(BOOL)selected {
+- (void)moxSetSelected:(NSNumber*)selected {
   // Get SELECTABLE and UNAVAILABLE state.
   uint64_t state = [self stateWithMask:(states::SELECTABLE | states::UNAVAILABLE)];
   if ((state & states::SELECTABLE) == 0 || (state & states::UNAVAILABLE) != 0) {
@@ -142,10 +56,10 @@
     return;
   }
 
-  if (AccessibleWrap* accWrap = [self getGeckoAccessible]) {
-    accWrap->SetSelected(selected);
-  } else if (ProxyAccessible* proxy = [self getProxyAccessible]) {
-    proxy->SetSelected(selected);
+  if (Accessible* acc = mGeckoAccessible.AsAccessible()) {
+    acc->SetSelected([selected boolValue]);
+  } else {
+    mGeckoAccessible.AsProxy()->SetSelected([selected boolValue]);
   }
 
   // We need to invalidate the state because the accessibility service
@@ -158,50 +72,31 @@
 
 @implementation mozTabGroupAccessible
 
-- (NSArray*)accessibilityAttributeNames {
-  static NSMutableArray* attributes = nil;
-
-  if (!attributes) {
-    attributes = [[super accessibilityAttributeNames] mutableCopy];
-    [attributes addObject:NSAccessibilityContentsAttribute];
-    [attributes addObject:NSAccessibilityTabsAttribute];
-  }
-
-  return attributes;
+- (NSArray*)moxTabs {
+  return [self selectableChildren];
 }
 
-- (id)accessibilityAttributeValue:(NSString*)attribute {
-  if ([attribute isEqualToString:NSAccessibilityContentsAttribute]) return [super children];
-  if ([attribute isEqualToString:NSAccessibilityTabsAttribute]) return [self selectableChildren];
-
-  return [super accessibilityAttributeValue:attribute];
+- (NSArray*)moxContents {
+  return [self moxChildren];
 }
 
-- (id)value {
+- (id)moxValue {
   // The value of a tab group is its selected child. In the case
   // of multiple selections this will return the first one.
-  return [[self selectedChildren] firstObject];
+  return [[self moxSelectedChildren] firstObject];
 }
 
 @end
 
 @implementation mozTabAccessible
 
-- (NSString*)roleDescription {
+- (NSString*)moxRoleDescription {
   return utils::LocalizedString(NS_LITERAL_STRING("tab"));
 }
 
-- (NSString*)accessibilityActionDescription:(NSString*)action {
-  if ([action isEqualToString:NSAccessibilityPressAction]) {
-    return utils::LocalizedString(NS_LITERAL_STRING("switch"));
-  }
-
-  return [super accessibilityActionDescription:action];
-}
-
-- (id)value {
+- (id)moxValue {
   // Retuens 1 if item is selected, 0 if not.
-  return [NSNumber numberWithBool:[self isSelected]];
+  return [self moxSelected];
 }
 
 @end
@@ -220,49 +115,37 @@
   return ![child isKindOfClass:[mozSelectableChildAccessible class]];
 }
 
-- (NSArray*)accessibilityAttributeNames {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
-  static NSMutableArray* attributes = nil;
-
-  if (!attributes) {
-    attributes = [[super accessibilityAttributeNames] mutableCopy];
-    // VoiceOver uses the availability of AXOrientation to make
-    // an object an interaction group. The actual return value does
-    // not matter.
-    [attributes addObject:NSAccessibilityOrientationAttribute];
-  }
-
-  return attributes;
-  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
+- (NSString*)moxOrientation {
+  return NSAccessibilityUnknownOrientationValue;
 }
 
 @end
 
 @implementation mozOptionAccessible
 
-- (NSString*)title {
+- (NSString*)moxTitle {
   return @"";
 }
 
-- (id)value {
+- (id)moxValue {
   // Swap title and value of option so it behaves more like a AXStaticText.
-  return [super title];
+  return [super moxTitle];
 }
 
 @end
 
 @implementation mozMenuAccessible
 
-- (NSString*)title {
+- (NSString*)moxTitle {
   return @"";
 }
 
-- (NSString*)accessibilityLabel {
+- (NSString*)moxLabel {
   return @"";
 }
 
-- (void)postNotification:(NSString*)notification {
-  [super postNotification:notification];
+- (void)moxPostNotification:(NSString*)notification {
+  [super moxPostNotification:notification];
 
   if ([notification isEqualToString:@"AXMenuOpened"]) {
     mIsOpened = YES;
@@ -275,7 +158,7 @@
   if (mIsOpened) {
     // VO needs to receive a menu closed event when the menu goes away.
     // If the menu is being destroyed, send a menu closed event first.
-    [self postNotification:@"AXMenuClosed"];
+    [self moxPostNotification:@"AXMenuClosed"];
   }
 
   [super expire];
@@ -285,62 +168,41 @@
 
 @implementation mozMenuItemAccessible
 
-- (NSString*)accessibilityLabel {
+- (NSString*)moxLabel {
   return @"";
 }
 
-- (NSArray*)accessibilityAttributeNames {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
-  static NSMutableArray* attributes = nil;
-
-  if (!attributes) {
-    attributes = [[super accessibilityAttributeNames] mutableCopy];
-    [attributes addObject:@"AXMenuItemMarkChar"];
-  }
-
-  return attributes;
-  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
-}
-
-- (id)accessibilityAttributeValue:(NSString*)attribute {
-  NS_OBJC_BEGIN_TRY_ABORT_BLOCK_NIL;
-
-  if ([attribute isEqualToString:@"AXMenuItemMarkChar"]) {
-    AccessibleWrap* accWrap = [self getGeckoAccessible];
-    if (accWrap && accWrap->IsContent() &&
-        accWrap->GetContent()->IsXULElement(nsGkAtoms::menuitem)) {
-      // We need to provide a marker character. This is the visible "√" you see
-      // on dropdown menus. In our a11y tree this is a single child text node
-      // of the menu item.
-      // We do this only with XUL menuitems that conform to the native theme, and not
-      // with aria menu items that might have a pseudo element or something.
-      if (accWrap->ChildCount() == 1 && accWrap->FirstChild()->Role() == roles::STATICTEXT) {
-        nsAutoString marker;
-        accWrap->FirstChild()->Name(marker);
-        if (marker.Length() == 1) {
-          return nsCocoaUtils::ToNSString(marker);
-        }
+- (NSString*)moxMenuItemMarkChar {
+  Accessible* acc = mGeckoAccessible.AsAccessible();
+  if (acc && acc->IsContent() && acc->GetContent()->IsXULElement(nsGkAtoms::menuitem)) {
+    // We need to provide a marker character. This is the visible "√" you see
+    // on dropdown menus. In our a11y tree this is a single child text node
+    // of the menu item.
+    // We do this only with XUL menuitems that conform to the native theme, and not
+    // with aria menu items that might have a pseudo element or something.
+    if (acc->ChildCount() == 1 && acc->FirstChild()->Role() == roles::STATICTEXT) {
+      nsAutoString marker;
+      acc->FirstChild()->Name(marker);
+      if (marker.Length() == 1) {
+        return nsCocoaUtils::ToNSString(marker);
       }
     }
-
-    return nil;
   }
 
-  return [super accessibilityAttributeValue:attribute];
-  NS_OBJC_END_TRY_ABORT_BLOCK_NIL;
+  return nil;
 }
 
-- (BOOL)isSelected {
+- (NSNumber*)moxSelected {
   // Our focused state is equivelent to native selected states for menus.
-  return [self stateWithMask:states::FOCUSED] != 0;
+  return @([self stateWithMask:states::FOCUSED] != 0);
 }
 
 - (void)handleAccessibleEvent:(uint32_t)eventType {
   switch (eventType) {
     case nsIAccessibleEvent::EVENT_FOCUS:
       // Our focused state is equivelent to native selected states for menus.
-      mozAccessible* parent = (mozAccessible*)[self parent];
-      [parent postNotification:NSAccessibilitySelectedChildrenChangedNotification];
+      mozAccessible* parent = (mozAccessible*)[self moxParent];
+      [parent moxPostNotification:NSAccessibilitySelectedChildrenChangedNotification];
       break;
   }
 

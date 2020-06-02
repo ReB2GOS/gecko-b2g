@@ -5,10 +5,10 @@
 import React, { useState, useCallback, useEffect } from "react";
 import { Localized } from "./MSLocalized";
 import { AboutWelcomeUtils } from "../../lib/aboutwelcome-utils";
+import { addUtmParams } from "../../asrouter/templates/FirstRun/addUtmParams";
 
 export const MultiStageAboutWelcome = props => {
   const [index, setScreenIndex] = useState(0);
-
   useEffect(() => {
     // Send impression ping when respective screen first renders
     props.screens.forEach(screen => {
@@ -19,6 +19,17 @@ export const MultiStageAboutWelcome = props => {
       }
     });
   }, [index]);
+
+  const [flowParams, setFlowParams] = useState(null);
+  const { metricsFlowUri } = props;
+  useEffect(() => {
+    (async () => {
+      if (metricsFlowUri) {
+        setFlowParams(await AboutWelcomeUtils.fetchFlowParams(metricsFlowUri));
+      }
+    })();
+  }, [metricsFlowUri]);
+
   // Transition to next screen, opening about:home on last screen button CTA
   const handleTransition =
     index < props.screens.length
@@ -49,6 +60,9 @@ export const MultiStageAboutWelcome = props => {
               content={screen.content}
               navigate={handleTransition}
               topSites={topSites}
+              messageId={`${props.message_id}_${screen.id}`}
+              UTMTerm={props.utm_term}
+              flowParams={flowParams}
             />
           ) : null;
         })}
@@ -63,16 +77,45 @@ export class WelcomeScreen extends React.PureComponent {
     this.handleAction = this.handleAction.bind(this);
   }
 
-  handleAction(event) {
-    let targetContent = this.props.content[event.target.value];
+  handleOpenURL(action, flowParams, UTMTerm) {
+    let { type, data } = action;
+    let url = new URL(data.args);
+    addUtmParams(url, `aboutwelcome-${UTMTerm}-screen`);
+
+    if (action.addFlowParams && flowParams) {
+      url.searchParams.append("device_id", flowParams.deviceId);
+      url.searchParams.append("flow_id", flowParams.flowId);
+      url.searchParams.append("flow_begin_time", flowParams.flowBeginTime);
+    }
+
+    data = { ...data, args: url.toString() };
+    AboutWelcomeUtils.handleUserAction({ type, data });
+  }
+
+  async handleAction(event) {
+    let { props } = this;
+    let targetContent = props.content[event.target.value];
     if (!(targetContent && targetContent.action)) {
       return;
     }
-    if (targetContent.action.type) {
-      AboutWelcomeUtils.handleUserAction(targetContent.action);
+
+    // Send telemetry before waiting on actions
+    AboutWelcomeUtils.sendActionTelemetry(props.messageId, event.target.value);
+
+    let { action } = targetContent;
+    if (action.type === "OPEN_URL") {
+      this.handleOpenURL(action, props.flowParams, props.UTMTerm);
+    } else if (action.type) {
+      AboutWelcomeUtils.handleUserAction(action);
+      // Wait until migration closes to complete the action
+      if (action.type === "SHOW_MIGRATION_WIZARD") {
+        await window.AWWaitForMigrationClose();
+        AboutWelcomeUtils.sendActionTelemetry(props.messageId, "migrate_close");
+      }
     }
-    if (targetContent.action.navigate) {
-      this.props.navigate();
+
+    if (action.navigate) {
+      props.navigate();
     }
   }
 
@@ -118,12 +161,12 @@ export class WelcomeScreen extends React.PureComponent {
 
   render() {
     const { content } = this.props;
+    const hasSecondaryTopCTA =
+      content.secondary_button && content.secondary_button.position === "top";
     return (
       <main className={`screen ${this.props.id}`}>
-        {content.secondary_button && content.secondary_button.position === "top"
-          ? this.renderSecondaryCTA("top")
-          : null}
-        <div className="brand-logo" />
+        {hasSecondaryTopCTA ? this.renderSecondaryCTA("top") : null}
+        <div className={`brand-logo ${hasSecondaryTopCTA ? "cta-top" : ""}`} />
         <div className="welcome-text">
           <Localized text={content.title}>
             <h1 />

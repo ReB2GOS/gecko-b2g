@@ -3943,17 +3943,18 @@
     "n_buckets": 50,
     "description": "Time for a successful DNS resolution (msec)"
   },
-  "DNS_TRR_LOOKUP_TIME": {
+  "DNS_TRR_LOOKUP_TIME2": {
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec", "geckoview"],
     "expires_in_version": "never",
     "kind": "exponential",
     "high": 60000,
+    "keyed": true,
     "releaseChannelCollection": "opt-out",
     "alert_emails": ["necko@mozilla.com"],
-    "bug_numbers": [1434852],
+    "bug_numbers": [1434852, 1640867],
     "n_buckets": 50,
-    "description": "Time for a completed TRR resolution (msec)"
+    "description": "Time for a completed TRR resolution (msec); Keyed by TRR auto-detected"
   },
   "DNS_TRR_PROCESSING_TIME": {
     "record_in_processes": ["main"],
@@ -4037,43 +4038,47 @@
     "releaseChannelCollection": "opt-out",
     "description": "DNS: success distribution when both native and TRR were used"
   },
-  "DNS_TRR_FIRST2": {
+  "DNS_TRR_FIRST3": {
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec", "geckoview"],
     "alert_emails": ["necko@mozilla.com"],
     "expires_in_version": "never",
     "kind": "categorical",
+    "keyed": true,
     "labels": ["TRR", "NativeAfterTRR", "Native", "BothFailed"],
-    "bug_numbers": [1497252],
+    "bug_numbers": [1497252, 1640867],
     "releaseChannelCollection": "opt-out",
-    "description": "TRR-first mode distribution. 0=Worked, 1=fell back fine after TRR fail, 2=native worked, 3=both failed"
+    "description": "TRR-first mode distribution. 0=Worked, 1=fell back fine after TRR fail, 2=native worked, 3=both failed; Keyed by TRR auto-detected"
   },
-  "DNS_TRR_DISABLED": {
+  "DNS_TRR_DISABLED2": {
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec", "geckoview"],
     "expires_in_version": "never",
     "kind": "boolean",
-    "description": "Resolve success rate when in TRR-first and called TRR-disabled (fall-back mode)",
-    "bug_numbers": [1472659],
+    "keyed": true,
+    "description": "Resolve success rate when in TRR-first and called TRR-disabled (fall-back mode); Keyed by TRR auto-detected",
+    "bug_numbers": [1472659, 1640867],
     "releaseChannelCollection": "opt-out",
     "alert_emails": ["necko@mozilla.com"]
   },
-  "DNS_TRR_BLACKLISTED": {
+  "DNS_TRR_BLACKLISTED2": {
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec", "geckoview"],
     "expires_in_version": "never",
     "kind": "boolean",
-    "description": "DNS check for TRR was blocked by blacklist",
-    "bug_numbers": [1434852],
+    "keyed": true,
+    "description": "DNS check for TRR was blocked by blacklist; Keyed by TRR auto-detected",
+    "bug_numbers": [1434852, 1640867],
     "alert_emails": ["necko@mozilla.com"]
   },
-  "DNS_TRR_NS_VERFIFIED": {
+  "DNS_TRR_NS_VERFIFIED2": {
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec", "geckoview"],
     "expires_in_version": "never",
     "kind": "boolean",
-    "description": "TRR managed to verify NS entry",
-    "bug_numbers": [1453825],
+    "keyed": true,
+    "description": "TRR managed to verify NS entry; Keyed by TRR auto-detected",
+    "bug_numbers": [1453825, 1640867],
     "alert_emails": ["necko@mozilla.com"]
   },
   "DNS_TRR_REQUEST_PER_CONN": {
@@ -4087,14 +4092,15 @@
     "bug_numbers": [1470853],
     "description": "Number of DOH requests per connection"
   },
-  "DNS_TRR_SUCCESS": {
+  "DNS_TRR_SUCCESS2": {
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec", "geckoview"],
     "expires_in_version": "never",
     "kind": "categorical",
+    "keyed": true,
     "labels": ["Fine", "Timeout", "Bad"],
-    "description": "How often TRR (Trusted Recursive Resolver) requests are fine, time-out or error.",
-    "bug_numbers": [1497438],
+    "description": "How often TRR (Trusted Recursive Resolver) requests are fine, time-out or error. Keyed by TRR auto-detected",
+    "bug_numbers": [1497438, 1640867],
     "releaseChannelCollection": "opt-out",
     "alert_emails": ["necko@mozilla.com"]
   },
@@ -4118,17 +4124,18 @@
     "bug_numbers": [1434852],
     "description": "DNS: lookup algorithm"
   },
-  "DNS_LOOKUP_DISPOSITION": {
+  "DNS_LOOKUP_DISPOSITION2": {
     "record_in_processes": ["main"],
     "products": ["firefox", "fennec", "geckoview"],
     "alert_emails": ["necko@mozilla.com"],
     "expires_in_version": "never",
     "kind": "categorical",
+    "keyed": true,
     "labels": ["trrOK", "trrFail", "trrAOK", "trrAFail",
 	       "trrAAAAOK", "trrAAAAFail", "osOK", "osFail"],
-    "bug_numbers": [1434852],
+    "bug_numbers": [1434852, 1640867],
     "releaseChannelCollection": "opt-out",
-    "description": "DNS: lookup algorithm"
+    "description": "DNS: lookup algorithm; Keyed by TRR auto-detected"
   },
   "DNS_RENEWAL_TIME": {
     "record_in_processes": ["main"],
@@ -11363,7 +11370,7 @@
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 36,
-    "description": "ECDHE KEA (TLS_ECDHE_*) curve (23=P-256, 24=P-384, 25=P-521) in full handshake"
+    "description": "ECDHE KEA (TLS_ECDHE_*) curve (23=P-256, 24=P-384, 25=P-521, 29=Curve25519) in full handshake"
   },
   "SSL_AUTH_ALGORITHM_FULL": {
     "record_in_processes": ["main", "content"],
@@ -11372,7 +11379,7 @@
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 16,
-    "description": "SSL Authentication Algorithm (null=0, rsa=1, dsa=2, ecdsa=4) in full handshake"
+    "description": "SSL Authentication Algorithm (null=0, rsa(KEA)=1, ecdsa=4, rsa(sign)=7) in full handshake"
   },
   "SSL_AUTH_RSA_KEY_SIZE_FULL": {
     "record_in_processes": ["main", "content"],
@@ -11877,6 +11884,69 @@
     "description": "Whether or not a user has the zoomed view (a.k.a. \"Magnify small areas\") enabled.",
     "alert_emails": ["mobile-frontend@mozilla.com"],
     "bug_numbers": [1235061]
+  },
+  "PAGE_LOAD_ERROR" : {
+    "record_in_processes": ["main", "content"],
+    "products": ["firefox", "fennec", "geckoview"],
+    "expires_in_version": "never",
+    "releaseChannelCollection": "opt-out",
+    "kind": "categorical",
+    "keyed": true,
+    "keys": [
+      "top",
+      "frame"
+    ],
+    "n_values": 45,
+    "labels": [
+      "UNKNOWN_PROTOCOL",
+      "FILE_NOT_FOUND",
+      "FILE_ACCESS_DENIED",
+      "UNKNOWN_HOST",
+      "CONNECTION_REFUSED",
+      "PROXY_BAD_GATEWAY",
+      "NET_INTERRUPT",
+      "NET_TIMEOUT",
+      "P_GATEWAY_TIMEOUT",
+      "CSP_FRAME_ANCEST",
+      "CSP_FORM_ACTION",
+      "CSP_NAVIGATE_TO",
+      "XFO_VIOLATION",
+      "PHISHING_URI",
+      "MALWARE_URI",
+      "UNWANTED_URI",
+      "HARMFUL_URI",
+      "CONTENT_CRASHED",
+      "FRAME_CRASHED",
+      "BUILDID_MISMATCH",
+      "NET_RESET",
+      "MALFORMED_URI",
+      "REDIRECT_LOOP",
+      "UNKNOWN_SOCKET",
+      "DOCUMENT_N_CACHED",
+      "OFFLINE",
+      "DOC_PRINTMODE",
+      "PORT_ACCESS",
+      "UNKNOWN_PROXY_HOST",
+      "PROXY_CONNECTION",
+      "PROXY_FORBIDDEN",
+      "P_NOT_IMPLEMENTED",
+      "PROXY_AUTH",
+      "PROXY_TOO_MANY",
+      "CONTENT_ENCODING",
+      "REMOTE_XUL",
+      "UNSAFE_CONTENT",
+      "CORRUPTED_CONTENT",
+      "INTERCEPTION_FAIL",
+      "INADEQUATE_SEC",
+      "BLOCKED_BY_POLICY",
+      "HTTP2_SENT_GOAWAY",
+      "HTTP3_PROTOCOL",
+      "BINDING_FAILED",
+      "otherError"
+    ],
+    "description": "Page load errors. Match values with type of error in nsDocShellTelemetryUtils.cpp",
+    "alert_emails": ["seceng-telemetry@mozilla.com"],
+    "bug_numbers": [1636962]
   },
   "COOKIE_BEHAVIOR": {
     "record_in_processes": ["main"],
@@ -14343,7 +14413,7 @@
     "record_in_processes": ["main", "content"],
     "products": ["firefox", "fennec", "geckoview"],
     "alert_emails": ["seceng-telemetry@mozilla.com", "dlee@mozilla.com"],
-    "bug_numbers": [1375277, 1531034],
+    "bug_numbers": [1375277, 1531034, 1636962],
     "expires_in_version": "never",
     "kind": "enumerated",
     "n_values": 64,
@@ -15245,6 +15315,61 @@
     "releaseChannelCollection": "opt-out",
     "bug_numbers": [1619349],
     "description": "Encountered a missing character that would have been supported by a user-installed font"
+  },
+  "COOKIE_PURGING_ORIGINS_PURGED": {
+    "expires_in_version": "82",
+    "record_in_processes": ["main"],
+    "products": ["firefox", "geckoview"],
+    "kind": "exponential",
+    "high": 500,
+    "n_buckets": 30,
+    "bug_numbers": [1630053],
+    "alert_emails": ["jhofmann@mozilla.com", "senglehardt@mozilla.com", "aedelstein@mozilla.com", "seceng-telemetry@mozilla.com"],
+    "description": "The number of origins that were purged during one run of cookie purging."
+  },
+  "COOKIE_PURGING_TRACKERS_WITH_USER_INTERACTION": {
+    "expires_in_version": "82",
+    "record_in_processes": ["main"],
+    "products": ["firefox", "geckoview"],
+    "kind": "exponential",
+    "high": 500,
+    "n_buckets": 30,
+    "bug_numbers": [1630053],
+    "alert_emails": ["jhofmann@mozilla.com", "senglehardt@mozilla.com", "aedelstein@mozilla.com", "seceng-telemetry@mozilla.com"],
+    "description": "The number of trackers that had user interaction at the time of purging."
+  },
+  "COOKIE_PURGING_TRACKERS_USER_INTERACTION_REMAINING_DAYS": {
+    "expires_in_version": "82",
+    "record_in_processes": ["main"],
+    "products": ["firefox", "geckoview"],
+    "kind": "linear",
+    "high": 100,
+    "n_buckets": 60,
+    "bug_numbers": [1630053],
+    "alert_emails": ["jhofmann@mozilla.com", "senglehardt@mozilla.com", "aedelstein@mozilla.com", "seceng-telemetry@mozilla.com"],
+    "description": "The time remaining until expiration per user interaction permissions of trackers at the time of purging, in days (one record per tracker, not averaged)."
+  },
+  "COOKIE_PURGING_DURATION_MS" : {
+    "record_in_processes": ["main"],
+    "products": ["firefox", "geckoview"],
+    "alert_emails": ["jhofmann@mozilla.com", "senglehardt@mozilla.com", "aedelstein@mozilla.com", "seceng-telemetry@mozilla.com"],
+    "expires_in_version": "82",
+    "bug_numbers": [1630053],
+    "kind": "exponential",
+    "high": 600000,
+    "n_buckets": 30,
+    "description": "Time spent per daily cookie purging activity, in milliseconds. This measures the time for all batch iterations of that day."
+  },
+  "COOKIE_PURGING_INTERVAL_HOURS" : {
+    "record_in_processes": ["main"],
+    "products": ["firefox", "geckoview"],
+    "alert_emails": ["jhofmann@mozilla.com", "senglehardt@mozilla.com", "aedelstein@mozilla.com", "seceng-telemetry@mozilla.com"],
+    "expires_in_version": "82",
+    "bug_numbers": [1630053],
+    "kind": "linear",
+    "high": 168,
+    "n_buckets": 56,
+    "description": "How much time (in hours) passed between the current cookie purging activity and the one before that (cookie purging is run on 'daily idle')"
   },
   "WHEEL_INDEX" : {
     "products": ["firefox"],

@@ -400,7 +400,6 @@ class UrlbarView {
       if (
         // Do not show Top Sites in private windows.
         !this.input.isPrivate &&
-        this.input.openViewOnFocus &&
         !this.isOpen &&
         ["mousedown", "command"].includes(queryOptions.event.type)
       ) {
@@ -1170,7 +1169,7 @@ class UrlbarView {
     this._selectedElement = item;
 
     if (updateInput) {
-      this.input.setValueFromResult(item && item.result);
+      this.input.setValueFromResult(item?.result);
     }
   }
 

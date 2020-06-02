@@ -46,9 +46,9 @@ from taskgraph.util.schema import (
 )
 from taskgraph.util.chunking import (
     chunk_manifests,
-    get_manifests,
     get_runtimes,
     guess_mozinfo_from_task,
+    manifest_loaders,
 )
 from taskgraph.util.taskcluster import (
     get_artifact_path,
@@ -1404,11 +1404,18 @@ def set_test_manifests(config, tasks):
 
         suite_definition = TEST_SUITES[task['suite']]
         mozinfo = guess_mozinfo_from_task(task)
-        task['test-manifests'] = get_manifests(
+
+        loader = manifest_loaders[config.params['test_manifest_loader']]
+        task['test-manifests'] = loader.get_manifests(
             suite_definition['build_flavor'],
             suite_definition.get('kwargs', {}).get('subsuite', 'undefined'),
             frozenset(mozinfo.items()),
         )
+
+        # Skip the task if the loader doesn't return any manifests for the
+        # associated suite.
+        if not task['test-manifests']['active'] and not task['test-manifests']['skipped']:
+            continue
 
         yield task
 
@@ -1635,7 +1642,7 @@ def set_worker_type(config, tasks):
 @transforms.add
 def set_schedules_components(config, tasks):
     for task in tasks:
-        if 'optimization' in task:
+        if 'optimization' in task or 'when' in task:
             yield task
             continue
 

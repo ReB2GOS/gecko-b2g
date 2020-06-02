@@ -493,11 +493,6 @@ button > hbox > label {
   justify-content: space-between;
 }
 
-#sanitizeEverythingWarningBox {
-  background-color: var(--in-content-box-background);
-  border: 1px solid var(--in-content-box-border-color);
-}
-
 #blockCookies,
 #keepRow {
   margin-top: 1.5em;
@@ -797,6 +792,11 @@ dialog > .sync-engines-list + hbox {
 .sync-engine-addresses .checkbox-icon,
 .sync-engine-addresses.sync-engine-image {
   list-style-image: url("chrome://browser/skin/preferences/formfill.svg");
+}
+
+.sync-engine-creditcards .checkbox-icon,
+.sync-engine-creditcards.sync-engine-image {
+  list-style-image: url("chrome://formautofill/content/icon-credit-card-generic.svg");
 }
 
 .fxaMobilePromo {

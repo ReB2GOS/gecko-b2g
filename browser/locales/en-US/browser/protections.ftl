@@ -138,12 +138,30 @@ info-known-breaches-found =
   }
 
 # This string is displayed after a large numeral that indicates the total number
+# of known data breaches that are marked as resolved by the user. Don’t add $count
+# to your localization, because it would result in the number showing twice.
+info-known-breaches-resolved =
+  { $count ->
+     [one] Known data breach marked as resolved
+    *[other] Known data breaches marked as resolved
+  }
+
+# This string is displayed after a large numeral that indicates the total number
 # of exposed passwords. Don’t add $count to
 # your localization, because it would result in the number showing twice.
 info-exposed-passwords-found =
   { $count ->
      [one] Password exposed across all breaches
     *[other] Passwords exposed across all breaches
+  }
+
+# This string is displayed after a large numeral that indicates the total number
+# of exposed passwords that are marked as resolved by the user. Don’t add $count
+# to your localization, because it would result in the number showing twice.
+info-exposed-passwords-resolved =
+  { $count ->
+     [one] Password exposed in unresolved breaches
+    *[other] Passwords exposed in unresolved breaches
   }
 
 monitor-no-breaches-title = Good news!
@@ -172,7 +190,7 @@ monitor-partial-breaches-percentage = { $percentageResolved }% complete
 monitor-partial-breaches-motivation-title-start = Great start!
 monitor-partial-breaches-motivation-title-middle = Keep it up!
 monitor-partial-breaches-motivation-title-end = Almost done! Keep it up.
-monitor-partial-breaches-motivation-desc = Resolve the rest of your breaches on { -monitor-brand-short-name }
+monitor-partial-breaches-motivation-description = Resolve the rest of your breaches on { -monitor-brand-short-name }.
 monitor-resolve-breaches-link = Resolve Breaches
   .title = Resolve breaches on { -monitor-brand-short-name }
 

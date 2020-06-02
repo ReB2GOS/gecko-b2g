@@ -1137,7 +1137,6 @@ void RegExpShared::useRegExpMatch(size_t pairCount) {
 /* static */
 bool RegExpShared::initializeNamedCaptures(JSContext* cx, HandleRegExpShared re,
                                            HandleNativeObject namedCaptures) {
-  MOZ_ASSERT(re->kind() == RegExpShared::Kind::RegExp);
   MOZ_ASSERT(!re->groupsTemplate_);
   MOZ_ASSERT(!re->namedCaptureIndices_);
 
@@ -1180,6 +1179,7 @@ bool RegExpShared::initializeNamedCaptures(JSContext* cx, HandleRegExpShared re,
   uint32_t arraySize = numNamedCaptures * sizeof(uint32_t);
   uint32_t* captureIndices = static_cast<uint32_t*>(js_malloc(arraySize));
   if (!captureIndices) {
+    js::ReportOutOfMemory(cx);
     return false;
   }
 

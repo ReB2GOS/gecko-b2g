@@ -414,51 +414,66 @@ void AddrHostRecord::ResolveComplete() {
       uint32_t millis = static_cast<uint32_t>(mNativeDuration.ToMilliseconds());
       Telemetry::Accumulate(Telemetry::DNS_NATIVE_LOOKUP_TIME, millis);
     }
-    AccumulateCategorical(
-        mNativeSuccess ? Telemetry::LABELS_DNS_LOOKUP_DISPOSITION::osOK
-                       : Telemetry::LABELS_DNS_LOOKUP_DISPOSITION::osFail);
+    AccumulateCategoricalKeyed(
+        TRRService::AutoDetectedKey(),
+        mNativeSuccess ? Telemetry::LABELS_DNS_LOOKUP_DISPOSITION2::osOK
+                       : Telemetry::LABELS_DNS_LOOKUP_DISPOSITION2::osFail);
   }
 
   if (mTRRUsed) {
     if (mTRRSuccess) {
       uint32_t millis = static_cast<uint32_t>(mTrrDuration.ToMilliseconds());
-      Telemetry::Accumulate(Telemetry::DNS_TRR_LOOKUP_TIME, millis);
+      Telemetry::Accumulate(Telemetry::DNS_TRR_LOOKUP_TIME2,
+                            TRRService::AutoDetectedKey(), millis);
     }
-    AccumulateCategorical(
-        mTRRSuccess ? Telemetry::LABELS_DNS_LOOKUP_DISPOSITION::trrOK
-                    : Telemetry::LABELS_DNS_LOOKUP_DISPOSITION::trrFail);
+    AccumulateCategoricalKeyed(
+        TRRService::AutoDetectedKey(),
+        mTRRSuccess ? Telemetry::LABELS_DNS_LOOKUP_DISPOSITION2::trrOK
+                    : Telemetry::LABELS_DNS_LOOKUP_DISPOSITION2::trrFail);
 
     if (mTrrAUsed == OK) {
-      AccumulateCategorical(Telemetry::LABELS_DNS_LOOKUP_DISPOSITION::trrAOK);
+      AccumulateCategoricalKeyed(
+          TRRService::AutoDetectedKey(),
+          Telemetry::LABELS_DNS_LOOKUP_DISPOSITION2::trrAOK);
     } else if (mTrrAUsed == FAILED) {
-      AccumulateCategorical(Telemetry::LABELS_DNS_LOOKUP_DISPOSITION::trrAFail);
+      AccumulateCategoricalKeyed(
+          TRRService::AutoDetectedKey(),
+          Telemetry::LABELS_DNS_LOOKUP_DISPOSITION2::trrAFail);
     }
 
     if (mTrrAAAAUsed == OK) {
-      AccumulateCategorical(
-          Telemetry::LABELS_DNS_LOOKUP_DISPOSITION::trrAAAAOK);
+      AccumulateCategoricalKeyed(
+          TRRService::AutoDetectedKey(),
+          Telemetry::LABELS_DNS_LOOKUP_DISPOSITION2::trrAAAAOK);
     } else if (mTrrAAAAUsed == FAILED) {
-      AccumulateCategorical(
-          Telemetry::LABELS_DNS_LOOKUP_DISPOSITION::trrAAAAFail);
+      AccumulateCategoricalKeyed(
+          TRRService::AutoDetectedKey(),
+          Telemetry::LABELS_DNS_LOOKUP_DISPOSITION2::trrAAAAFail);
     }
   }
 
   if (mEffectiveTRRMode == nsIRequest::TRR_FIRST_MODE) {
     if (flags & nsIDNSService::RESOLVE_DISABLE_TRR) {
       // TRR is disabled on request, which is a next-level back-off method.
-      Telemetry::Accumulate(Telemetry::DNS_TRR_DISABLED, mNativeSuccess);
+      Telemetry::Accumulate(Telemetry::DNS_TRR_DISABLED2,
+                            TRRService::AutoDetectedKey(), mNativeSuccess);
     } else {
       if (mTRRSuccess) {
-        AccumulateCategorical(Telemetry::LABELS_DNS_TRR_FIRST2::TRR);
+        AccumulateCategoricalKeyed(TRRService::AutoDetectedKey(),
+                                   Telemetry::LABELS_DNS_TRR_FIRST3::TRR);
       } else if (mNativeSuccess) {
         if (mTRRUsed) {
-          AccumulateCategorical(
-              Telemetry::LABELS_DNS_TRR_FIRST2::NativeAfterTRR);
+          AccumulateCategoricalKeyed(
+              TRRService::AutoDetectedKey(),
+              Telemetry::LABELS_DNS_TRR_FIRST3::NativeAfterTRR);
         } else {
-          AccumulateCategorical(Telemetry::LABELS_DNS_TRR_FIRST2::Native);
+          AccumulateCategoricalKeyed(TRRService::AutoDetectedKey(),
+                                     Telemetry::LABELS_DNS_TRR_FIRST3::Native);
         }
       } else {
-        AccumulateCategorical(Telemetry::LABELS_DNS_TRR_FIRST2::BothFailed);
+        AccumulateCategoricalKeyed(
+            TRRService::AutoDetectedKey(),
+            Telemetry::LABELS_DNS_TRR_FIRST3::BothFailed);
       }
     }
   }
@@ -1249,6 +1264,7 @@ nsresult nsHostResolver::TrrLookup(nsHostRecord* aRec, TRR* pushedTRR) {
   if (Mode() == MODE_TRROFF || StaticPrefs::network_dns_disabled()) {
     return NS_ERROR_UNKNOWN_HOST;
   }
+  LOG(("TrrLookup host:%s af:%" PRId16, aRec->host.get(), aRec->af));
 
   RefPtr<nsHostRecord> rec(aRec);
   mLock.AssertCurrentThreadOwns();
@@ -1493,6 +1509,8 @@ static nsIRequest::TRRMode EffectiveTRRMode(const nsCString& aHost,
 
 // Kick-off a name resolve operation, using native resolver and/or TRR
 nsresult nsHostResolver::NameLookup(nsHostRecord* rec) {
+  LOG(("NameLookup host:%s af:%" PRId16, rec->host.get(), rec->af));
+
   nsresult rv = NS_ERROR_UNKNOWN_HOST;
   if (rec->mResolving) {
     LOG(("NameLookup %s while already resolving\n", rec->host.get()));
@@ -1529,8 +1547,8 @@ nsresult nsHostResolver::NameLookup(nsHostRecord* rec) {
     return TrrLookup(rec);
   }
 
-  LOG(("NameLookup: %s effectiveTRRmode: %d", rec->host.get(),
-       rec->mEffectiveTRRMode));
+  LOG(("NameLookup: %s effectiveTRRmode: %d flags: %X", rec->host.get(),
+       rec->mEffectiveTRRMode, rec->flags));
 
   if (rec->mEffectiveTRRMode != nsIRequest::TRR_DISABLED_MODE &&
       !((rec->flags & RES_DISABLE_TRR))) {

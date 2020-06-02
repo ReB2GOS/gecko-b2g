@@ -126,8 +126,6 @@
 #include "mozilla/net/NeckoChannelParams.h"
 #include "mozilla/net/UrlClassifierFeatureFactory.h"
 #include "HttpTrafficAnalyzer.h"
-#include "mozilla/dom/CanonicalBrowsingContext.h"
-#include "mozilla/dom/WindowGlobalParent.h"
 #include "mozilla/net/SocketProcessParent.h"
 #include "js/Conversions.h"
 #include "mozilla/dom/SecFetch.h"
@@ -147,13 +145,6 @@ using namespace dom;
 namespace net {
 
 namespace {
-
-static bool sRCWNEnabled = false;
-static uint32_t sRCWNQueueSizeNormal = 50;
-static uint32_t sRCWNQueueSizePriority = 10;
-static uint32_t sRCWNSmallResourceSizeKB = 256;
-static uint32_t sRCWNMinWaitMs = 0;
-static uint32_t sRCWNMaxWaitMs = 500;
 
 // True if the local cache should be bypassed when processing a request.
 #define BYPASS_LOCAL_CACHE(loadFlags, isPreferCacheLoadOverBypass) \
@@ -395,7 +386,6 @@ nsHttpChannel::nsHttpChannel()
       mHasBeenIsolatedChecked(0),
       mIsIsolated(0),
       mTopWindowOriginComputed(0),
-      mHasCrossOriginOpenerPolicyMismatch(0),
       mDataAlreadySent(0),
       mPushedStreamId(0),
       mLocalBlocklist(false),
@@ -2381,7 +2371,7 @@ void nsHttpChannel::ProcessSSLInformation() {
   if (NS_SUCCEEDED(rv) &&
       tlsVersion != nsITransportSecurityInfo::TLS_VERSION_1_2 &&
       tlsVersion != nsITransportSecurityInfo::TLS_VERSION_1_3) {
-    nsString consoleErrorTag = NS_LITERAL_STRING("DeprecatedTLSVersion");
+    nsString consoleErrorTag = NS_LITERAL_STRING("DeprecatedTLSVersion2");
     nsString consoleErrorCategory = NS_LITERAL_STRING("TLS");
     Unused << AddSecurityMessage(consoleErrorTag, consoleErrorCategory);
   }
@@ -4156,7 +4146,8 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(
   mCacheQueueSizeWhenOpen =
       CacheStorageService::CacheQueueSize(mCacheOpenWithPriority);
 
-  if (sRCWNEnabled && maybeRCWN && !mApplicationCacheForWrite) {
+  if (StaticPrefs::network_http_rcwn_enabled() && maybeRCWN &&
+      !mApplicationCacheForWrite) {
     bool hasAltData = false;
     uint32_t sizeInKb = 0;
     rv = cacheStorage->GetCacheIndexEntryAttrs(
@@ -4166,7 +4157,7 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(
     // this entry in the cache index, and it has appropriate attributes
     // (doesn't have alt-data, and has a small size)
     if (NS_SUCCEEDED(rv) && !hasAltData &&
-        sizeInKb < sRCWNSmallResourceSizeKB) {
+        sizeInKb < StaticPrefs::network_http_rcwn_small_resource_size_kb()) {
       MaybeRaceCacheWithNetwork();
     }
   }
@@ -4174,7 +4165,7 @@ nsresult nsHttpChannel::OpenCacheEntryInternal(
   if (!mCacheOpenDelay) {
     MOZ_ASSERT(NS_IsMainThread(), "Should be called on the main thread");
     if (mNetworkTriggered) {
-      mRaceCacheWithNetwork = sRCWNEnabled;
+      mRaceCacheWithNetwork = StaticPrefs::network_http_rcwn_enabled();
     }
     rv = cacheStorage->AsyncOpenURI(mCacheEntryURI, mCacheIdExtension,
                                     cacheEntryOpenFlags, this);
@@ -4777,9 +4768,12 @@ nsresult nsHttpChannel::OnNormalCacheEntryAvailable(nsICacheEntry* aEntry,
       uint32_t duration = (TimeStamp::Now() - mAsyncOpenTime).ToMicroseconds();
       bool isSlow = false;
       if ((mCacheOpenWithPriority &&
-           mCacheQueueSizeWhenOpen >= sRCWNQueueSizePriority) ||
+           mCacheQueueSizeWhenOpen >=
+               StaticPrefs::
+                   network_http_rcwn_cache_queue_priority_threshold()) ||
           (!mCacheOpenWithPriority &&
-           mCacheQueueSizeWhenOpen >= sRCWNQueueSizeNormal)) {
+           mCacheQueueSizeWhenOpen >=
+               StaticPrefs::network_http_rcwn_cache_queue_normal_threshold())) {
         isSlow = true;
       }
       CacheFileUtils::CachePerfStats::AddValue(
@@ -6531,24 +6525,6 @@ nsHttpChannel::AsyncOpen(nsIStreamListener* aListener) {
     return NS_ERROR_NOT_AVAILABLE;
   }
 
-  static bool sRCWNInited = false;
-  if (!sRCWNInited) {
-    sRCWNInited = true;
-    Preferences::AddBoolVarCache(&sRCWNEnabled, "network.http.rcwn.enabled");
-    Preferences::AddUintVarCache(
-        &sRCWNQueueSizeNormal,
-        "network.http.rcwn.cache_queue_normal_threshold");
-    Preferences::AddUintVarCache(
-        &sRCWNQueueSizePriority,
-        "network.http.rcwn.cache_queue_priority_threshold");
-    Preferences::AddUintVarCache(&sRCWNSmallResourceSizeKB,
-                                 "network.http.rcwn.small_resource_size_kb");
-    Preferences::AddUintVarCache(&sRCWNMinWaitMs,
-                                 "network.http.rcwn.min_wait_before_racing_ms");
-    Preferences::AddUintVarCache(&sRCWNMaxWaitMs,
-                                 "network.http.rcwn.max_wait_before_racing_ms");
-  }
-
   rv = NS_CheckPortSafety(mURI);
   if (NS_FAILED(rv)) {
     ReleaseListeners();
@@ -7436,7 +7412,7 @@ nsHttpChannel::SetWWWCredentials(const nsACString& value) {
 //-----------------------------------------------------------------------------
 // Methods that nsIHttpAuthenticableChannel dupes from other IDLs, which we
 // get from HttpBaseChannel, must be explicitly forwarded, because C++ sucks.
-//
+//-----------------------------------------------------------------------------
 
 NS_IMETHODIMP
 nsHttpChannel::GetLoadFlags(nsLoadFlags* aLoadFlags) {
@@ -7459,244 +7435,6 @@ nsHttpChannel::GetLoadGroup(nsILoadGroup** aLoadGroup) {
 NS_IMETHODIMP
 nsHttpChannel::GetRequestMethod(nsACString& aMethod) {
   return HttpBaseChannel::GetRequestMethod(aMethod);
-}
-
-// See https://gist.github.com/annevk/6f2dd8c79c77123f39797f6bdac43f3e
-// This method runs steps 1-4 of the algorithm to compare
-// cross-origin-opener policies
-static bool CompareCrossOriginOpenerPolicies(
-    nsILoadInfo::CrossOriginOpenerPolicy documentPolicy,
-    nsIPrincipal* documentOrigin,
-    nsILoadInfo::CrossOriginOpenerPolicy resultPolicy,
-    nsIPrincipal* resultOrigin) {
-  if (documentPolicy == nsILoadInfo::OPENER_POLICY_UNSAFE_NONE &&
-      resultPolicy == nsILoadInfo::OPENER_POLICY_UNSAFE_NONE) {
-    return true;
-  }
-
-  if (documentPolicy == nsILoadInfo::OPENER_POLICY_UNSAFE_NONE ||
-      resultPolicy == nsILoadInfo::OPENER_POLICY_UNSAFE_NONE) {
-    return false;
-  }
-
-  if (documentPolicy == resultPolicy && documentOrigin->Equals(resultOrigin)) {
-    return true;
-  }
-
-  return false;
-}
-
-// This runs steps 1-5 of the algorithm when navigating a top level document.
-// See https://gist.github.com/annevk/6f2dd8c79c77123f39797f6bdac43f3e
-nsresult nsHttpChannel::ComputeCrossOriginOpenerPolicyMismatch() {
-  mHasCrossOriginOpenerPolicyMismatch = false;
-  if (!StaticPrefs::browser_tabs_remote_useCrossOriginOpenerPolicy()) {
-    return NS_OK;
-  }
-
-  // Only consider Cross-Origin-Opener-Policy for toplevel document loads.
-  if (mLoadInfo->GetExternalContentPolicyType() !=
-      nsIContentPolicy::TYPE_DOCUMENT) {
-    return NS_OK;
-  }
-
-  // Maybe the channel failed and we have no response head?
-  if (!mResponseHead && !mCachedResponseHead) {
-    // Not having a response head is not a hard failure at the point where
-    // this method is called.
-    return NS_OK;
-  }
-
-  RefPtr<mozilla::dom::BrowsingContext> ctx;
-  mLoadInfo->GetBrowsingContext(getter_AddRefs(ctx));
-
-  // In xpcshell-tests we don't always have a browsingContext
-  if (!ctx) {
-    return NS_OK;
-  }
-
-  // Get the policy of the active document, and the policy for the result.
-  nsILoadInfo::CrossOriginOpenerPolicy documentPolicy = ctx->GetOpenerPolicy();
-  nsILoadInfo::CrossOriginOpenerPolicy resultPolicy =
-      nsILoadInfo::OPENER_POLICY_UNSAFE_NONE;
-  Unused << ComputeCrossOriginOpenerPolicy(documentPolicy, &resultPolicy);
-  mComputedCrossOriginOpenerPolicy = resultPolicy;
-
-  // If bc's popup sandboxing flag set is not empty and potentialCOOP is
-  // non-null, then navigate bc to a network error and abort these steps.
-  if (resultPolicy != nsILoadInfo::OPENER_POLICY_UNSAFE_NONE &&
-      GetHasNonEmptySandboxingFlag()) {
-    LOG(
-        ("nsHttpChannel::ComputeCrossOriginOpenerPolicyMismatch network error "
-         "for non empty sandboxing and non null COOP"));
-    return NS_ERROR_BLOCKED_BY_POLICY;
-  }
-
-  // In xpcshell-tests we don't always have a current window global
-  if (!ctx->Canonical()->GetCurrentWindowGlobal()) {
-    return NS_OK;
-  }
-
-  // We use the top window principal as the documentOrigin
-  nsCOMPtr<nsIPrincipal> documentOrigin =
-      ctx->Canonical()->GetCurrentWindowGlobal()->DocumentPrincipal();
-  nsCOMPtr<nsIPrincipal> resultOrigin;
-
-  nsContentUtils::GetSecurityManager()->GetChannelResultPrincipal(
-      this, getter_AddRefs(resultOrigin));
-
-  bool compareResult = CompareCrossOriginOpenerPolicies(
-      documentPolicy, documentOrigin, resultPolicy, resultOrigin);
-
-  if (LOG_ENABLED()) {
-    LOG(
-        ("nsHttpChannel::HasCrossOriginOpenerPolicyMismatch - "
-         "doc:%d result:%d - compare:%d\n",
-         documentPolicy, resultPolicy, compareResult));
-    nsAutoCString docOrigin;
-    nsCOMPtr<nsIURI> uri = documentOrigin->GetURI();
-    uri->GetSpec(docOrigin);
-    nsAutoCString resOrigin;
-    uri = resultOrigin->GetURI();
-    uri->GetSpec(resOrigin);
-    LOG(("doc origin:%s - res origin: %s\n", docOrigin.get(), resOrigin.get()));
-  }
-
-  if (compareResult) {
-    return NS_OK;
-  }
-
-  // If one of the following is false:
-  //   - document's policy is same-origin-allow-popups
-  //   - resultPolicy is null
-  //   - doc is the initial about:blank document
-  // then we have a mismatch.
-
-  if (documentPolicy != nsILoadInfo::OPENER_POLICY_SAME_ORIGIN_ALLOW_POPUPS) {
-    mHasCrossOriginOpenerPolicyMismatch = true;
-    return NS_OK;
-  }
-
-  if (resultPolicy != nsILoadInfo::OPENER_POLICY_UNSAFE_NONE) {
-    mHasCrossOriginOpenerPolicyMismatch = true;
-    return NS_OK;
-  }
-
-  if (!ctx->Canonical()->GetCurrentWindowGlobal()->IsInitialDocument()) {
-    mHasCrossOriginOpenerPolicyMismatch = true;
-    return NS_OK;
-  }
-
-  return NS_OK;
-}
-
-// https://mikewest.github.io/corpp/#process-navigation-response
-nsresult nsHttpChannel::ProcessCrossOriginEmbedderPolicyHeader() {
-  nsresult rv;
-  if (!StaticPrefs::browser_tabs_remote_useCrossOriginEmbedderPolicy()) {
-    return NS_OK;
-  }
-
-  // Only consider Cross-Origin-Embedder-Policy for document loads.
-  if (mLoadInfo->GetExternalContentPolicyType() !=
-          nsIContentPolicy::TYPE_DOCUMENT &&
-      mLoadInfo->GetExternalContentPolicyType() !=
-          nsIContentPolicy::TYPE_SUBDOCUMENT) {
-    return NS_OK;
-  }
-
-  nsILoadInfo::CrossOriginEmbedderPolicy resultPolicy =
-      nsILoadInfo::EMBEDDER_POLICY_NULL;
-  rv = GetResponseEmbedderPolicy(&resultPolicy);
-  if (NS_FAILED(rv)) {
-    return NS_OK;
-  }
-
-  // https://mikewest.github.io/corpp/#abstract-opdef-process-navigation-response
-  if (mLoadInfo->GetExternalContentPolicyType() ==
-          nsIContentPolicy::TYPE_SUBDOCUMENT &&
-      mLoadInfo->GetLoadingEmbedderPolicy() !=
-          nsILoadInfo::EMBEDDER_POLICY_NULL &&
-      resultPolicy != nsILoadInfo::EMBEDDER_POLICY_REQUIRE_CORP) {
-    return NS_ERROR_BLOCKED_BY_POLICY;
-  }
-
-  return NS_OK;
-}
-
-// https://mikewest.github.io/corpp/#corp-check
-nsresult nsHttpChannel::ProcessCrossOriginResourcePolicyHeader() {
-  // Fetch 4.5.9
-  uint32_t corsMode;
-  MOZ_ALWAYS_SUCCEEDS(GetCorsMode(&corsMode));
-  if (corsMode != nsIHttpChannelInternal::CORS_MODE_NO_CORS) {
-    return NS_OK;
-  }
-
-  // We only apply this for resources.
-  if (mLoadInfo->GetExternalContentPolicyType() ==
-          nsIContentPolicy::TYPE_DOCUMENT ||
-      mLoadInfo->GetExternalContentPolicyType() ==
-          nsIContentPolicy::TYPE_SUBDOCUMENT) {
-    return NS_OK;
-  }
-
-  MOZ_ASSERT(mLoadInfo->GetLoadingPrincipal(),
-             "Resources should always have a LoadingPrincipal");
-  if (!mResponseHead) {
-    return NS_OK;
-  }
-
-  nsAutoCString content;
-  Unused << mResponseHead->GetHeader(nsHttp::Cross_Origin_Resource_Policy,
-                                     content);
-
-  // 3.2.1.6 If policy is null, and embedder policy is "require-corp", set
-  // policy to "same-origin".
-  if (StaticPrefs::browser_tabs_remote_useCrossOriginEmbedderPolicy()) {
-    // Note that we treat invalid value as "cross-origin", which spec
-    // indicates. We might want to make that stricter.
-    if (content.IsEmpty() && mLoadInfo->GetLoadingEmbedderPolicy() ==
-                                 nsILoadInfo::EMBEDDER_POLICY_REQUIRE_CORP) {
-      content = NS_LITERAL_CSTRING("same-origin");
-    }
-  }
-
-  if (content.IsEmpty()) {
-    return NS_OK;
-  }
-
-  nsCOMPtr<nsIPrincipal> channelOrigin;
-  nsContentUtils::GetSecurityManager()->GetChannelResultPrincipal(
-      this, getter_AddRefs(channelOrigin));
-
-  // Cross-Origin-Resource-Policy = %s"same-origin" / %s"same-site" /
-  // %s"cross-origin"
-  if (content.EqualsLiteral("same-origin")) {
-    if (!channelOrigin->Equals(mLoadInfo->GetLoadingPrincipal())) {
-      return NS_ERROR_DOM_CORP_FAILED;
-    }
-    return NS_OK;
-  }
-  if (content.EqualsLiteral("same-site")) {
-    nsAutoCString documentBaseDomain;
-    nsAutoCString resourceBaseDomain;
-    mLoadInfo->GetLoadingPrincipal()->GetBaseDomain(documentBaseDomain);
-    channelOrigin->GetBaseDomain(resourceBaseDomain);
-    if (documentBaseDomain != resourceBaseDomain) {
-      return NS_ERROR_DOM_CORP_FAILED;
-    }
-
-    nsCOMPtr<nsIURI> resourceURI = channelOrigin->GetURI();
-    if (!mLoadInfo->GetLoadingPrincipal()->SchemeIs("https") &&
-        resourceURI->SchemeIs("https")) {
-      return NS_ERROR_DOM_CORP_FAILED;
-    }
-
-    return NS_OK;
-  }
-
-  return NS_OK;
 }
 
 //-----------------------------------------------------------------------------
@@ -9868,7 +9606,7 @@ void nsHttpChannel::SetDoNotTrack() {
 }
 
 void nsHttpChannel::ReportRcwnStats(bool isFromNet) {
-  if (!sRCWNEnabled) {
+  if (!StaticPrefs::network_http_rcwn_enabled()) {
     return;
   }
 
@@ -10168,7 +9906,7 @@ nsresult nsHttpChannel::TriggerNetwork() {
   if (mCacheOpenFunc) {
     mRaceCacheWithNetwork = true;
   } else if (AwaitingCacheCallbacks()) {
-    mRaceCacheWithNetwork = sRCWNEnabled;
+    mRaceCacheWithNetwork = StaticPrefs::network_http_rcwn_enabled();
   }
 
   LOG(("  triggering network\n"));
@@ -10221,9 +9959,12 @@ nsresult nsHttpChannel::MaybeRaceCacheWithNetwork() {
     mRaceDelay /= 1000;
   }
 
-  mRaceDelay = clamped<uint32_t>(mRaceDelay, sRCWNMinWaitMs, sRCWNMaxWaitMs);
+  mRaceDelay = clamped<uint32_t>(
+      mRaceDelay, StaticPrefs::network_http_rcwn_min_wait_before_racing_ms(),
+      StaticPrefs::network_http_rcwn_max_wait_before_racing_ms());
 
-  MOZ_ASSERT(sRCWNEnabled, "The pref must be turned on.");
+  MOZ_ASSERT(StaticPrefs::network_http_rcwn_enabled(),
+             "The pref must be turned on.");
   LOG(("nsHttpChannel::MaybeRaceCacheWithNetwork [this=%p, delay=%u]\n", this,
        mRaceDelay));
 

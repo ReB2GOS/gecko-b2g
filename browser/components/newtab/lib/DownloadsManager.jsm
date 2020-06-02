@@ -35,9 +35,7 @@ this.DownloadsManager = class DownloadsManager {
   }
 
   formatDownload(download) {
-    let { referrerInfo } = download.source;
-    let referrer = (referrerInfo && referrerInfo.originalReferrer) || null;
-    referrer = (referrer && referrer.spec) || null;
+    let referrer = download.source.referrerInfo?.originalReferrer?.spec || null;
     return {
       hostname: new URL(download.source.url).hostname,
       url: download.source.url,
@@ -174,8 +172,14 @@ this.DownloadsManager = class DownloadsManager {
         });
         break;
       case at.OPEN_DOWNLOAD_FILE:
+        const win = action._target.browser.ownerGlobal;
+        const openWhere = action.data.event
+          ? win.whereToOpenLink(action.data.event)
+          : "current";
         doDownloadAction(download => {
-          DownloadsCommon.openDownload(download);
+          DownloadsCommon.openDownload(download, {
+            openWhere,
+          });
         });
         break;
       case at.UNINIT:

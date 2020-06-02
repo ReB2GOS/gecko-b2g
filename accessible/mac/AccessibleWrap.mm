@@ -11,6 +11,7 @@
 #include "Role.h"
 #include "gfxPlatform.h"
 
+#import "MOXMathAccessibles.h"
 #import "mozAccessible.h"
 #import "mozActionElements.h"
 #import "mozHTMLAccessible.h"
@@ -43,8 +44,7 @@ mozAccessible* AccessibleWrap::GetNativeObject() {
     Accessible* parent = Parent();
     bool mustBePruned = parent && nsAccUtils::MustPrune(parent);
     if (!IsXULTooltip() && !IsDefunct() && !mustBePruned) {
-      uintptr_t accWrap = reinterpret_cast<uintptr_t>(this);
-      mNativeObject = [[GetNativeType() alloc] initWithAccessible:accWrap];
+      mNativeObject = [[GetNativeType() alloc] initWithAccessible:this];
     }
   }
 
@@ -182,8 +182,10 @@ Class a11y::GetTypeFromRole(roles::Role aRole) {
 
     case roles::CHECKBUTTON:
     case roles::TOGGLE_BUTTON:
-    case roles::RADIOBUTTON:
       return [mozCheckboxAccessible class];
+
+    case roles::RADIOBUTTON:
+      return [mozRadioButtonAccessible class];
 
     case roles::SPINBUTTON:
     case roles::SLIDER:
@@ -227,6 +229,28 @@ Class a11y::GetTypeFromRole(roles::Role aRole) {
     case roles::MENUITEM: {
       return [mozMenuItemAccessible class];
     }
+
+    case roles::MATHML_ROOT:
+      return [MOXMathRootAccessible class];
+
+    case roles::MATHML_SQUARE_ROOT:
+      return [MOXMathSquareRootAccessible class];
+
+    case roles::MATHML_FRACTION:
+      return [MOXMathFractionAccessible class];
+
+    case roles::MATHML_SUB:
+    case roles::MATHML_SUP:
+    case roles::MATHML_SUB_SUP:
+      return [MOXMathSubSupAccessible class];
+
+    case roles::MATHML_UNDER:
+    case roles::MATHML_OVER:
+    case roles::MATHML_UNDER_OVER:
+      return [MOXMathUnderOverAccessible class];
+
+    case roles::SUMMARY:
+      return [MOXSummaryAccessible class];
 
     default:
       return [mozAccessible class];

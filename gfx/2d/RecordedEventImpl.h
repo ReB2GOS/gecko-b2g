@@ -3068,6 +3068,7 @@ RecordedSourceSurfaceCreation::RecordedSourceSurfaceCreation(S& aStream)
     gfxCriticalNote
         << "RecordedSourceSurfaceCreation failed to allocate data of size "
         << size;
+    aStream.SetIsBad();
   } else {
     aStream.read((char*)mData, size);
   }
@@ -3425,8 +3426,12 @@ void RecordedFontData::Record(S& aStream) const {
 
   WriteElement(aStream, mType);
   WriteElement(aStream, mFontDetails.fontDataKey);
-  WriteElement(aStream, mFontDetails.size);
-  aStream.write((const char*)mData, mFontDetails.size);
+  if (!mData) {
+    WriteElement(aStream, 0);
+  } else {
+    WriteElement(aStream, mFontDetails.size);
+    aStream.write((const char*)mData, mFontDetails.size);
+  }
 }
 
 inline void RecordedFontData::OutputSimpleEventInfo(
@@ -3466,7 +3471,7 @@ RecordedFontData::RecordedFontData(S& aStream)
   ReadElementConstrained(aStream, mType, FontType::DWRITE, FontType::UNKNOWN);
   ReadElement(aStream, mFontDetails.fontDataKey);
   ReadElement(aStream, mFontDetails.size);
-  if (!aStream.good()) {
+  if (!mFontDetails.size || !aStream.good()) {
     return;
   }
 
@@ -3475,6 +3480,7 @@ RecordedFontData::RecordedFontData(S& aStream)
     gfxCriticalNote
         << "RecordedFontData failed to allocate data for playback of size "
         << mFontDetails.size;
+    aStream.SetIsBad();
   } else {
     aStream.read((char*)mData, mFontDetails.size);
   }
@@ -3503,7 +3509,9 @@ void RecordedFontDescriptor::Record(S& aStream) const {
   WriteElement(aStream, mRefPtr);
   WriteElement(aStream, mIndex);
   WriteElement(aStream, (size_t)mData.size());
-  aStream.write((char*)mData.data(), mData.size());
+  if (mData.size()) {
+    aStream.write((char*)mData.data(), mData.size());
+  }
 }
 
 inline void RecordedFontDescriptor::OutputSimpleEventInfo(
@@ -3530,9 +3538,10 @@ RecordedFontDescriptor::RecordedFontDescriptor(S& aStream)
   if (!aStream.good()) {
     return;
   }
-
-  mData.resize(size);
-  aStream.read((char*)mData.data(), size);
+  if (size) {
+    mData.resize(size);
+    aStream.read((char*)mData.data(), size);
+  }
 }
 
 inline bool RecordedUnscaledFontCreation::PlayEvent(
@@ -3558,7 +3567,9 @@ void RecordedUnscaledFontCreation::Record(S& aStream) const {
   WriteElement(aStream, mFontDataKey);
   WriteElement(aStream, mIndex);
   WriteElement(aStream, (size_t)mInstanceData.size());
-  aStream.write((char*)mInstanceData.data(), mInstanceData.size());
+  if (mInstanceData.size()) {
+    aStream.write((char*)mInstanceData.data(), mInstanceData.size());
+  }
 }
 
 inline void RecordedUnscaledFontCreation::OutputSimpleEventInfo(
@@ -3568,7 +3579,9 @@ inline void RecordedUnscaledFontCreation::OutputSimpleEventInfo(
 
 inline void RecordedUnscaledFontCreation::SetFontInstanceData(
     const uint8_t* aData, uint32_t aSize) {
-  mInstanceData.assign(aData, aData + aSize);
+  if (aSize) {
+    mInstanceData.assign(aData, aData + aSize);
+  }
 }
 
 template <class S>
@@ -3583,9 +3596,10 @@ RecordedUnscaledFontCreation::RecordedUnscaledFontCreation(S& aStream)
   if (!aStream.good()) {
     return;
   }
-
-  mInstanceData.resize(size);
-  aStream.read((char*)mInstanceData.data(), size);
+  if (size) {
+    mInstanceData.resize(size);
+    aStream.read((char*)mInstanceData.data(), size);
+  }
 }
 
 inline bool RecordedUnscaledFontDestruction::PlayEvent(
@@ -3634,10 +3648,14 @@ void RecordedScaledFontCreation::Record(S& aStream) const {
   WriteElement(aStream, mUnscaledFont);
   WriteElement(aStream, mGlyphSize);
   WriteElement(aStream, (size_t)mInstanceData.size());
-  aStream.write((char*)mInstanceData.data(), mInstanceData.size());
+  if (mInstanceData.size()) {
+    aStream.write((char*)mInstanceData.data(), mInstanceData.size());
+  }
   WriteElement(aStream, (size_t)mVariations.size());
-  aStream.write((char*)mVariations.data(),
-                sizeof(FontVariation) * mVariations.size());
+  if (mVariations.size()) {
+    aStream.write((char*)mVariations.data(),
+                  sizeof(FontVariation) * mVariations.size());
+  }
 }
 
 inline void RecordedScaledFontCreation::OutputSimpleEventInfo(
@@ -3648,8 +3666,12 @@ inline void RecordedScaledFontCreation::OutputSimpleEventInfo(
 inline void RecordedScaledFontCreation::SetFontInstanceData(
     const uint8_t* aData, uint32_t aSize, const FontVariation* aVariations,
     uint32_t aNumVariations) {
-  mInstanceData.assign(aData, aData + aSize);
-  mVariations.assign(aVariations, aVariations + aNumVariations);
+  if (aSize) {
+    mInstanceData.assign(aData, aData + aSize);
+  }
+  if (aNumVariations) {
+    mVariations.assign(aVariations, aVariations + aNumVariations);
+  }
 }
 
 template <class S>
@@ -3664,18 +3686,21 @@ RecordedScaledFontCreation::RecordedScaledFontCreation(S& aStream)
   if (!aStream.good()) {
     return;
   }
+  if (size) {
+    mInstanceData.resize(size);
+    aStream.read((char*)mInstanceData.data(), size);
+  }
 
-  mInstanceData.resize(size);
-  aStream.read((char*)mInstanceData.data(), size);
   size_t numVariations;
   ReadElement(aStream, numVariations);
   if (!aStream.good()) {
     return;
   }
-
-  mVariations.resize(numVariations);
-  aStream.read((char*)mVariations.data(),
-               sizeof(FontVariation) * numVariations);
+  if (numVariations) {
+    mVariations.resize(numVariations);
+    aStream.read((char*)mVariations.data(),
+                 sizeof(FontVariation) * numVariations);
+  }
 }
 
 inline bool RecordedScaledFontDestruction::PlayEvent(

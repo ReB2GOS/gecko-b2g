@@ -61,6 +61,14 @@ anywhere, unless its build platform is specified explicitly in try syntax.
     to define that a task will run on `try`.
 
 
+.. note::
+
+    A given task `[taskA]` may not respect `run-on-projects` if there another task
+    `[taskB]` which is scheduled to run (such as via run-on-projects) which depends it
+    `[taskA]`. Because by nature of `TaskB` running we must run `TaskA`.
+
+    See `bug 1640603 <https://bugzilla.mozilla.org/show_bug.cgi?id=1640603#c5>`_ as example.
+
 run_on_hg_branches
 ==================
 
@@ -381,3 +389,9 @@ geckodriver
 ===========
 If non-empty, declares that the (toolchain) task is a `geckodriver`
 task that produces a binary that should be signed.
+
+rebuild-on-release
+==================
+If true, the digest for this task will also depend on if the branch is a
+release branch.  This will cause tasks like toolchains to be rebuilt as they
+move from e.g. autoland to mozilla-central.

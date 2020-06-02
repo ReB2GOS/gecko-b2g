@@ -330,11 +330,6 @@ void IProtocol::ReplaceEventTargetForActor(IProtocol* aActor,
   mToplevel->ReplaceEventTargetForActor(aActor, aEventTarget);
 }
 
-void IProtocol::SetEventTargetForRoute(int32_t aRoute,
-                                       nsIEventTarget* aEventTarget) {
-  mToplevel->SetEventTargetForRoute(aRoute, aEventTarget);
-}
-
 nsIEventTarget* IProtocol::GetActorEventTarget() {
   // FIXME: It's a touch sketchy that we don't return a strong reference here.
   RefPtr<nsIEventTarget> target = GetActorEventTarget(this);
@@ -654,9 +649,10 @@ int32_t IToplevelProtocol::Register(IProtocol* aRouted) {
   // Inherit our event target from our manager.
   if (IProtocol* manager = aRouted->Manager()) {
     MutexAutoLock lock(mEventTargetMutex);
-    if (nsCOMPtr<nsIEventTarget> target =
-            mEventTargetMap.Lookup(manager->Id())) {
-      mEventTargetMap.AddWithID(target, id);
+    if (nsCOMPtr<nsIEventTarget> target = mEventTargetMap.Get(manager->Id())) {
+      MOZ_ASSERT(!mEventTargetMap.Contains(id),
+                 "Don't insert with an existing ID");
+      mEventTargetMap.Put(id, target);
     }
   }
 
@@ -666,19 +662,20 @@ int32_t IToplevelProtocol::Register(IProtocol* aRouted) {
 int32_t IToplevelProtocol::RegisterID(IProtocol* aRouted, int32_t aId) {
   aRouted->SetId(aId);
   aRouted->ActorConnected();
-  mActorMap.AddWithID(aRouted, aId);
+  MOZ_ASSERT(!mActorMap.Contains(aId), "Don't insert with an existing ID");
+  mActorMap.Put(aId, aRouted);
   return aId;
 }
 
-IProtocol* IToplevelProtocol::Lookup(int32_t aId) {
-  return mActorMap.Lookup(aId);
-}
+IProtocol* IToplevelProtocol::Lookup(int32_t aId) { return mActorMap.Get(aId); }
 
 void IToplevelProtocol::Unregister(int32_t aId) {
+  MOZ_ASSERT(mActorMap.Contains(aId),
+             "Attempting to remove an ID not in the actor map");
   mActorMap.Remove(aId);
 
   MutexAutoLock lock(mEventTargetMutex);
-  mEventTargetMap.RemoveIfPresent(aId);
+  mEventTargetMap.Remove(aId);
 }
 
 Shmem::SharedMemory* IToplevelProtocol::CreateSharedMemory(
@@ -711,16 +708,22 @@ Shmem::SharedMemory* IToplevelProtocol::CreateSharedMemory(
 
   *aId = shmem.Id(Shmem::PrivateIPDLCaller());
   Shmem::SharedMemory* rawSegment = segment.get();
-  mShmemMap.AddWithID(segment.forget().take(), *aId);
+  MOZ_ASSERT(!mShmemMap.Contains(*aId), "Don't insert with an existing ID");
+  mShmemMap.Put(*aId, segment.forget().take());
   return rawSegment;
 }
 
 Shmem::SharedMemory* IToplevelProtocol::LookupSharedMemory(Shmem::id_t aId) {
-  return mShmemMap.Lookup(aId);
+  return mShmemMap.Get(aId);
 }
 
 bool IToplevelProtocol::IsTrackingSharedMemory(Shmem::SharedMemory* segment) {
-  return mShmemMap.HasData(segment);
+  for (const auto& iter : mShmemMap) {
+    if (segment == iter.GetData()) {
+      return true;
+    }
+  }
+  return false;
 }
 
 bool IToplevelProtocol::DestroySharedMemory(Shmem& shmem) {
@@ -733,6 +736,8 @@ bool IToplevelProtocol::DestroySharedMemory(Shmem& shmem) {
   Message* descriptor =
       shmem.UnshareFrom(Shmem::PrivateIPDLCaller(), MSG_ROUTING_CONTROL);
 
+  MOZ_ASSERT(mShmemMap.Contains(aId),
+             "Attempting to remove an ID not in the shmem map");
   mShmemMap.Remove(aId);
   Shmem::Dealloc(Shmem::PrivateIPDLCaller(), segment);
 
@@ -746,9 +751,8 @@ bool IToplevelProtocol::DestroySharedMemory(Shmem& shmem) {
 }
 
 void IToplevelProtocol::DeallocShmems() {
-  for (IDMap<SharedMemory*>::const_iterator cit = mShmemMap.begin();
-       cit != mShmemMap.end(); ++cit) {
-    Shmem::Dealloc(Shmem::PrivateIPDLCaller(), cit->second);
+  for (const auto& cit : mShmemMap) {
+    Shmem::Dealloc(Shmem::PrivateIPDLCaller(), cit.GetData());
   }
   mShmemMap.Clear();
 }
@@ -760,7 +764,8 @@ bool IToplevelProtocol::ShmemCreated(const Message& aMsg) {
   if (!rawmem) {
     return false;
   }
-  mShmemMap.AddWithID(rawmem.forget().take(), id);
+  MOZ_ASSERT(!mShmemMap.Contains(id), "Don't insert with an existing ID");
+  mShmemMap.Put(id, rawmem.forget().take());
   return true;
 }
 
@@ -774,6 +779,8 @@ bool IToplevelProtocol::ShmemDestroyed(const Message& aMsg) {
 
   Shmem::SharedMemory* rawmem = LookupSharedMemory(id);
   if (rawmem) {
+    MOZ_ASSERT(mShmemMap.Contains(id),
+               "Attempting to remove an ID not in the shmem map");
     mShmemMap.Remove(id);
     Shmem::Dealloc(Shmem::PrivateIPDLCaller(), rawmem);
   }
@@ -787,7 +794,7 @@ already_AddRefed<nsIEventTarget> IToplevelProtocol::GetMessageEventTarget(
   Maybe<MutexAutoLock> lock;
   lock.emplace(mEventTargetMutex);
 
-  nsCOMPtr<nsIEventTarget> target = mEventTargetMap.Lookup(route);
+  nsCOMPtr<nsIEventTarget> target = mEventTargetMap.Get(route);
 
   if (aMsg.is_constructor()) {
     ActorHandle handle;
@@ -796,32 +803,14 @@ already_AddRefed<nsIEventTarget> IToplevelProtocol::GetMessageEventTarget(
       return nullptr;
     }
 
-    // Normally a new actor inherits its event target from its manager. If the
-    // manager has no event target, we give the subclass a chance to make a new
-    // one.
-    if (!target) {
-      MutexAutoUnlock unlock(mEventTargetMutex);
-      target = GetConstructedEventTarget(aMsg);
-    }
-
 #ifdef DEBUG
-    // If this function is called more than once for the same message,
-    // the actor handle ID will already be in the map and the AddWithID
-    // call below will trigger a crash in DEBUG builds. Avoid this by
-    // removing the entry first and ASSERTing that if the ID has already
-    // been inserted, it matches the provided |aMsg| ID. If the ASSERT fails,
-    // the map contains a different event target which is unexpected.
-    nsCOMPtr<nsIEventTarget> existingTgt = mEventTargetMap.Lookup(handle.mId);
+    // If this function is called more than once for the same message, the actor
+    // handle ID will already be in the map, but it should have the same target.
+    nsCOMPtr<nsIEventTarget> existingTgt = mEventTargetMap.Get(handle.mId);
     MOZ_ASSERT(existingTgt == target || existingTgt == nullptr);
-    mEventTargetMap.RemoveIfPresent(handle.mId);
 #endif /* DEBUG */
 
-    mEventTargetMap.AddWithID(target, handle.mId);
-  } else if (!target) {
-    // We don't need the lock after this point.
-    lock.reset();
-
-    target = GetSpecificMessageEventTarget(aMsg);
+    mEventTargetMap.Put(handle.mId, target);
   }
 
   return target.forget();
@@ -833,7 +822,7 @@ already_AddRefed<nsIEventTarget> IToplevelProtocol::GetActorEventTarget(
                      aActor->Id() != kFreedActorId);
 
   MutexAutoLock lock(mEventTargetMutex);
-  nsCOMPtr<nsIEventTarget> target = mEventTargetMap.Lookup(aActor->Id());
+  nsCOMPtr<nsIEventTarget> target = mEventTargetMap.Get(aActor->Id());
   return target.forget();
 }
 
@@ -862,16 +851,7 @@ void IToplevelProtocol::SetEventTargetForActorInternal(
 
   MutexAutoLock lock(mEventTargetMutex);
   // FIXME bug 1445121 - sometimes the id is already mapped.
-  // (IDMap debug-asserts that the existing state is as expected.)
-  bool replace = false;
-#ifdef DEBUG
-  replace = mEventTargetMap.Lookup(id) != nullptr;
-#endif
-  if (replace) {
-    mEventTargetMap.ReplaceWithID(aEventTarget, id);
-  } else {
-    mEventTargetMap.AddWithID(aEventTarget, id);
-  }
+  mEventTargetMap.Put(id, aEventTarget);
 }
 
 void IToplevelProtocol::ReplaceEventTargetForActor(
@@ -884,17 +864,8 @@ void IToplevelProtocol::ReplaceEventTargetForActor(
   MOZ_RELEASE_ASSERT(id != kNullActorId && id != kFreedActorId);
 
   MutexAutoLock lock(mEventTargetMutex);
-  mEventTargetMap.ReplaceWithID(aEventTarget, id);
-}
-
-void IToplevelProtocol::SetEventTargetForRoute(int32_t aRoute,
-                                               nsIEventTarget* aEventTarget) {
-  MOZ_RELEASE_ASSERT(aRoute != Id());
-  MOZ_RELEASE_ASSERT(aRoute != kNullActorId && aRoute != kFreedActorId);
-
-  MutexAutoLock lock(mEventTargetMutex);
-  MOZ_ASSERT(!mEventTargetMap.Lookup(aRoute));
-  mEventTargetMap.AddWithID(aEventTarget, aRoute);
+  MOZ_ASSERT(mEventTargetMap.Contains(id), "Only replace an existing ID");
+  mEventTargetMap.Put(id, aEventTarget);
 }
 
 }  // namespace ipc

@@ -302,7 +302,7 @@ uint32_t ParseIDFromDeviceID(const nsAString& key, const char* prefix,
     id.Cut(0, start + strlen(prefix));
     id.Truncate(length);
   }
-  if (id.Equals(L"QCOM", nsCaseInsensitiveStringComparator())) {
+  if (id.Equals(L"QCOM", nsCaseInsensitiveStringComparator)) {
     // String format assumptions are broken, so use a Qualcomm PCI Vendor ID
     // for now. See also GfxDriverInfo::GetDeviceVendor.
     return 0x5143;
@@ -1822,14 +1822,14 @@ const nsTArray<GfxDriverInfo>& GfxInfo::GetGfxDriverInfo() {
         "FEATURE_ROLLOUT_BATTERY_S_SCRN_NV_RECENT");
 
     APPEND_TO_DRIVER_BLOCKLIST2_EXT(
-        OperatingSystem::Windows, ScreenSizeStatus::Small, BatteryStatus::None,
+        OperatingSystem::Windows, ScreenSizeStatus::All, BatteryStatus::None,
         DesktopEnvironment::All, WindowProtocol::All, DriverVendor::All,
         DeviceFamily::IntelRolloutWebRender, nsIGfxInfo::FEATURE_WEBRENDER,
         nsIGfxInfo::FEATURE_ALLOW_ALWAYS, DRIVER_COMPARISON_IGNORED,
         V(0, 0, 0, 0), "FEATURE_ROLLOUT_DESKTOP_INTEL_S_SCRN");
 
     APPEND_TO_DRIVER_BLOCKLIST2_EXT(
-        OperatingSystem::RecentWindows10, ScreenSizeStatus::Small,
+        OperatingSystem::RecentWindows10, ScreenSizeStatus::All,
         BatteryStatus::Present, DesktopEnvironment::All, WindowProtocol::All,
         DriverVendor::All, DeviceFamily::IntelModernRolloutWebRender,
         nsIGfxInfo::FEATURE_WEBRENDER, nsIGfxInfo::FEATURE_ALLOW_ALWAYS,
@@ -1949,22 +1949,22 @@ nsresult GfxInfo::GetFeatureStatusImpl(
     if (OnlyAllowFeatureOnWhitelistedVendor(aFeature) &&
         !adapterVendorID.Equals(
             GfxDriverInfo::GetDeviceVendor(DeviceVendor::Intel),
-            nsCaseInsensitiveStringComparator()) &&
+            nsCaseInsensitiveStringComparator) &&
         !adapterVendorID.Equals(
             GfxDriverInfo::GetDeviceVendor(DeviceVendor::NVIDIA),
-            nsCaseInsensitiveStringComparator()) &&
+            nsCaseInsensitiveStringComparator) &&
         !adapterVendorID.Equals(
             GfxDriverInfo::GetDeviceVendor(DeviceVendor::ATI),
-            nsCaseInsensitiveStringComparator()) &&
+            nsCaseInsensitiveStringComparator) &&
         !adapterVendorID.Equals(
             GfxDriverInfo::GetDeviceVendor(DeviceVendor::Microsoft),
-            nsCaseInsensitiveStringComparator()) &&
+            nsCaseInsensitiveStringComparator) &&
         !adapterVendorID.Equals(
             GfxDriverInfo::GetDeviceVendor(DeviceVendor::Parallels),
-            nsCaseInsensitiveStringComparator()) &&
+            nsCaseInsensitiveStringComparator) &&
         !adapterVendorID.Equals(
             GfxDriverInfo::GetDeviceVendor(DeviceVendor::Qualcomm),
-            nsCaseInsensitiveStringComparator()) &&
+            nsCaseInsensitiveStringComparator) &&
         // FIXME - these special hex values are currently used in xpcshell tests
         // introduced by bug 625160 patch 8/8. Maybe these tests need to be
         // adjusted now that we're only whitelisting intel/ati/nvidia.

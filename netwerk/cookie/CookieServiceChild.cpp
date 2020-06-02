@@ -323,19 +323,21 @@ CookieServiceChild::Observe(nsISupports* aSubject, const char* aTopic,
 }
 
 NS_IMETHODIMP
-CookieServiceChild::GetCookieStringForPrincipal(nsIPrincipal* aPrincipal,
+CookieServiceChild::GetCookieStringFromDocument(Document* aDocument,
                                                 nsACString& aCookieString) {
-  NS_ENSURE_ARG(aPrincipal);
+  NS_ENSURE_ARG(aDocument);
 
   aCookieString.Truncate();
 
+  nsCOMPtr<nsIPrincipal> principal = aDocument->EffectiveStoragePrincipal();
+
   nsAutoCString baseDomain;
-  nsresult rv = CookieCommons::GetBaseDomain(aPrincipal, baseDomain);
+  nsresult rv = CookieCommons::GetBaseDomain(principal, baseDomain);
   if (NS_WARN_IF(NS_FAILED(rv))) {
     return NS_OK;
   }
 
-  CookieKey key(baseDomain, aPrincipal->OriginAttributesRef());
+  CookieKey key(baseDomain, principal->OriginAttributesRef());
   CookiesList* cookiesList = nullptr;
   mCookiesMap.Get(key, &cookiesList);
 
@@ -344,13 +346,22 @@ CookieServiceChild::GetCookieStringForPrincipal(nsIPrincipal* aPrincipal,
   }
 
   nsAutoCString hostFromURI;
-  aPrincipal->GetAsciiHost(hostFromURI);
+  principal->GetAsciiHost(hostFromURI);
 
   nsAutoCString pathFromURI;
-  aPrincipal->GetFilePath(pathFromURI);
+  principal->GetFilePath(pathFromURI);
+
+  bool thirdParty = true;
+  nsPIDOMWindowInner* innerWindow = aDocument->GetInnerWindow();
+  // in gtests we don't have a window, let's consider those requests as 3rd
+  // party.
+  if (innerWindow) {
+    thirdParty = nsContentUtils::IsThirdPartyWindowOrChannel(innerWindow,
+                                                             nullptr, nullptr);
+  }
 
   bool isPotentiallyTrustworthy =
-      aPrincipal->GetIsOriginPotentiallyTrustworthy();
+      principal->GetIsOriginPotentiallyTrustworthy();
   int64_t currentTimeInUsec = PR_Now();
   int64_t currentTime = currentTimeInUsec / PR_USEC_PER_SEC;
 
@@ -364,6 +375,11 @@ CookieServiceChild::GetCookieStringForPrincipal(nsIPrincipal* aPrincipal,
 
     // We don't show HttpOnly cookies in content processes.
     if (cookie->IsHttpOnly()) {
+      continue;
+    }
+
+    if (thirdParty &&
+        !CookieCommons::ShouldIncludeCrossSiteCookieForDocument(cookie)) {
       continue;
     }
 
@@ -426,6 +442,20 @@ CookieServiceChild::SetCookieStringFromDocument(
       aDocument, aCookieString, PR_Now(), mTLDService, mThirdPartyUtil,
       hasExistingCookiesLambda, getter_AddRefs(documentURI), baseDomain, attrs);
   if (!cookie) {
+    return NS_OK;
+  }
+
+  bool thirdParty = true;
+  nsPIDOMWindowInner* innerWindow = aDocument->GetInnerWindow();
+  // in gtests we don't have a window, let's consider those requests as 3rd
+  // party.
+  if (innerWindow) {
+    thirdParty = nsContentUtils::IsThirdPartyWindowOrChannel(innerWindow,
+                                                             nullptr, nullptr);
+  }
+
+  if (thirdParty &&
+      !CookieCommons::ShouldIncludeCrossSiteCookieForDocument(cookie)) {
     return NS_OK;
   }
 

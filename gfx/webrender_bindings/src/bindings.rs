@@ -2130,7 +2130,7 @@ pub extern "C" fn wr_resource_updates_add_font_instance(
     txn.add_font_instance(
         key,
         font_key,
-        Au::from_f32_px(glyph_size),
+        glyph_size,
         unsafe { options.as_ref().cloned() },
         unsafe { platform_options.as_ref().cloned() },
         variations.convert_into_vec::<FontVariation>(),
@@ -3548,8 +3548,8 @@ pub extern "C" fn wr_dp_start_item_group(state: &mut WrState) {
 }
 
 #[no_mangle]
-pub extern "C" fn wr_dp_cancel_item_group(state: &mut WrState) {
-    state.frame_builder.dl_builder.cancel_item_group();
+pub extern "C" fn wr_dp_cancel_item_group(state: &mut WrState, discard: bool) {
+    state.frame_builder.dl_builder.cancel_item_group(discard);
 }
 
 #[no_mangle]

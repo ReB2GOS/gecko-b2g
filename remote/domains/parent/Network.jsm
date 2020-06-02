@@ -156,6 +156,25 @@ class Network extends Domain {
   }
 
   /**
+   * Returns all browser cookies.
+   *
+   * Depending on the backend support, will return detailed cookie information in the cookies field.
+   *
+   * @param {Object} options
+   *
+   * @return {Array<Cookie>}
+   *     Array of cookie objects.
+   */
+  async getAllCookies(options = {}) {
+    const cookies = [];
+    for (const cookie of Services.cookies.cookies) {
+      cookies.push(_buildCookie(cookie));
+    }
+
+    return { cookies };
+  }
+
+  /**
    * Returns all browser cookies for the current URL.
    *
    * @param {Object} options
@@ -192,29 +211,7 @@ class Network extends Domain {
           continue;
         }
 
-        const data = {
-          name: cookie.name,
-          value: cookie.value,
-          domain: cookie.host,
-          path: cookie.path,
-          expires: cookie.isSession ? -1 : cookie.expiry,
-          // The size is the combined length of both the cookie name and value
-          size: cookie.name.length + cookie.value.length,
-          httpOnly: cookie.isHttpOnly,
-          secure: cookie.isSecure,
-          session: cookie.isSession,
-        };
-
-        if (cookie.sameSite) {
-          const sameSiteMap = new Map([
-            [Ci.nsICookie.SAMESITE_LAX, "Lax"],
-            [Ci.nsICookie.SAMESITE_STRICT, "Strict"],
-          ]);
-
-          data.sameSite = sameSiteMap.get(cookie.sameSite);
-        }
-
-        cookies.push(data);
+        cookies.push(_buildCookie(cookie));
       }
     }
 
@@ -381,7 +378,7 @@ class Network extends Domain {
 
   _onRequest(eventName, httpChannel, data) {
     const wrappedChannel = ChannelWrapper.get(httpChannel);
-    const topFrame = getLoadContext(httpChannel).topFrameElement;
+
     const request = {
       url: httpChannel.URI.spec,
       urlFragment: undefined,
@@ -404,16 +401,15 @@ class Network extends Domain {
       initiator: undefined,
       redirectResponse: undefined,
       type: LOAD_CAUSE_STRINGS[data.cause] || "unknown",
-      // Bug 1637363 - Add subframe support
-      frameId: topFrame.browsingContext?.id.toString(),
+      frameId: data.frameId,
       hasUserGesture: undefined,
     });
   }
 
   _onResponse(eventName, httpChannel, data) {
     const wrappedChannel = ChannelWrapper.get(httpChannel);
-    const topFrame = getLoadContext(httpChannel).topFrameElement;
     const headers = headersAsObject(data.headers);
+
     this.emit("Network.responseReceived", {
       requestId: data.requestId,
       loaderId: data.loaderId,
@@ -437,29 +433,43 @@ class Network extends Domain {
         // unknown, neutral, insecure, secure, info, insecure-broken
         securityState: "unknown",
       },
-      // Bug 1637363 - Add subframe support
-      frameId: topFrame.browsingContext?.id.toString(),
+      frameId: data.frameId,
     });
   }
 }
 
-function getLoadContext(httpChannel) {
-  let loadContext = null;
-  try {
-    if (httpChannel.notificationCallbacks) {
-      loadContext = httpChannel.notificationCallbacks.getInterface(
-        Ci.nsILoadContext
-      );
-    }
-  } catch (e) {}
-  try {
-    if (!loadContext && httpChannel.loadGroup) {
-      loadContext = httpChannel.loadGroup.notificationCallbacks.getInterface(
-        Ci.nsILoadContext
-      );
-    }
-  } catch (e) {}
-  return loadContext;
+/**
+ * Creates a CDP Network.Cookie from our internal cookie values
+ *
+ * @param {nsICookie} cookie
+ *
+ * @returns {Network.Cookie}
+ *      A CDP Cookie
+ */
+function _buildCookie(cookie) {
+  const data = {
+    name: cookie.name,
+    value: cookie.value,
+    domain: cookie.host,
+    path: cookie.path,
+    expires: cookie.isSession ? -1 : cookie.expiry,
+    // The size is the combined length of both the cookie name and value
+    size: cookie.name.length + cookie.value.length,
+    httpOnly: cookie.isHttpOnly,
+    secure: cookie.isSecure,
+    session: cookie.isSession,
+  };
+
+  if (cookie.sameSite) {
+    const sameSiteMap = new Map([
+      [Ci.nsICookie.SAMESITE_LAX, "Lax"],
+      [Ci.nsICookie.SAMESITE_STRICT, "Strict"],
+    ]);
+
+    data.sameSite = sameSiteMap.get(cookie.sameSite);
+  }
+
+  return data;
 }
 
 /**

@@ -1942,13 +1942,20 @@
   value: false
   mirror: always
 
-# Process launch delay (im milliseconds).
+# Process launch delay (in milliseconds).
 - name: dom.ipc.processPrelaunch.delayMs
   type: uint32_t
 # This number is fairly arbitrary ... the intention is to put off
 # launching another app process until the last one has finished
 # loading its content, to reduce CPU/memory/IO contention.
   value: 1000
+  mirror: always
+
+# Process preallocation cache
+# Only used in fission; in e10s we use 1 always
+- name: dom.ipc.processPrelaunch.fission.number
+  type: uint32_t
+  value: 3
   mirror: always
 
 - name: dom.ipc.processPriorityManager.enabled
@@ -3824,7 +3831,7 @@
 
 - name: gfx.canvas.remote
   type: RelaxedAtomicBool
-#if defined(XP_WIN) && defined(NIGHTLY_BUILD)
+#if defined(XP_WIN) && defined(EARLY_BETA_OR_EARLIER)
   value: true
 #else
   value: false
@@ -5610,7 +5617,7 @@
 # Are implicit tracks in computed grid templates serialized?
 - name: layout.css.serialize-grid-implicit-tracks
   type: RelaxedAtomicBool
-  value: @IS_NOT_NIGHTLY_BUILD@
+  value: true
   mirror: always
 
 # Set the number of device pixels per CSS pixel. A value <= 0 means choose
@@ -6361,6 +6368,12 @@
 - name: layout.viewport_contains_no_contents_area
   type: bool
   value: true
+  mirror: always
+
+# Test only.
+- name: layout.dynamic-toolbar-max-height
+  type: RelaxedAtomicInt32
+  value: 0
   mirror: always
 
 #---------------------------------------------------------------------------
@@ -7592,6 +7605,39 @@
   value: 2 * 1024 * 1024
   mirror: always
 
+# If we should attempt to race the cache and network.
+- name: network.http.rcwn.enabled
+  type: bool
+  value: true
+  mirror: always
+
+- name: network.http.rcwn.cache_queue_normal_threshold
+  type: uint32_t
+  value: 8
+  mirror: always
+
+- name: network.http.rcwn.cache_queue_priority_threshold
+  type: uint32_t
+  value: 2
+  mirror: always
+
+# We might attempt to race the cache with the network only if a resource
+# is smaller than this size.
+- name: network.http.rcwn.small_resource_size_kb
+  type: uint32_t
+  value: 256
+  mirror: always
+
+- name: network.http.rcwn.min_wait_before_racing_ms
+  type: uint32_t
+  value: 0
+  mirror: always
+
+- name: network.http.rcwn.max_wait_before_racing_ms
+  type: uint32_t
+  value: 500
+  mirror: always
+
 # false=real referer, true=spoof referer (use target URI as referer).
 - name: network.http.referer.spoofSource
   type: bool
@@ -7679,6 +7725,19 @@
 - name: network.http.referer.defaultPolicy.trackers.pbmode
   type: uint32_t
   value: 2
+  mirror: always
+
+# Whether certain http header values should be censored out in logs.
+# Specifically filters out "authorization" and "proxy-authorization".
+- name: network.http.sanitize-headers-in-logs
+  type: bool
+  value: true
+  mirror: always
+
+# If set to true, IOService.offline depends on IOService.connectivity.
+- name: network.offline-mirrors-connectivity
+  type: RelaxedAtomicBool
+  value: false
   mirror: always
 
 # Enables the predictive service.
@@ -7801,14 +7860,10 @@
 - name: network.process.enabled
   type: RelaxedAtomicBool
   mirror: always
-#ifdef ANDROID
-  value: false
+#if defined(ANDROID) || defined(MOZ_THUNDERBIRD)
+  value: false # see bug 1641427
 #else
-#ifdef NIGHTLY_BUILD
-  value: true
-#else
-  value: false
-#endif
+  value: @IS_NIGHTLY_BUILD@
 #endif
 
 # Whether we can send OnDataAvailable to content process directly.
@@ -7871,6 +7926,38 @@
 - name: network.http.stale_while_revalidate.enabled
   type: RelaxedAtomicBool
   value: true
+  mirror: always
+
+# Whether to use sni encryption.
+- name: network.security.esni.enabled
+  type: bool
+  value: false
+  mirror: always
+
+# Whether to cache SSL resumption tokens in necko.
+- name: network.ssl_tokens_cache_enabled
+  type: RelaxedAtomicBool
+  value: @IS_NIGHTLY_BUILD@
+  mirror: always
+
+# Capacity of the above cache, in kilobytes.
+- name: network.ssl_tokens_cache_capacity
+  type: RelaxedAtomicUint32
+  value: 2048
+  mirror: always
+
+# Whether nsIURI.host/.hostname/.spec should return a punycode string.
+# If set to false we will revert to previous behaviour and return a unicode
+# string.
+- name: network.standard-url.punycode-host
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
+# The maximum allowed length for a URL - 1MB default.
+- name: network.standard-url.max-length
+  type: RelaxedAtomicUint32
+  value: 1048576
   mirror: always
 
 # Single TRR request timeout, in milliseconds
@@ -8170,6 +8257,11 @@
   value: false
   mirror: always
 
+- name: privacy.firstparty.isolate.use_site
+  type: RelaxedAtomicBool
+  value: false
+  mirror: always
+
 # Enforce tracking protection in all modes.
 - name: privacy.trackingprotection.enabled
   type: bool
@@ -8427,6 +8519,11 @@
   value: false
   mirror: always
 
+- name: privacy.dynamic_firstparty.use_site
+  type: RelaxedAtomicBool
+  value: true
+  mirror: always
+
 - name: privacy.partition.network_state
   type: RelaxedAtomicBool
   value: @IS_NIGHTLY_BUILD@
@@ -8487,6 +8584,14 @@
   value: true
   mirror: always
 
+# If true, all toplevel data: URI navigations will be blocked.
+# Please note that manually entering a data: URI in the
+# URL-Bar will not be blocked when flipping this pref.
+- name: security.data_uri.block_toplevel_data_uri_navigations
+  type: bool
+  value: true
+  mirror: always
+
 # Allowed by default so it doesn't affect Thunderbird/SeaMonkey, but
 # not allowed for Firefox Desktop in firefox.js
 - name: security.allow_parent_unrestricted_js_loads
@@ -8506,6 +8611,13 @@
 - name: security.allow_eval_in_parent_process
   type: RelaxedAtomicBool
   value: true
+  mirror: always
+
+# Disallowed by default, ensure not disallowed content is loaded in the parent
+# process.
+- name: security.allow_unsafe_parent_loads
+  type: bool
+  value: false
   mirror: always
 
 # Pref to block mixed scripts (fonts, plugin content, scripts, stylesheets,

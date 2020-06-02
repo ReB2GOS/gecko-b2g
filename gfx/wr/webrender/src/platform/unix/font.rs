@@ -551,8 +551,8 @@ impl FontContext {
         let format = unsafe { (*slot).format };
         match format {
             FT_Glyph_Format::FT_GLYPH_FORMAT_BITMAP => {
-                let y_size = unsafe { (*(*(*slot).face).size).metrics.y_ppem };
-                Some((slot, req_size as f32 / y_size as f32))
+                let bitmap_size = unsafe { (*(*(*slot).face).size).metrics.y_ppem };
+                Some((slot, req_size as f32 / bitmap_size as f32))
             }
             FT_Glyph_Format::FT_GLYPH_FORMAT_OUTLINE => Some((slot, 1.0)),
             _ => {
@@ -870,7 +870,7 @@ impl FontContext {
         };
 
         // If we need padding, we will need to expand the buffer size.
-        let (buffer_width, buffer_height, padding) = if font.texture_padding {
+        let (buffer_width, buffer_height, padding) = if font.use_texture_padding() {
             (actual_width + 2, actual_height + 2, 1)
         } else {
             (actual_width, actual_height, 0)
@@ -959,7 +959,7 @@ impl FontContext {
             dest = row_end + 8 * padding;
         }
 
-        if font.texture_padding {
+        if font.use_texture_padding() {
             left -= padding as i32;
             top += padding as i32;
             actual_width = buffer_width;

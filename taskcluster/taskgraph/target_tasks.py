@@ -476,6 +476,13 @@ def target_tasks_pine(full_task_graph, parameters, graph_config):
 def target_tasks_kaios(full_task_graph, parameters, graph_config):
     """The set of tasks to run for kaios integration"""
     def filter(task):
+        # Never try to run tasks on macosx or windows workers.
+        if task.task['tags'].get('os') in ('macosx', 'windows'):
+            task.optimization = {'always': None}
+            return False
+        # Toolchains used for local development should always be built.
+        if task.attributes.get('local-toolchain'):
+            return True
         # We disable everything in central, and adjust downstream.
         return False
     return [l for l, t in six.iteritems(full_task_graph.tasks) if filter(t)]
@@ -574,12 +581,19 @@ def target_tasks_general_perf_testing(full_task_graph, parameters, graph_config)
             platform = task.task.get('extra').get('treeherder-platform')
             try_name = task.label
 
+        def _run_live_site():
+            for test in LIVE_SITES:
+                if try_name.endswith(test) or try_name.endswith(test + "-e10s"):
+                    return True
+            return False
+
         # Run chrome and chromium on all platforms available
         if '-chrome' in try_name:
             if 'android' in platform:
                 # Run only on shippable android builds
                 if 'shippable' in platform:
-                    return True
+                    if '-live' in try_name:
+                        return _run_live_site()
                 else:
                     return False
             else:
@@ -608,9 +622,7 @@ def target_tasks_general_perf_testing(full_task_graph, parameters, graph_config)
             if '-live' in try_name:
                 # We only want to select those which should run 3 times
                 # a week here, other live site tests should be removed
-                for test in LIVE_SITES:
-                    if try_name.endswith(test) or try_name.endswith(test + "-e10s"):
-                        return True
+                return _run_live_site()
             return False
 
         # Run the following tests on android geckoview

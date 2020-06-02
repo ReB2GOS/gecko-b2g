@@ -1057,9 +1057,9 @@ int32_t GfxInfoBase::FindBlocklistedDeviceInList(
           (nsAString&)GfxDriverInfo::GetDeviceVendor(DeviceVendor::NVIDIA);
       const nsString nv310mDeviceId = NS_LITERAL_STRING("0x0A70");
       if (nvVendorID.Equals(adapterVendorID[1],
-                            nsCaseInsensitiveStringComparator()) &&
+                            nsCaseInsensitiveStringComparator) &&
           nv310mDeviceId.Equals(adapterDeviceID[1],
-                                nsCaseInsensitiveStringComparator())) {
+                                nsCaseInsensitiveStringComparator)) {
         status = nsIGfxInfo::FEATURE_BLOCKED_DEVICE;
         aFailureId = "FEATURE_FAILURE_D2D_NV310M_BLOCK";
       }
@@ -1095,38 +1095,38 @@ void GfxInfoBase::SetFeatureStatus(
 bool GfxInfoBase::DoesDesktopEnvironmentMatch(
     const nsAString& aBlocklistDesktop, const nsAString& aDesktopEnv) {
   return aBlocklistDesktop.Equals(aDesktopEnv,
-                                  nsCaseInsensitiveStringComparator()) ||
+                                  nsCaseInsensitiveStringComparator) ||
          aBlocklistDesktop.Equals(
              GfxDriverInfo::GetDesktopEnvironment(DesktopEnvironment::All),
-             nsCaseInsensitiveStringComparator());
+             nsCaseInsensitiveStringComparator);
 }
 
 bool GfxInfoBase::DoesWindowProtocolMatch(
     const nsAString& aBlocklistWindowProtocol,
     const nsAString& aWindowProtocol) {
   return aBlocklistWindowProtocol.Equals(aWindowProtocol,
-                                         nsCaseInsensitiveStringComparator()) ||
+                                         nsCaseInsensitiveStringComparator) ||
          aBlocklistWindowProtocol.Equals(
              GfxDriverInfo::GetWindowProtocol(WindowProtocol::All),
-             nsCaseInsensitiveStringComparator());
+             nsCaseInsensitiveStringComparator);
 }
 
 bool GfxInfoBase::DoesVendorMatch(const nsAString& aBlocklistVendor,
                                   const nsAString& aAdapterVendor) {
   return aBlocklistVendor.Equals(aAdapterVendor,
-                                 nsCaseInsensitiveStringComparator()) ||
+                                 nsCaseInsensitiveStringComparator) ||
          aBlocklistVendor.Equals(
              GfxDriverInfo::GetDeviceVendor(DeviceVendor::All),
-             nsCaseInsensitiveStringComparator());
+             nsCaseInsensitiveStringComparator);
 }
 
 bool GfxInfoBase::DoesDriverVendorMatch(const nsAString& aBlocklistVendor,
                                         const nsAString& aDriverVendor) {
   return aBlocklistVendor.Equals(aDriverVendor,
-                                 nsCaseInsensitiveStringComparator()) ||
+                                 nsCaseInsensitiveStringComparator) ||
          aBlocklistVendor.Equals(
              GfxDriverInfo::GetDriverVendor(DriverVendor::All),
-             nsCaseInsensitiveStringComparator());
+             nsCaseInsensitiveStringComparator);
 }
 
 bool GfxInfoBase::IsFeatureAllowlisted(int32_t aFeature) const {
@@ -1604,6 +1604,10 @@ bool GfxInfoBase::BuildFeatureStateLog(JSContext* aCx,
 void GfxInfoBase::DescribeFeatures(JSContext* aCx, JS::Handle<JSObject*> aObj) {
   JS::Rooted<JSObject*> obj(aCx);
 
+  gfx::FeatureState& hwCompositing =
+      gfxConfig::GetFeature(gfx::Feature::HW_COMPOSITING);
+  InitFeatureObject(aCx, aObj, "hwCompositing", hwCompositing, &obj);
+
   gfx::FeatureState& gpuProcess =
       gfxConfig::GetFeature(gfx::Feature::GPU_PROCESS);
   InitFeatureObject(aCx, aObj, "gpuProcess", gpuProcess, &obj);
@@ -1641,10 +1645,8 @@ bool GfxInfoBase::InitFeatureObject(JSContext* aCx,
   nsCString status;
   auto value = aFeatureState.GetValue();
   if (value == FeatureStatus::Blacklisted ||
-      value == FeatureStatus::Unavailable ||
-      value == FeatureStatus::Blocked) {
-    status.AppendPrintf("%s:%s",
-                        FeatureStatusToString(value),
+      value == FeatureStatus::Unavailable || value == FeatureStatus::Blocked) {
+    status.AppendPrintf("%s:%s", FeatureStatusToString(value),
                         aFeatureState.GetFailureId().get());
   } else {
     status.Append(FeatureStatusToString(value));

@@ -16,7 +16,6 @@ py2commands="
     browsertime
     check-spidermonkey
     clang-format
-    cppunittest
     cramtest
     crashtest
     devtools-css-db
@@ -25,18 +24,16 @@ py2commands="
     geckodriver-test
     geckoview-junit
     gradle
-    gtest
     hazards
     jsapi-tests
     jsshell-bench
+    marionette-test
     jstestbrowser
     jstests
-    marionette-test
     mochitest
     mozharness
     pastebin
     prettier-format
-    puppeteer-test
     python
     python-test
     raptor

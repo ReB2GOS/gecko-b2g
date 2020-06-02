@@ -7558,8 +7558,6 @@ class MLoadElement : public MBinaryInstruction, public NoTypePolicy::Data {
   NAMED_OPERANDS((0, elements), (1, index))
 
   bool needsHoleCheck() const { return needsHoleCheck_; }
-  void disableHoleCheck() { needsHoleCheck_ = false; }
-
   bool loadDoubles() const { return loadDoubles_; }
   bool fallible() const { return needsHoleCheck(); }
 
@@ -10688,8 +10686,10 @@ class MIsCallable : public MUnaryInstruction,
                     public BoxExceptPolicy<0, MIRType::Object>::Data {
   explicit MIsCallable(MDefinition* object)
       : MUnaryInstruction(classOpcode, object) {
-    MOZ_ASSERT(object->type() == MIRType::Object ||
-               object->type() == MIRType::Value);
+    MOZ_ASSERT_IF(
+        !JitOptions.warpBuilder,
+        object->type() == MIRType::Object || object->type() == MIRType::Value);
+
     setResultType(MIRType::Boolean);
     setMovable();
   }

@@ -247,20 +247,20 @@ bool WarpCacheIRTranspiler::emitGuardSpecificFunction(
   return true;
 }
 
-bool WarpCacheIRTranspiler::emitGuardType(ValOperandId inputId,
-                                          ValueType type) {
+bool WarpCacheIRTranspiler::emitGuardNonDoubleType(ValOperandId inputId,
+                                                   ValueType type) {
   switch (type) {
     case ValueType::String:
     case ValueType::Symbol:
     case ValueType::BigInt:
     case ValueType::Int32:
-    case ValueType::Double:
     case ValueType::Boolean:
       return emitGuardTo(inputId, MIRTypeFromValueType(JSValueType(type)));
     case ValueType::Undefined:
       return emitGuardIsUndefined(inputId);
     case ValueType::Null:
       return emitGuardIsNull(inputId);
+    case ValueType::Double:
     case ValueType::Magic:
     case ValueType::PrivateGCThing:
     case ValueType::Object:
@@ -387,8 +387,8 @@ bool WarpCacheIRTranspiler::emitGuardToTypedArrayIndex(
 }
 
 bool WarpCacheIRTranspiler::emitTruncateDoubleToUInt32(
-    ValOperandId valId, Int32OperandId resultId) {
-  MDefinition* input = getOperand(valId);
+    NumberOperandId inputId, Int32OperandId resultId) {
+  MDefinition* input = getOperand(inputId);
   auto* ins = MTruncateToInt32::New(alloc(), input);
   add(ins);
 
@@ -397,7 +397,11 @@ bool WarpCacheIRTranspiler::emitTruncateDoubleToUInt32(
 
 bool WarpCacheIRTranspiler::emitGuardToInt32ModUint32(ValOperandId valId,
                                                       Int32OperandId resultId) {
-  return emitTruncateDoubleToUInt32(valId, resultId);
+  MDefinition* input = getOperand(valId);
+  auto* ins = MTruncateToInt32::New(alloc(), input);
+  add(ins);
+
+  return defineOperand(resultId, ins);
 }
 
 bool WarpCacheIRTranspiler::emitLoadInt32Result(Int32OperandId valId) {
@@ -1100,6 +1104,16 @@ bool WarpCacheIRTranspiler::emitArrayPush(ObjOperandId objId,
   return resumeAfter(ins);
 }
 
+bool WarpCacheIRTranspiler::emitIsArrayResult(ValOperandId inputId) {
+  MDefinition* value = getOperand(inputId);
+
+  auto* isArray = MIsArray::New(alloc(), value);
+  addEffectful(isArray);
+  pushResult(isArray);
+
+  return resumeAfter(isArray);
+}
+
 bool WarpCacheIRTranspiler::emitIsObjectResult(ValOperandId inputId) {
   MDefinition* value = getOperand(inputId);
 
@@ -1111,6 +1125,26 @@ bool WarpCacheIRTranspiler::emitIsObjectResult(ValOperandId inputId) {
     pushResult(isObject);
   }
 
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitIsCallableResult(ValOperandId inputId) {
+  MDefinition* value = getOperand(inputId);
+
+  auto* isCallable = MIsCallable::New(alloc(), value);
+  add(isCallable);
+
+  pushResult(isCallable);
+  return true;
+}
+
+bool WarpCacheIRTranspiler::emitIsConstructorResult(ObjOperandId objId) {
+  MDefinition* obj = getOperand(objId);
+
+  auto* isConstructor = MIsConstructor::New(alloc(), obj);
+  add(isConstructor);
+
+  pushResult(isConstructor);
   return true;
 }
 
@@ -1176,13 +1210,32 @@ bool WarpCacheIRTranspiler::emitCallFunction(ObjOperandId calleeId,
              static_cast<int32_t>(callInfo_->argc()));
 #endif
 
-  // TODO: For non-normal calls the arguments need to be changed.
-  MOZ_ASSERT(flags.getArgFormat() == CallFlags::Standard);
-
   // The transpilation will add various guards to the callee.
   // We replace the callee referenced by the CallInfo, so that
   // the resulting MCall instruction depends on these guards.
   callInfo_->setCallee(callee);
+
+  MOZ_ASSERT(flags.getArgFormat() == CallFlags::Standard ||
+             flags.getArgFormat() == CallFlags::FunCall);
+
+  if (flags.getArgFormat() == CallFlags::FunCall) {
+    MOZ_ASSERT(!callInfo_->constructing());
+
+    // Note: setCallee above already changed the callee to the target
+    // function instead of the |call| function.
+
+    if (callInfo_->argc() == 0) {
+      // Special case for fun.call() with no arguments.
+      auto* undef = constant(UndefinedValue());
+      callInfo_->setThis(undef);
+    } else {
+      // The first argument for |call| is the new this value.
+      callInfo_->setThis(callInfo_->getArg(0));
+
+      // Shift down all other arguments by removing the first.
+      callInfo_->removeArg(0);
+    }
+  }
 
   // CacheIR emits the following for specialized calls:
   //     GuardSpecificFunction <callee> <func> ..
