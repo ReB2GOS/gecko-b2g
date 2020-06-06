@@ -20,18 +20,22 @@ class nsWifiConfiguration final : public nsIWifiConfiguration {
  public:
   NS_DECL_THREADSAFE_ISUPPORTS
   NS_DECL_NSIWIFICONFIGURATION
-  nsWifiConfiguration(
-      int32_t aNetId, const nsAString& aSsid, const nsAString& aBssid,
-      const nsAString& aKeyManagement, const nsAString& aPsk,
-      const nsAString& aWepKey, int32_t aWepTxKeyIndex, bool aScanSsid,
-      bool aPmf, int32_t aProto, int32_t aAuthAlg, int32_t aGroupCipher,
-      int32_t aPairwiseCipher, int32_t aEap, int32_t aEapPhase2,
-      const nsAString& aIdentity, const nsAString& aAnonymousId,
-      const nsAString& aPassword, const nsAString& aClientCert,
-      const nsAString& aCaCert, const nsAString& aCaPath,
-      const nsAString& aSubjectMatch, const nsAString& aEngineId, bool aEngine,
-      const nsAString& aPrivateKeyId, const nsAString& aAltSubjectMatch,
-      const nsAString& aDomainSuffixMatch, bool aProactiveKeyCaching);
+  nsWifiConfiguration(int32_t aNetId, const nsAString& aSsid,
+                      const nsAString& aBssid, const nsAString& aKeyManagement,
+                      const nsAString& aPsk, const nsAString& aWepKey,
+                      int32_t aWepTxKeyIndex, bool aScanSsid, bool aPmf,
+                      const nsAString& aProto, const nsAString& aAuthAlg,
+                      const nsAString& aGroupCipher,
+                      const nsAString& aPairwiseCipher, const nsAString& aEap,
+                      const nsAString& aEapPhase2, const nsAString& aIdentity,
+                      const nsAString& aAnonymousId, const nsAString& aPassword,
+                      const nsAString& aClientCert, const nsAString& aCaCert,
+                      const nsAString& aCaPath, const nsAString& aSubjectMatch,
+                      const nsAString& aEngineId, bool aEngine,
+                      const nsAString& aPrivateKeyId,
+                      const nsAString& aAltSubjectMatch,
+                      const nsAString& aDomainSuffixMatch,
+                      bool aProactiveKeyCaching, int32_t aSimIndex);
 
  private:
   ~nsWifiConfiguration(){};
@@ -45,12 +49,12 @@ class nsWifiConfiguration final : public nsIWifiConfiguration {
   int32_t mWepTxKeyIndex;
   bool mScanSsid;
   bool mPmf;
-  int32_t mProto;
-  int32_t mAuthAlg;
-  int32_t mGroupCipher;
-  int32_t mPairwiseCipher;
-  int32_t mEap;
-  int32_t mEapPhase2;
+  nsString mProto;
+  nsString mAuthAlg;
+  nsString mGroupCipher;
+  nsString mPairwiseCipher;
+  nsString mEap;
+  nsString mEapPhase2;
   nsString mIdentity;
   nsString mAnonymousId;
   nsString mPassword;
@@ -64,6 +68,7 @@ class nsWifiConfiguration final : public nsIWifiConfiguration {
   nsString mAltSubjectMatch;
   nsString mDomainSuffixMatch;
   bool mProactiveKeyCaching;
+  int32_t mSimIndex;
 };
 
 class nsScanResult final : public nsIScanResult {

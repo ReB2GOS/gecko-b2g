@@ -57,7 +57,7 @@ class WifiNative {
   Result_t SetBtCoexistenceMode(uint8_t aMode);
   Result_t SetBtCoexistenceScanMode(bool aEnable);
   Result_t SignalPoll(std::vector<int32_t>& aPollResult);
-  Result_t GetLinkLayerStats(wifiNameSpace::StaLinkLayerStats& aStats);
+  Result_t GetLinkLayerStats(wifiNameSpaceV1_0::StaLinkLayerStats& aStats);
   Result_t SetFirmwareRoaming(bool aEnable);
   Result_t ConfigureFirmwareRoaming(
       RoamingConfigurationOptions* aRoamingConfig);
@@ -81,6 +81,20 @@ class WifiNative {
   Result_t DisableNetwork();
   Result_t RemoveNetworks();
   Result_t StartRoaming(ConfigurationOptions* aConfig);
+  Result_t SendEapSimIdentityResponse(SimIdentityRespDataOptions* aIdentity);
+  Result_t SendEapSimGsmAuthResponse(
+      const nsTArray<SimGsmAuthRespDataOptions>& aGsmAuthResp);
+  Result_t SendEapSimGsmAuthFailure();
+  Result_t SendEapSimUmtsAuthResponse(
+      SimUmtsAuthRespDataOptions* aUmtsAuthResp);
+  Result_t SendEapSimUmtsAutsResponse(
+      SimUmtsAutsRespDataOptions* aUmtsAutsResp);
+  Result_t SendEapSimUmtsAuthFailure();
+
+  SimIdentityRespDataOptions mIdentityResp;
+  SimUmtsAuthRespDataOptions mUmtsAuthResp;
+  SimUmtsAutsRespDataOptions mUmtsAutsResp;
+  nsTArray<SimGsmAuthRespDataOptions> mGsmAuthResp;
 
   Result_t StartSoftAp(SoftapConfigurationOptions* aSoftapConfig,
                        nsAString& aIfaceName);
@@ -93,11 +107,11 @@ class WifiNative {
     virtual void OnDeath() override;
   };
 
-  static WifiHal* s_WifiHal;
-  static WificondControl* s_WificondControl;
-  static SupplicantStaManager* s_SupplicantStaManager;
-  static SoftapManager* s_SoftapManager;
-  static WifiEventCallback* s_Callback;
+  static WifiHal* sWifiHal;
+  static WificondControl* sWificondControl;
+  static SupplicantStaManager* sSupplicantStaManager;
+  static SoftapManager* sSoftapManager;
+  static WifiEventCallback* sCallback;
 
   std::string mStaInterfaceName;
   std::string mApInterfaceName;

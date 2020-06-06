@@ -4141,7 +4141,9 @@ nsresult nsLayoutUtils::PaintFrame(gfxContext* aRenderingContext,
       list->PaintRoot(builder, aRenderingContext, flags);
   Telemetry::AccumulateTimeDelta(Telemetry::PAINT_RASTERIZE_TIME, paintStart);
 
-  presShell->EndPaint();
+  if (builder->IsPaintingToWindow()) {
+    presShell->EndPaint();
+  }
   builder->Check();
 
   if (StaticPrefs::gfx_logging_painted_pixel_count_enabled()) {
@@ -9041,6 +9043,16 @@ ScrollMetadata nsLayoutUtils::ComputeScrollMetadata(
   ScrollMetadata metadata;
   FrameMetrics& metrics = metadata.GetMetrics();
   metrics.SetLayoutViewport(CSSRect::FromAppUnits(aViewport));
+
+  nsIDocShell* docShell = presContext->GetDocShell();
+  BrowsingContext* bc = docShell ? docShell->GetBrowsingContext() : nullptr;
+  bool isTouchEventsEnabled =
+      docShell && docShell->GetTouchEventsOverride() ==
+                      nsIDocShell::TOUCHEVENTS_OVERRIDE_ENABLED;
+
+  if (bc && bc->InRDMPane() && isTouchEventsEnabled) {
+    metadata.SetIsRDMTouchSimulationActive(true);
+  }
 
   ViewID scrollId = ScrollableLayerGuid::NULL_SCROLL_ID;
   if (aContent) {

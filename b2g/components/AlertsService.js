@@ -9,10 +9,6 @@ const Cc = Components.classes;
 Cu.import("resource://gre/modules/XPCOMUtils.jsm");
 Cu.import("resource://gre/modules/Services.jsm");
 
-XPCOMUtils.defineLazyServiceGetter(this, "gSystemMessenger",
-                                   "@mozilla.org/system-message-internal;1",
-                                   "nsISystemMessagesInternal");
-
 XPCOMUtils.defineLazyServiceGetter(this, "uuidGenerator",
                                    "@mozilla.org/uuid-generator;1",
                                    "nsIUUIDGenerator");
@@ -41,8 +37,6 @@ function debug(str) {
 // -----------------------------------------------------------------------
 // Alerts Service
 // -----------------------------------------------------------------------
-
-const kNotificationSystemMessageName = "notification";
 
 const kMessageAppNotificationSend    = "app-notification-send";
 const kMessageAppNotificationReturn  = "app-notification-return";
@@ -132,9 +126,8 @@ AlertsService.prototype = {
       timestamp: aDetails.timestamp || undefined,
       dataObj: aDetails.data || undefined,
       mozbehavior: aDetails.mozbehavior,
-      requireInteraction: aDetails.requireInteraction || false,
-      actions: aDetails.actions || "[]",
-      serviceWorkerRegistrationID: aDetails.serviceWorkerRegistrationID
+      // TODO: Interactive Notification feature
+      serviceWorkerRegistrationScope: aDetails.serviceWorkerRegistrationScope
     };
 
     cpmm.sendAsyncMessage(kMessageAppNotificationSend, {
@@ -157,35 +150,30 @@ AlertsService.prototype = {
     }
 
     let topic = data.topic;
-    let userAction = "";
-    if (data.extra && typeof data.extra === 'string') {
-      userAction = data.extra;
-    }
 
     try {
-      listener.observer.observe(null, topic, userAction);
+      listener.observer.observe(null, topic, null);
     } catch (e) {
-      // The non-empty serviceWorkerRegistrationID means the notification
+      // The non-empty serviceWorkerRegistrationScope means the notification
       // is issued by service worker, so deal with this listener
       // via serviceWorkerManager
-      if (listener.serviceWorkerRegistrationID.length &&
-          topic !== kTopicAlertShow) {
-        let appId = appsService.getAppLocalIdByManifestURL(listener.manifestURL);
-        let originSuffix = "^appId=" + appId;
+      if (listener.serviceWorkerRegistrationScope.length &&
+        topic !== kTopicAlertShow) {
+        const scope = listener.serviceWorkerRegistrationScope;
+        const originAttr = ChromeUtils.createOriginAttributesFromOrigin(scope);
+        const originSuffix = ChromeUtils.originAttributesToSuffix(originAttr);
         let eventName;
 
         if (topic == kTopicAlertClickCallback) {
           eventName = "notificationclick";
         } else if (topic === kTopicAlertFinished) {
           eventName = "notificationclose";
-          userAction = "";
         }
 
-        if (eventName) {
-          serviceWorkerManager.sendNotificationEvent(
-            eventName,
+        if (eventName == "notificationclick") {
+          serviceWorkerManager.sendNotificationClickEvent(
             originSuffix,
-            listener.serviceWorkerRegistrationID,
+            scope,
             listener.dbId,
             listener.title,
             listener.dir,
@@ -194,40 +182,8 @@ AlertsService.prototype = {
             listener.tag,
             listener.imageURL,
             listener.dataObj || undefined,
-            listener.mozbehavior,
-            listener.requireInteraction,
-            listener.actions,
-            userAction
+            listener.mozbehavior
           );
-        }
-      } else {
-        // It seems like there is no callbacks anymore, forward the click on
-        // notification via a system message containing the title/text/icon of
-        // the notification so the app get a change to react.
-        if (data.target) {
-          if (topic !== kTopicAlertShow) {
-            // excluding the 'show' event: there is no reason a unlaunched app
-            // would want to be notified that a notification is shown. This
-            // happens when a notification is still displayed at reboot time.
-            let dataObj = this.deserializeStructuredClone(listener.dataObj);
-            gSystemMessenger.sendMessage(kNotificationSystemMessageName, {
-                clicked: (topic === kTopicAlertClickCallback),
-                title: listener.title,
-                body: listener.text,
-                imageURL: listener.imageURL,
-                lang: listener.lang,
-                dir: listener.dir,
-                id: listener.id,
-                tag: listener.tag,
-                timestamp: listener.timestamp,
-                data: dataObj || undefined,
-                requireInteraction: listener.requireInteraction,
-                actions: []
-              },
-              Services.io.newURI(data.target, null, null),
-              Services.io.newURI(listener.manifestURL, null, null)
-            );
-          }
         }
       }
       if (topic === kTopicAlertFinished && listener.dbId) {
@@ -239,30 +195,6 @@ AlertsService.prototype = {
     if (topic === kTopicAlertFinished) {
       delete this._listeners[data.uid];
     }
-  },
-
-  deserializeStructuredClone: function(dataString) {
-    if (!dataString) {
-      return null;
-    }
-    let scContainer = Cc["@mozilla.org/docshell/structured-clone-container;1"].
-      createInstance(Ci.nsIStructuredCloneContainer);
-
-    // The maximum supported structured-clone serialization format version
-    // as defined in "js/public/StructuredClone.h"
-    let JS_STRUCTURED_CLONE_VERSION = 4;
-    scContainer.initFromBase64(dataString, JS_STRUCTURED_CLONE_VERSION);
-    let dataObj = scContainer.deserializeToVariant();
-
-    // We have to check whether dataObj contains DOM objects (supported by
-    // nsIStructuredCloneContainer, but not by Cu.cloneInto), e.g. ImageData.
-    // After the structured clone callback systems will be unified, we'll not
-    // have to perform this check anymore.
-    try {
-      let data = Cu.cloneInto(dataObj, {});
-    } catch(e) { dataObj = null; }
-
-    return dataObj;
   }
 };
 

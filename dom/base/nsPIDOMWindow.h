@@ -13,6 +13,7 @@
 #include "nsCOMPtr.h"
 #include "nsTArray.h"
 #include "mozilla/dom/EventTarget.h"
+#include "mozilla/EventForwards.h"
 #include "mozilla/Maybe.h"
 #include "mozilla/TaskCategory.h"
 #include "js/TypeDecls.h"
@@ -556,9 +557,9 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
   virtual nsISerialEventTarget* EventTargetFor(
       mozilla::TaskCategory aCategory) const = 0;
 
-  void SaveStorageAccessGranted();
+  void SaveStorageAccessPermissionGranted();
 
-  bool HasStorageAccessGranted();
+  bool HasStorageAccessPermissionGranted();
 
   nsIPrincipal* GetDocumentContentBlockingAllowListPrincipal() const;
 
@@ -656,7 +657,7 @@ class nsPIDOMWindowInner : public mozIDOMWindow {
   // current window. These are also set as permissions, but it could happen
   // that we need to access them synchronously in this context, and for
   // this, we need a copy here.
-  bool mStorageAccessGranted;
+  bool mStorageAccessPermissionGranted;
 
   // The WindowGlobalChild actor for this window.
   //
@@ -965,7 +966,10 @@ class nsPIDOMWindowOuter : public mozIDOMWindowProxy {
    *
    * Outer windows only.
    */
-  virtual bool DispatchCustomEvent(const nsAString& aEventName) = 0;
+  virtual bool DispatchCustomEvent(
+      const nsAString& aEventName,
+      mozilla::ChromeOnlyDispatch aChromeOnlyDispatch =
+          mozilla::ChromeOnlyDispatch::eNo) = 0;
 
   /**
    * Like nsIDOMWindow::Open, except that we don't navigate to the given URL.

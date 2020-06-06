@@ -8,20 +8,16 @@
 
 this.EXPORTED_SYMBOLS = ["WifiWorker"];
 
-const { classes: Cc, interfaces: Ci, utils: Cu, results: Cr } = Components;
-
 const { XPCOMUtils } = ChromeUtils.import(
   "resource://gre/modules/XPCOMUtils.jsm"
 );
-const { Services } = ChromeUtils.import(
-  "resource://gre/modules/Services.jsm"
-);
+const { Services } = ChromeUtils.import("resource://gre/modules/Services.jsm");
+
 const { libcutils, netHelpers } = ChromeUtils.import(
   "resource://gre/modules/systemlibs.js"
 );
-const { WifiInfo } = ChromeUtils.import(
-  "resource://gre/modules/WifiInfo.jsm"
-);
+const { WifiInfo } = ChromeUtils.import("resource://gre/modules/WifiInfo.jsm");
+
 const { WifiNetUtil } = ChromeUtils.import(
   "resource://gre/modules/WifiNetUtil.jsm"
 );
@@ -39,9 +35,6 @@ const { WifiConfigManager } = ChromeUtils.import(
 );
 const { WifiScanSettings, WifiPnoSettings } = ChromeUtils.import(
   "resource://gre/modules/WifiScanSettings.jsm"
-);
-const { FileUtils } = ChromeUtils.import(
-  "resource://gre/modules/FileUtils.jsm"
 );
 const { Timer, clearTimeout, setTimeout } = ChromeUtils.import(
   "resource://gre/modules/Timer.jsm"
@@ -67,13 +60,20 @@ const FEATURE_TDLS_OFFCHANNEL = Ci.nsIWifiResult.FEATURE_TDLS_OFFCHANNEL;
 const FEATURE_ND_OFFLOAD = Ci.nsIWifiResult.FEATURE_ND_OFFLOAD;
 const FEATURE_KEEP_ALIVE = Ci.nsIWifiResult.FEATURE_KEEP_ALIVE;
 const FEATURE_DEBUG_PACKET_FATE = Ci.nsIWifiResult.FEATURE_DEBUG_PACKET_FATE;
-const FEATURE_DEBUG_MEMORY_FIRMWARE_DUMP = Ci.nsIWifiResult.FEATURE_DEBUG_MEMORY_FIRMWARE_DUMP;
-const FEATURE_DEBUG_MEMORY_DRIVER_DUMP = Ci.nsIWifiResult.FEATURE_DEBUG_MEMORY_DRIVER_DUMP;
-const FEATURE_DEBUG_RING_BUFFER_CONNECT_EVENT = Ci.nsIWifiResult.FEATURE_DEBUG_RING_BUFFER_CONNECT_EVENT;
-const FEATURE_DEBUG_RING_BUFFER_POWER_EVENT = Ci.nsIWifiResult.FEATURE_DEBUG_RING_BUFFER_POWER_EVENT;
-const FEATURE_DEBUG_RING_BUFFER_WAKELOCK_EVENT = Ci.nsIWifiResult.FEATURE_DEBUG_RING_BUFFER_WAKELOCK_EVENT;
-const FEATURE_DEBUG_RING_BUFFER_VENDOR_DATA = Ci.nsIWifiResult.FEATURE_DEBUG_RING_BUFFER_VENDOR_DATA;
-const FEATURE_DEBUG_HOST_WAKE_REASON_STATS = Ci.nsIWifiResult.FEATURE_DEBUG_HOST_WAKE_REASON_STATS;
+const FEATURE_DEBUG_MEMORY_FIRMWARE_DUMP =
+  Ci.nsIWifiResult.FEATURE_DEBUG_MEMORY_FIRMWARE_DUMP;
+const FEATURE_DEBUG_MEMORY_DRIVER_DUMP =
+  Ci.nsIWifiResult.FEATURE_DEBUG_MEMORY_DRIVER_DUMP;
+const FEATURE_DEBUG_RING_BUFFER_CONNECT_EVENT =
+  Ci.nsIWifiResult.FEATURE_DEBUG_RING_BUFFER_CONNECT_EVENT;
+const FEATURE_DEBUG_RING_BUFFER_POWER_EVENT =
+  Ci.nsIWifiResult.FEATURE_DEBUG_RING_BUFFER_POWER_EVENT;
+const FEATURE_DEBUG_RING_BUFFER_WAKELOCK_EVENT =
+  Ci.nsIWifiResult.FEATURE_DEBUG_RING_BUFFER_WAKELOCK_EVENT;
+const FEATURE_DEBUG_RING_BUFFER_VENDOR_DATA =
+  Ci.nsIWifiResult.FEATURE_DEBUG_RING_BUFFER_VENDOR_DATA;
+const FEATURE_DEBUG_HOST_WAKE_REASON_STATS =
+  Ci.nsIWifiResult.FEATURE_DEBUG_HOST_WAKE_REASON_STATS;
 const FEATURE_DEBUG_ERROR_ALERTS = Ci.nsIWifiResult.FEATURE_DEBUG_ERROR_ALERTS;
 
 const SUCCESS = Ci.nsIWifiResult.SUCCESS;
@@ -83,57 +83,6 @@ const ERROR_INVALID_ARGS = Ci.nsIWifiResult.ERROR_INVALID_ARGS;
 const ERROR_NOT_SUPPORTED = Ci.nsIWifiResult.ERROR_NOT_SUPPORTED;
 const ERROR_TIMEOUT = Ci.nsIWifiResult.ERROR_TIMEOUT;
 const ERROR_UNKNOWN = Ci.nsIWifiResult.ERROR_UNKNOWN;
-
-const SSID_MAX_LEN_IN_BYTES = Ci.nsIWifiConfiguration.SSID_MAX_LEN_IN_BYTES;
-const PSK_PASSPHRASE_MIN_LEN_IN_BYTES = Ci.nsIWifiConfiguration.PSK_PASSPHRASE_MIN_LEN_IN_BYTES;
-const PSK_PASSPHRASE_MAX_LEN_IN_BYTES = Ci.nsIWifiConfiguration.PSK_PASSPHRASE_MAX_LEN_IN_BYTES;
-const WEP_KEYS_MAX_NUM = Ci.nsIWifiConfiguration.WEP_KEYS_MAX_NUM;
-const WEP40_KEY_LEN_IN_BYTES = Ci.nsIWifiConfiguration.WEP40_KEY_LEN_IN_BYTES;
-const WEP104_KEY_LEN_IN_BYTES = Ci.nsIWifiConfiguration.WEP104_KEY_LEN_IN_BYTES;
-
-const KEYMGMT_WPA_EAP = Ci.nsIWifiConfiguration.KEYMGMT_WPA_EAP;
-const KEYMGMT_WPA_PSK = Ci.nsIWifiConfiguration.KEYMGMT_WPA_PSK;
-const KEYMGMT_NONE = Ci.nsIWifiConfiguration.KEYMGMT_NONE;
-const KEYMGMT_IEEE8021X = Ci.nsIWifiConfiguration.KEYMGMT_IEEE8021X;
-const KEYMGMT_FT_EAP = Ci.nsIWifiConfiguration.KEYMGMT_FT_EAP;
-const KEYMGMT_FT_PSK = Ci.nsIWifiConfiguration.KEYMGMT_FT_PSK;
-const KEYMGMT_OSEN = Ci.nsIWifiConfiguration.KEYMGMT_OSEN;
-
-const PROTO_WPA = Ci.nsIWifiConfiguration.PROTO_WPA;
-const PROTO_RSN = Ci.nsIWifiConfiguration.PROTO_RSN;
-const PROTO_OSEN = Ci.nsIWifiConfiguration.PROTO_OSEN;
-
-const AUTHALG_OPEN = Ci.nsIWifiConfiguration.AUTHALG_OPEN;
-const AUTHALG_SHARED = Ci.nsIWifiConfiguration.AUTHALG_SHARED;
-const AUTHALG_LEAP = Ci.nsIWifiConfiguration.AUTHALG_LEAP;
-
-const GROUPCIPHER_WEP40 = Ci.nsIWifiConfiguration.GROUPCIPHER_WEP40;
-const GROUPCIPHER_WEP104 = Ci.nsIWifiConfiguration.GROUPCIPHER_WEP104;
-const GROUPCIPHER_TKIP = Ci.nsIWifiConfiguration.GROUPCIPHER_TKIP;
-const GROUPCIPHER_CCMP = Ci.nsIWifiConfiguration.GROUPCIPHER_CCMP;
-const GROUPCIPHER_GTK_NOT_USED = Ci.nsIWifiConfiguration.GROUPCIPHER_GTK_NOT_USED;
-
-const PAIRWISECIPHER_NONE = Ci.nsIWifiConfiguration.PAIRWISECIPHER_NONE;
-const PAIRWISECIPHER_TKIP = Ci.nsIWifiConfiguration.PAIRWISECIPHER_TKIP;
-const PAIRWISECIPHER_CCMP = Ci.nsIWifiConfiguration.PAIRWISECIPHER_CCMP;
-
-const EAP_PEAP = Ci.nsIWifiConfiguration.EAP_PEAP;
-const EAP_TLS = Ci.nsIWifiConfiguration.EAP_TLS;
-const EAP_TTLS = Ci.nsIWifiConfiguration.EAP_TTLS;
-const EAP_PWD = Ci.nsIWifiConfiguration.EAP_PWD;
-const EAP_SIM = Ci.nsIWifiConfiguration.EAP_SIM;
-const EAP_AKA = Ci.nsIWifiConfiguration.EAP_AKA;
-const EAP_AKA_PRIME = Ci.nsIWifiConfiguration.EAP_AKA_PRIME;
-const EAP_WFA_UNAUTH_TLS = Ci.nsIWifiConfiguration.EAP_WFA_UNAUTH_TLS;
-
-const PHASE2_NONE = Ci.nsIWifiConfiguration.PHASE2_NONE;
-const PHASE2_PAP = Ci.nsIWifiConfiguration.PHASE2_PAP;
-const PHASE2_MSPAP = Ci.nsIWifiConfiguration.PHASE2_MSPAP;
-const PHASE2_MSPAPV2 = Ci.nsIWifiConfiguration.PHASE2_MSPAPV2;
-const PHASE2_GTC = Ci.nsIWifiConfiguration.PHASE2_GTC;
-const PHASE2_SIM = Ci.nsIWifiConfiguration.PHASE2_SIM;
-const PHASE2_AKA = Ci.nsIWifiConfiguration.PHASE2_AKA;
-const PHASE2_AKA_PRIME = Ci.nsIWifiConfiguration.PHASE2_AKA_PRIME;
 
 const AP_BAND_24GHZ = Ci.nsISoftapConfiguration.AP_BAND_24GHZ;
 const AP_BAND_5GHZ = Ci.nsISoftapConfiguration.AP_BAND_5GHZ;
@@ -158,12 +107,13 @@ const AUTH_FAILURE_TIMEOUT = Ci.nsIWifiEvent.AUTH_FAILURE_TIMEOUT;
 const AUTH_FAILURE_WRONG_KEY = Ci.nsIWifiEvent.AUTH_FAILURE_WRONG_KEY;
 const AUTH_FAILURE_EAP_FAILURE = Ci.nsIWifiEvent.AUTH_FAILURE_EAP_FAILURE;
 
-const ERROR_EAP_SIM_VENDOR_SPECIFIC_EXPIRED_CERT = Ci.nsIWifiEvent.ERROR_EAP_SIM_VENDOR_SPECIFIC_EXPIRED_CERT;
+const ERROR_EAP_SIM_NOT_SUBSCRIBED =
+  Ci.nsIWifiEvent.ERROR_EAP_SIM_NOT_SUBSCRIBED;
+const ERROR_EAP_SIM_VENDOR_SPECIFIC_EXPIRED_CERT =
+  Ci.nsIWifiEvent.ERROR_EAP_SIM_VENDOR_SPECIFIC_EXPIRED_CERT;
 
 const WIFIWORKER_CONTRACTID = "@mozilla.org/wifi/worker;1";
 const WIFIWORKER_CID = Components.ID("{a14e8977-d259-433a-a88d-58dd44657e5b}");
-
-const WIFIWORKER_WORKER = "resource://gre/modules/wifi_worker.js";
 
 const kMozSettingsChangedObserverTopic = "mozsettings-changed";
 const kXpcomShutdownChangedTopic = "xpcom-shutdown";
@@ -282,24 +232,39 @@ XPCOMUtils.defineLazyServiceGetter(
 //                                    "@mozilla.org/settingsService;1",
 //                                    "nsISettingsService");
 
-// XPCOMUtils.defineLazyServiceGetter(this, "gMobileConnectionService",
-//                                    "@mozilla.org/mobileconnection/mobileconnectionservice;1",
-//                                    "nsIMobileConnectionService");
+XPCOMUtils.defineLazyServiceGetter(
+  this,
+  "gMobileConnectionService",
+  "@mozilla.org/mobileconnection/mobileconnectionservice;1",
+  "nsIMobileConnectionService"
+);
 
-// XPCOMUtils.defineLazyServiceGetter(this, "gIccService",
-//                                    "@mozilla.org/icc/iccservice;1",
-//                                    "nsIIccService");
+XPCOMUtils.defineLazyServiceGetter(
+  this,
+  "gIccService",
+  "@mozilla.org/icc/iccservice;1",
+  "nsIIccService"
+);
 
-// XPCOMUtils.defineLazyServiceGetter(this, "gPowerManagerService",
-//                                    "@mozilla.org/power/powermanagerservice;1",
-//                                    "nsIPowerManagerService");
+XPCOMUtils.defineLazyServiceGetter(
+  this,
+  "gPowerManagerService",
+  "@mozilla.org/power/powermanagerservice;1",
+  "nsIPowerManagerService"
+);
 
-// XPCOMUtils.defineLazyServiceGetter(this, "gImsRegService",
-//                                    "@mozilla.org/mobileconnection/imsregservice;1",
-//                                    "nsIImsRegService");
+XPCOMUtils.defineLazyServiceGetter(
+  this,
+  "gImsRegService",
+  "@mozilla.org/mobileconnection/imsregservice;1",
+  "nsIImsRegService"
+);
 
-// XPCOMUtils.defineLazyModuleGetter(this, "PhoneNumberUtils",
-//                                   "resource://gre/modules/PhoneNumberUtils.jsm");
+// ChromeUtils.defineLazyModuleGetter(
+//   this,
+//   "PhoneNumberUtils",
+//   "resource://gre/modules/PhoneNumberUtils.jsm"
+// );
 
 ChromeUtils.defineModuleGetter(
   this,
@@ -328,8 +293,7 @@ var WifiManager = (function() {
 
   function getStartupPrefs() {
     return {
-      // FIXME: sdk NaN
-      sdkVersion: 29, //parseInt(libcutils.property_get("ro.build.version.sdk"), 10),
+      sdkVersion: parseInt(libcutils.property_get("ro.build.version.sdk"), 10),
       schedScanRecovery:
         libcutils.property_get("ro.moz.wifi.sched_scan_recover") !== "false",
       p2pSupported: libcutils.property_get("ro.moz.wifi.p2p_supported") === "1",
@@ -339,8 +303,7 @@ var WifiManager = (function() {
       ibssSupported:
         libcutils.property_get("ro.moz.wifi.ibss_supported", "true") === "true",
       ifname: libcutils.property_get("wifi.interface"),
-      //FIXME: NS_ERROR_UNEXPECTED: Component returned failure code: 0x8000ffff (NS_ERROR_UNEXPECTED) [nsIPrefBranch.getIntPref]
-      numRil: 1, //Services.prefs.getIntPref("ril.numRadioInterfaces"),
+      numRil: Services.prefs.getIntPref("ril.numRadioInterfaces"),
       wapi_key_type: libcutils.property_get(
         "ro.wifi.wapi.wapi_key_type",
         "wapi_key_type"
@@ -396,8 +359,7 @@ var WifiManager = (function() {
 
   let wifiListener = {
     onEventCallback(event, iface) {
-      if (handleEvent(event)) {
-      }
+      handleEvent(event, iface);
     },
 
     onCommandResult(result, iface) {
@@ -477,7 +439,11 @@ var WifiManager = (function() {
     screenOn = enabled;
     if (screenOn) {
       fullBandConnectedTimeIntervalMilli = WIFI_ASSOCIATED_SCAN_INTERVAL;
-      setSuspendOptimizationsMode(POWER_MODE_SCREEN_STATE, false, function() {});
+      setSuspendOptimizationsMode(
+        POWER_MODE_SCREEN_STATE,
+        false,
+        function() {}
+      );
       enableBackgroundScan(false);
       if (manager.state == "COMPLETED") {
         // Scan after 500ms
@@ -517,14 +483,15 @@ var WifiManager = (function() {
         //       so we should optimize the pno list.
         let config = configuredNetworks[networkKey];
         network.ssid = config.ssid;
-        network.isHidden = (config.scanSsid) ? true : false;
+        network.isHidden = config.scanSsid;
 
         // TODO: temporarily add all 2G channels in list,
         //       should confirm where to update the frequencies
         // network.frequencies = [config.frequency];
-        network.frequencies =
-          [ 2412, 2417, 2422, 2427, 2432, 2437,
-            2442, 2447, 2452, 2457, 2462 ];
+        network.frequencies = [
+          2412, 2417, 2422, 2427, 2432, 2437,
+          2442, 2447, 2452, 2457, 2462
+        ];
 
         WifiPnoSettings.pnoNetworks.push(network);
       }
@@ -532,7 +499,8 @@ var WifiManager = (function() {
 
       if (pnoSettings.pnoNetworks.length == 0) {
         debug("Empty PNO network list");
-        return callback(false);
+        callback(false);
+        return;
       }
 
       wifiCommand.startPnoScan(pnoSettings, function(result) {
@@ -550,7 +518,8 @@ var WifiManager = (function() {
       let channels = result.getChannels();
       if (channels.length > 0) {
         WifiScanSettings.channels = channels;
-        return callback(true);
+        callback(true);
+        return;
       }
       callback(false);
     });
@@ -922,9 +891,8 @@ var WifiManager = (function() {
 
   function preDhcpSetup() {
     manager.inObtainingIpState = true;
-    // TODO: gPowerManagerService is not defined
     // Hold wakelock during doing DHCP
-    // acquireWifiWakeLock();
+    acquireWifiWakeLock();
 
     // Disable power saving mode when doing dhcp
     setSuspendOptimizationsMode(POWER_MODE_DHCP, false, function() {});
@@ -938,9 +906,9 @@ var WifiManager = (function() {
     }
     setSuspendOptimizationsMode(POWER_MODE_DHCP, true, function(ok) {
       manager.setPowerSave(true, function(result) {
-        // TODO: gPowerManagerService is not defined
         // Release wakelock during doing DHCP
-        // releaseWifiWakeLock();
+        releaseWifiWakeLock();
+
         manager.inObtainingIpState = false;
         callback(result.status == SUCCESS);
       });
@@ -978,299 +946,368 @@ var WifiManager = (function() {
     }
   }
 
-  var supplicantStatesMap =
-    [
-      "DISCONNECTED",
-      "INTERFACE_DISABLED",
-      "INACTIVE",
-      "SCANNING",
-      "AUTHENTICATING",
-      "ASSOCIATING",
-      "ASSOCIATED",
-      "FOUR_WAY_HANDSHAKE",
-      "GROUP_HANDSHAKE",
-      "COMPLETED",
-      "UNINITIALIZED",
-    ];
+  var supplicantStatesMap = [
+    "DISCONNECTED",
+    "INTERFACE_DISABLED",
+    "INACTIVE",
+    "SCANNING",
+    "AUTHENTICATING",
+    "ASSOCIATING",
+    "ASSOCIATED",
+    "FOUR_WAY_HANDSHAKE",
+    "GROUP_HANDSHAKE",
+    "COMPLETED",
+    "UNINITIALIZED",
+  ];
 
-  var driverEventMap = {
-    STOPPED: "driverstopped",
-    STARTED: "driverstarted",
-    HANGED: "driverhung",
-  };
+  var eventTable = new Map([
+    ["SUPPLICANT_STATE_CHANGED", supplicantStateChanged],
+    ["SUPPLICANT_TERMINATING", supplicantTerminating],
+    ["SUPPLICANT_NETWORK_CONNECTED", supplicantNetworkConnected],
+    ["SUPPLICANT_NETWORK_DISCONNECTED", supplicantNetworkDisconnected],
+    ["SUPPLICANT_TARGET_BSSID", supplicantTargetBssid],
+    ["SUPPLICANT_ASSOCIATED_BSSID", supplicantAssocistedBssid],
+    ["SUPPLICANT_AUTH_FAILURE", supplicantAuthenticationFailure],
+    ["SUPPLICANT_ASSOC_REJECT", supplicantAssociationReject],
+    ["EAP_SIM_GSM_AUTH_REQUEST", eapSimGsmAuthRequest],
+    ["EAP_SIM_UMTS_AUTH_REQUEST", eapSimUmtsAuthRequest],
+    ["EAP_SIM_IDENTITY_REQUEST", eapSimIdentityRequest],
+    ["SCAN_RESULT_READY", scanResultReady],
+    ["SCAN_RESULT_FAILED", scanResultFailed],
+    ["PNO_SCAN_FOUND", pnoScanFound],
+    ["PNO_SCAN_FAILED", pnoScanFailed],
+    ["HOTSPOT_CLIENT_CHANGED", hotspotClientChanged],
+  ]);
 
   var linkDebouncingId = null;
   var isDriverRoaming = false;
   // Handle events sent to us by the event worker.
-  function handleEvent(event) {
-    let eventData = event.name;
-    debug("Event coming in: " + eventData);
-    if (eventData.includes("SUPPLICANT_STATE_CHANGED")) {
-      // Parse the event data.
-      var fields = {};
-      fields.state = supplicantStatesMap[event.stateChanged.state];
-      fields.id = event.stateChanged.id;
-      fields.ssid = event.stateChanged.ssid;
-      fields.bssid = event.stateChanged.bssid;
-      wifiInfo.setSupplicantState(fields.state);
+  function handleEvent(event, iface) {
+    debug("Event coming: [" + iface + "] " + event.name);
 
-      if (manager.isConnectState(fields.state)) {
-        if (wifiInfo.ssid != fields.ssid && fields.ssid.length > 0) {
-          wifiInfo.setSSID(fields.ssid);
-        }
+    if (eventTable.has(event.name)) {
+      eventTable.get(event.name)(event);
+    }
+    return true;
+  }
 
-        if (
-          wifiInfo.bssid != fields.bssid &&
-          fields.bssid !== "00:00:00:00:00:00"
-        ) {
-          wifiInfo.setBSSID(fields.bssid);
-        }
+  function supplicantStateChanged(event) {
+    // Parse the event data.
+    var fields = {};
+    fields.state = supplicantStatesMap[event.stateChanged.state];
+    fields.id = event.stateChanged.id;
+    fields.ssid = event.stateChanged.ssid;
+    fields.bssid = event.stateChanged.bssid;
+    wifiInfo.setSupplicantState(fields.state);
 
-        WifiConfigManager.getNetworkConfiguration(
-          manager.targetNetworkId,
-          function(network) {
-            if (network && network.netId !== INVALID_NETWORK_ID) {
-              wifiInfo.setNetworkId(network.netId);
-              wifiInfo.setSecurity(network.keyMgmt);
-            }
-        });
-      } else if (manager.isConnectState(manager.state)) {
-        manager.lastDriverRoamAttempt = 0;
-        wifiInfo.reset();
+    if (manager.isConnectState(fields.state)) {
+      if (wifiInfo.ssid != fields.ssid && fields.ssid.length > 0) {
+        wifiInfo.setSSID(fields.ssid);
       }
 
-      if (manager.wpsStarted && manager.state !== "COMPLETED") {
-        return true;
+      if (
+        wifiInfo.bssid != fields.bssid &&
+        fields.bssid !== "00:00:00:00:00:00"
+      ) {
+        wifiInfo.setBSSID(fields.bssid);
       }
 
-      // Check device in roaming state or not.
-      if (manager.state === "COMPLETED" && fields.state === "ASSOCIATED") {
-        debug("Driver Roaming starts.");
-        isDriverRoaming = true;
-      } else if (!manager.isConnectState(fields.state)) {
-        debug("Driver Roaming resets flag.");
+      WifiConfigManager.getNetworkConfiguration(
+        manager.targetNetworkId,
+        function(network) {
+          if (network && network.netId !== INVALID_NETWORK_ID) {
+            wifiInfo.setNetworkId(network.netId);
+            WifiConfigUtils.getSecurityByKeyMgmt(network, function(security) {
+              wifiInfo.setSecurity(security);
+            });
+          }
+        }
+      );
+    } else if (manager.isConnectState(manager.state)) {
+      manager.lastDriverRoamAttempt = 0;
+      wifiInfo.reset();
+    }
+
+    if (manager.wpsStarted && manager.state !== "COMPLETED") {
+      return;
+    }
+
+    // Check device in roaming state or not.
+    if (manager.state === "COMPLETED" && fields.state === "ASSOCIATED") {
+      debug("Driver Roaming starts.");
+      isDriverRoaming = true;
+    } else if (!manager.isConnectState(fields.state)) {
+      debug("Driver Roaming resets flag.");
+      isDriverRoaming = false;
+    }
+
+    fields.isDriverRoaming = isDriverRoaming;
+
+    if (manager.linkDebouncing) {
+      debug(
+        "State Change from " +
+          manager.state +
+          " to " +
+          fields.state +
+          ", linkDebouncing."
+      );
+
+      if (fields.state !== "COMPLETED") {
+        return;
+      }
+
+      if (linkDebouncingId !== null) {
+        clearTimeout(linkDebouncingId);
+        linkDebouncingId = null;
+      }
+      manager.linkDebouncing = false;
+    }
+
+    notifyStateChange(fields);
+    if (fields.state === "COMPLETED") {
+      manager.lastDriverRoamAttempt = 0;
+      manager.targetNetworkId = INVALID_NETWORK_ID;
+      onconnected();
+      if (isDriverRoaming) {
         isDriverRoaming = false;
       }
+    }
+  }
 
-      fields.isDriverRoaming = isDriverRoaming;
+  function supplicantTerminating() {
+    wifiInfo.reset();
+    notifyStateChange({ state: "DISCONNECTED", BSSID: null, id: -1 });
 
-      if (manager.linkDebouncing) {
-        debug(
-          "State Change from " +
-            manager.state +
-            " to " +
-            fields.state +
-            ", linkDebouncing."
-        );
-        if (fields.state !== "COMPLETED") {
-          return true;
-        }
+    // If the supplicant is terminated as commanded, the supplicant lost
+    // notification will be sent after driver unloaded. In such case, the
+    // manager state will be "DISABLING" or "UNINITIALIZED".
+    // So if supplicant terminated with incorrect manager state, implying
+    // unexpected condition, we should notify supplicant lost here.
+    if (manager.state !== "DISABLING" && manager.state !== "UNINITIALIZED") {
+      notify("supplicantlost", { success: true });
+    }
+  }
 
-        if (linkDebouncingId !== null) {
-          clearTimeout(linkDebouncingId);
-          linkDebouncingId = null;
-        }
-        manager.linkDebouncing = false;
-      }
+  function supplicantNetworkConnected(event) {
+    var bssid = event.bssid;
+    wifiInfo.setBSSID(bssid);
 
-      notifyStateChange(fields);
-      if (fields.state === "COMPLETED") {
-        manager.lastDriverRoamAttempt = 0;
-        manager.targetNetworkId = INVALID_NETWORK_ID;
-        onconnected();
-        if (isDriverRoaming) {
-          isDriverRoaming = false;
-        }
-      }
-    } else if (eventData.includes("CTRL-EVENT-DRIVER-STATE")) {
-      var handlerName = driverEventMap[eventData];
-      if (handlerName) {
-        notify(handlerName);
-      }
-    } else if (eventData.includes("SUPPLICANT_TERMINATING")) {
-      wifiInfo.reset();
-      notifyStateChange({ state: "DISCONNECTED", BSSID: null, id: -1 });
+    if (WifiNetworkSelector.trackBssid(bssid, true, 0)) {
+      manager.setFirmwareRoamingConfiguration();
+    }
+    if (manager.wpsStarted) {
+      manager.wpsStarted = false;
+    }
+  }
 
-      // If the supplicant is terminated as commanded, the supplicant lost
-      // notification will be sent after driver unloaded. In such case, the
-      // manager state will be "DISABLING" or "UNINITIALIZED".
-      // So if supplicant terminated with incorrect manager state, implying
-      // unexpected condition, we should notify supplicant lost here.
-      if (manager.state !== "DISABLING" && manager.state !== "UNINITIALIZED") {
-        notify("supplicantlost", { success: true });
-      }
-    } else if (eventData.includes("SUPPLICANT_NETWORK_DISCONNECTED")) {
-      var bssid = event.bssid;
-      var reason = event.reason;
-      var lastRoam = 0;
-      fullBandConnectedTimeIntervalMilli = WIFI_ASSOCIATED_SCAN_INTERVAL;
-      if (manager.lastDriverRoamAttempt != 0) {
-        lastRoam = Date.now() - manager.lastDriverRoamAttempt;
-        manager.lastDriverRoamAttempt = 0;
-      }
+  function supplicantNetworkDisconnected(event) {
+    var reason = event.reason;
+    var lastRoam = 0;
+    fullBandConnectedTimeIntervalMilli = WIFI_ASSOCIATED_SCAN_INTERVAL;
+    if (manager.lastDriverRoamAttempt != 0) {
+      lastRoam = Date.now() - manager.lastDriverRoamAttempt;
+      manager.lastDriverRoamAttempt = 0;
+    }
 
-      debug("DISCONNECTED wifiInfo: " + JSON.stringify(wifiInfo));
+    debug("DISCONNECTED wifiInfo: " + JSON.stringify(wifiInfo));
 
-      if (manager.isWifiEnabled(manager.state)) {
-        // Clear the bssid in the current config's network block
-        WifiConfigManager.clearCurrentConfigBssid(lastNetwork.netId, function() {});
+    if (manager.isWifiEnabled(manager.state)) {
+      // Clear the bssid in the current config's network block
+      WifiConfigManager.clearCurrentConfigBssid(
+        lastNetwork.netId,
+        function() {}
+      );
 
-        let networkKey = escape(wifiInfo.wifiSsid) + wifiInfo.security;
-        var configuredNetworks = WifiConfigManager.configuredNetworks;
-        if (typeof configuredNetworks[networkKey] !== "undefined") {
-          let networkEnabled = !configuredNetworks[networkKey]
-            .networkSelectionStatus;
-          if (
-            screenOn &&
-            !manager.linkDebouncing &&
-            networkEnabled &&
-            !WifiConfigManager.isLastSelectedNetwork(lastNetwork.netId) &&
-            (reason != 3 || (lastRoam > 0 && lastRoam < 2000)) &&
-            ((wifiInfo.is24G &&
-              wifiInfo.rssi > WifiNetworkSelector.RSSI_THRESHOLD_LOW_24G) ||
-              (wifiInfo.is5G &&
-                wifiInfo.rssi > WifiNetworkSelector.RSSI_THRESHOLD_LOW_5G))
-          ) {
-            handleScanRequest(function() {});
-            manager.linkDebouncing = true;
-            linkDebouncingId = setTimeout(function() {
-              isDriverRoaming = false;
-              manager.linkDebouncing = false;
-              notifyStateChange({ state: "DISCONNECTED", BSSID: null, id: -1 });
-            }, 5000);
-            debug(
-              "Receive DISCONNECTED:" +
-                " BSSID=" +
-                wifiInfo.bssid +
-                " RSSI=" +
-                wifiInfo.rssi +
-                " freq=" +
-                wifiInfo.frequency +
-                " reason=" +
-                reason +
-                " -> debounce"
-            );
-          } else {
-            handleScanRequest(function() {});
-            debug(
-              "Receive DISCONNECTED:" +
-                " BSSID=" +
-                wifiInfo.bssid +
-                " RSSI=" +
-                wifiInfo.rssi +
-                " freq=" +
-                wifiInfo.frequency +
-                " was debouncing=" +
-                manager.linkDebouncing +
-                " reason=" +
-                reason +
-                " Network Enabled Status=" +
-                networkEnabled
-            );
-          }
+      let networkKey = escape(wifiInfo.wifiSsid) + wifiInfo.security;
+      var configuredNetworks = WifiConfigManager.configuredNetworks;
+      if (typeof configuredNetworks[networkKey] !== "undefined") {
+        let networkEnabled = !configuredNetworks[networkKey]
+          .networkSelectionStatus;
+        if (
+          screenOn &&
+          !manager.linkDebouncing &&
+          networkEnabled &&
+          !WifiConfigManager.isLastSelectedNetwork(lastNetwork.netId) &&
+          (reason != 3 || (lastRoam > 0 && lastRoam < 2000)) &&
+          ((wifiInfo.is24G &&
+            wifiInfo.rssi > WifiNetworkSelector.RSSI_THRESHOLD_LOW_24G) ||
+            (wifiInfo.is5G &&
+              wifiInfo.rssi > WifiNetworkSelector.RSSI_THRESHOLD_LOW_5G))
+        ) {
+          handleScanRequest(function() {});
+          manager.linkDebouncing = true;
+          linkDebouncingId = setTimeout(function() {
+            isDriverRoaming = false;
+            manager.linkDebouncing = false;
+            notifyStateChange({ state: "DISCONNECTED", BSSID: null, id: -1 });
+          }, 5000);
+          debug(
+            "Receive DISCONNECTED:" +
+              " BSSID=" +
+              wifiInfo.bssid +
+              " RSSI=" +
+              wifiInfo.rssi +
+              " freq=" +
+              wifiInfo.frequency +
+              " reason=" +
+              reason +
+              " -> debounce"
+          );
         } else {
-          debug(networkKey + " is not defined in conifgured networks");
+          handleScanRequest(function() {});
+          debug(
+            "Receive DISCONNECTED:" +
+              " BSSID=" +
+              wifiInfo.bssid +
+              " RSSI=" +
+              wifiInfo.rssi +
+              " freq=" +
+              wifiInfo.frequency +
+              " was debouncing=" +
+              manager.linkDebouncing +
+              " reason=" +
+              reason +
+              " Network Enabled Status=" +
+              networkEnabled
+          );
+        }
+      } else {
+        debug(networkKey + " is not defined in conifgured networks");
+      }
+    }
+    manager.currentConfigChannels = [];
+    wifiInfo.reset();
+    // Restore power save and suspend optimizations when dhcp failed.
+    postDhcpSetup(function(ok) {});
+  }
+
+  function supplicantTargetBssid(event) {
+    debug("Current target bssid: " + event.bssid);
+  }
+
+  function supplicantAssocistedBssid() {
+    if (manager.state === "COMPLETED") {
+      manager.lastDriverRoamAttempt = Date.now();
+    }
+  }
+
+  function supplicantAuthenticationFailure(event) {
+    let reasonCode = event.reason;
+    let disableReason = WifiConfigManager.DISABLED_AUTHENTICATION_FAILURE;
+    WifiConfigManager.getNetworkConfiguration(manager.targetNetworkId, function(
+      network
+    ) {
+      if (reasonCode == AUTH_FAILURE_WRONG_KEY) {
+        if (network && network.hasEverConnected) {
+          debug("Network " + manager.targetNetworkId + " is ever connected");
+        } else {
+          disableReason = WifiConfigManager.DISABLED_BY_WRONG_PASSWORD;
+        }
+      } else if (reasonCode == AUTH_FAILURE_EAP_FAILURE) {
+        let errorCode = event.errorCode;
+        if (errorCode == ERROR_EAP_SIM_NOT_SUBSCRIBED) {
+          disableReason =
+            WifiConfigManager.DISABLED_AUTHENTICATION_NO_SUBSCRIBED;
         }
       }
-      manager.currentConfigChannels = [];
-      wifiInfo.reset();
-      // Restore power save and suspend optimizations when dhcp failed.
-      postDhcpSetup(function(ok) {});
-    } else if (eventData.includes("SUPPLICANT_NETWORK_CONNECTED")) {
-      var bssid = event.bssid;
-      wifiInfo.setBSSID(bssid);
+      WifiConfigManager.updateNetworkSelectionStatus(
+        manager.targetNetworkId,
+        disableReason,
+        function(doDisable) {
+          if (doDisable) {
+            notify("networkdisable", {
+              reason: WifiConfigManager.DISABLED_AUTHENTICATION_FAILURE,
+            });
+          }
+        }
+      );
+    });
+  }
 
-      if (WifiNetworkSelector.trackBssid(bssid, true, 0)) {
+  function supplicantAssociationReject(event) {
+    if (manager.wpsStarted) {
+      return;
+    }
+    var bssid = event.bssid;
+    if (bssid && bssid !== "00:00:00:00:00:00") {
+      // If we have a BSSID, tell configStore to black list it
+      if (WifiNetworkSelector.trackBssid(bssid, false, event.statusCode)) {
         manager.setFirmwareRoamingConfiguration();
       }
-      if (manager.wpsStarted) {
-        manager.wpsStarted = false;
-      }
-    } else if (eventData.includes("SCAN_RESULT_READY")) {
-      debug("Notifying of scan results available");
-      manager.handlePostWifiScan();
-      if (!screenOn && manager.state === "SCANNING") {
-        enableBackgroundScan(true);
-      }
-      if (manager.linkDebouncing) {
-        manager.setAutoRoam(lastNetwork, function() {});
-      }
-      notify("scanresultsavailable", { type: USE_SINGLE_SCAN });
-    } else if (eventData.includes("SCAN_RESULT_FAILED")) {
-      debug("Receive single scan failure");
-      manager.cachedScanResults = [];
-    } else if (eventData.includes("PNO_SCAN_FOUND")) {
-      notify("scanresultsavailable", { type: USE_PNO_SCAN });
-    } else if (eventData.includes("PNO_SCAN_FAILED")) {
-      debug("Receive PNO scan failure");
-    } else if (eventData.includes("CTRL-EVENT-EAP")) {
-      if (eventData.includes("CTRL-EVENT-EAP-STARTED")) {
-          notifyStateChange({ state: "AUTHENTICATING" });
-      }
-    } else if (eventData.includes("SUPPLICANT_TARGET_BSSID")) {
-    } else if (eventData.includes("SUPPLICANT_ASSOCIATED_BSSID")) {
-      if (manager.state === "COMPLETED") {
-        manager.lastDriverRoamAttempt = Date.now();
-      }
-    } else if (eventData.includes("SUPPLICANT_AUTH_FAILURE")) {
-      let reasonCode = event.reason;
-      let errorCode = event.errorCode;
-      let disableReason = WifiConfigManager.DISABLED_AUTHENTICATION_FAILURE;
-      WifiConfigManager.getNetworkConfiguration(manager.targetNetworkId, function(network) {
-        if (reasonCode == AUTH_FAILURE_WRONG_KEY) {
-          if (network && network.hasEverConnected) {
-            debug("Network " + manager.targetNetworkId + " is ever connected");
-          } else {
-            disableReason = WifiConfigManager.DISABLED_BY_WRONG_PASSWORD;
+
+      WifiConfigManager.updateNetworkSelectionStatus(
+        manager.targetNetworkId,
+        WifiConfigManager.DISABLED_ASSOCIATION_REJECTION,
+        function(doDisable) {
+          if (doDisable) {
+            notify("networkdisable", {
+              reason: WifiConfigManager.DISABLED_ASSOCIATION_REJECTION,
+            });
           }
-        } else if (reasonCode == AUTH_FAILURE_EAP_FAILURE) {
-          // TODO: handle eap failure here
         }
-        WifiConfigManager.updateNetworkSelectionStatus(
-          manager.targetNetworkId, disableReason,
-          function(doDisable) {
-            if (doDisable) {
-              notify("networkdisable", {
-                reason: WifiConfigManager.DISABLED_AUTHENTICATION_FAILURE,
-              });
-            }
-          });
-      });
-    } else if (eventData.includes("SUPPLICANT_ASSOC_REJECT")) {
-      if (manager.wpsStarted) {
-        return true;
-      }
-      var bssid = event.bssid;
-      if (bssid && bssid !== "00:00:00:00:00:00") {
-        // If we have a BSSID, tell configStore to black list it
-        if (WifiNetworkSelector.trackBssid(bssid, false, event.statusCode)) {
-          manager.setFirmwareRoamingConfiguration();
-        }
-        WifiConfigManager.updateNetworkSelectionStatus(
-          manager.targetNetworkId,
-          WifiConfigManager.DISABLED_ASSOCIATION_REJECTION,
-          function(doDisable) {
-            if (doDisable) {
-              notify("networkdisable", {
-                reason: WifiConfigManager.DISABLED_ASSOCIATION_REJECTION,
-              });
-            }
-          });
-      }
-    } else if (eventData.includes("HOTSPOT_CLIENT_CHANGED")) {
-      notify("stationinfoupdate", { station: event.numStations });
-    } else if (eventData.includes("WPS-TIMEOUT")) {
-      manager.wpsStarted = false;
-      notifyStateChange({ state: "WPS_TIMEOUT", BSSID: null, id: -1 });
-    } else if (eventData.includes("WPS-FAIL")) {
-      manager.wpsStarted = false;
-      notifyStateChange({ state: "WPS_FAIL", BSSID: null, id: -1 });
-    } else if (eventData.includes("WPS-OVERLAP-DETECTED")) {
-      manager.wpsStarted = false;
-      notifyStateChange({ state: "WPS_OVERLAP_DETECTED", BSSID: null, id: -1 });
+      );
     }
-    // Unknown event.
-    return true;
+  }
+
+  function eapSimGsmAuthRequest(event) {
+    let rands = event.getGsmRands();
+    WifiConfigManager.getNetworkConfiguration(manager.targetNetworkId, function(
+      network
+    ) {
+      let simIndex = network.simIndex || 1;
+      simGsmAuthRequest(simIndex, rands);
+    });
+  }
+
+  function eapSimUmtsAuthRequest(event) {
+    WifiConfigManager.getNetworkConfiguration(manager.targetNetworkId, function(
+      network
+    ) {
+      let simIndex = network.simIndex || 1;
+      simUmtsAuthRequest(simIndex, event.rand, event.autn);
+    });
+  }
+
+  function eapSimIdentityRequest() {
+    WifiConfigManager.getNetworkConfiguration(manager.targetNetworkId, function(
+      network
+    ) {
+      let simIndex = network.simIndex || 1;
+      simIdentityRequest(
+        manager.targetNetworkId,
+        simIndex,
+        getIdentityPrefix(network.eap)
+      );
+    });
+  }
+
+  function scanResultReady() {
+    debug("Notifying of scan results available");
+    manager.handlePostWifiScan();
+    if (!screenOn && manager.state === "SCANNING") {
+      enableBackgroundScan(true);
+    }
+    if (manager.linkDebouncing) {
+      manager.setAutoRoam(lastNetwork, function() {});
+    }
+    notify("scanresultsavailable", { type: USE_SINGLE_SCAN });
+  }
+
+  function scanResultFailed() {
+    debug("Receive single scan failure");
+    manager.cachedScanResults = [];
+  }
+
+  function pnoScanFound() {
+    notify("scanresultsavailable", { type: USE_PNO_SCAN });
+  }
+
+  function pnoScanFailed() {
+    debug("Receive PNO scan failure");
+  }
+
+  function hotspotClientChanged(event) {
+    notify("stationinfoupdate", { station: event.numStations });
   }
 
   var requestOptimizationMode = 0;
@@ -1286,7 +1323,7 @@ var WifiManager = (function() {
     if (enable) {
       requestOptimizationMode &= ~reason;
       if (!requestOptimizationMode) {
-        wifiCommand.setSuspendMode(enable, function (result) {
+        wifiCommand.setSuspendMode(enable, function(result) {
           callback(result.status == SUCCESS);
         });
       } else {
@@ -1294,8 +1331,8 @@ var WifiManager = (function() {
       }
     } else {
       requestOptimizationMode |= reason;
-      wifiCommand.setSuspendMode(enable, function (result) {
-          callback(result.status == SUCCESS);
+      wifiCommand.setSuspendMode(enable, function(result) {
+        callback(result.status == SUCCESS);
       });
     }
   }
@@ -1362,7 +1399,12 @@ var WifiManager = (function() {
 
   // EAP-SIM/AKA/AKA': convert string from base64 to byte.
   function base64Tobytes(str) {
-    let octects = atob(str.replace(/-/g, "+").replace(/_/g, "/"));
+    let octects = atob(
+      str
+        .replace(/-/g, "+")
+        .replace(/_/g, "/")
+        .replace(/\r?\n|\r/g, "")
+    );
     return octects;
   }
 
@@ -1375,217 +1417,186 @@ var WifiManager = (function() {
     return hexs;
   }
 
-  function simIdentityRequest(networkId, eapMethod) {
-    wifiCommand.getNetworkVariable(networkId, "sim_num", function(sim_num) {
-      sim_num = sim_num || 1;
-      // For SIM & AKA/AKA' EAP method Only, get identity from ICC
-      let icc = gIccService.getIccByServiceId(sim_num - 1);
-      if (!icc || !icc.iccInfo || !icc.iccInfo.mcc || !icc.iccInfo.mnc) {
-        debug("SIM is not ready or iccInfo is invalid");
-        WifiConfigManager.updateNetworkSelectionStatus(
-          networkId,
-          WifiConfigManager.DISABLED_AUTHENTICATION_NO_CREDENTIALS,
-          function(doDisable) {
-            if (doDisable) {
-              manager.disableNetwork(function() {});
-            }
-          }
-        );
-        return;
-      }
-
-      // imsi, mcc, mnc
-      let imsi = icc.imsi;
-      let mcc = icc.iccInfo.mcc;
-      let mnc = icc.iccInfo.mnc;
-      if (mnc.length === 2) {
-        mnc = "0" + mnc;
-      }
-
-      let identity =
-        eapMethod +
-        imsi +
-        "@wlan.mnc" +
-        mnc +
-        ".mcc" +
-        mcc +
-        ".3gppnetwork.org";
-      debug("identity = " + identity);
-      wifiCommand.simIdentityResponse(networkId, identity, function() {});
-    });
+  // EAP-SIM/AKA/AKA': get identity prefix value.
+  function getIdentityPrefix(eapMethod) {
+    // Prefix value:
+    // "\0" for Encrypted Identity
+    // "0" for EAP-AKA Identity
+    // "1" for EAP-SIM Identity
+    // "6" for EAP-AKA' Identity
+    if (eapMethod == "SIM") {
+      return "1";
+    } else if (eapMethod == "AKA") {
+      return "0";
+    } else if (eapMethod == "AKA'") {
+      return "6";
+    }
+    return "\0";
   }
 
-  function simAuthRequest(requestName) {
-    let matchGsm = /SIM-([0-9]*):GSM-AUTH((:[0-9a-f]+)+) needed for SSID (.+)/.exec(
-      requestName
-    );
-    let matchUmts = /SIM-([0-9]*):UMTS-AUTH:([0-9a-f]+):([0-9a-f]+) needed for SSID (.+)/.exec(
-      requestName
-    );
-    // EAP-SIM
-    if (matchGsm) {
-      let networkId = parseInt(matchGsm[1]);
-      let data = matchGsm[2].split(":");
-      let authResponse = "";
-      let count = 0;
-
-      wifiCommand.getNetworkVariable(networkId, "sim_num", function(sim_num) {
-        sim_num = sim_num || 1;
-        let icc = gIccService.getIccByServiceId(sim_num - 1);
-        for (let value in data) {
-          let challenge = data[value];
-          if (!challenge.length) {
-            continue;
+  function simIdentityRequest(networkId, simIndex, prefix) {
+    // For SIM & AKA/AKA' EAP method Only, get identity from ICC
+    let icc = gIccService.getIccByServiceId(simIndex - 1);
+    if (!icc || !icc.iccInfo || !icc.iccInfo.mcc || !icc.iccInfo.mnc) {
+      debug("SIM is not ready or iccInfo is invalid");
+      WifiConfigManager.updateNetworkSelectionStatus(
+        networkId,
+        WifiConfigManager.DISABLED_AUTHENTICATION_NO_CREDENTIALS,
+        function(doDisable) {
+          if (doDisable) {
+            manager.disableNetwork(function() {});
           }
-          let base64Challenge = gsmHexToBase64(challenge);
-          debug("base64Challenge = " + base64Challenge);
+        }
+      );
+      return;
+    }
 
-          // Try USIM first for authentication.
-          icc.getIccAuthentication(
-            Ci.nsIIcc.APPTYPE_USIM,
-            Ci.nsIIcc.AUTHTYPE_EAP_SIM,
-            base64Challenge,
-            {
-              notifyAuthResponse(iccResponse) {
-                debug("Receive USIM iccResponse: " + iccResponse);
-                iccResponseReady(iccResponse);
-              },
-              notifyError(aErrorMsg) {
-                debug("Receive USIM iccResponse error: " + aErrorMsg);
-                // In case of failure, retry as a simple SIM.
-                icc.getIccAuthentication(
-                  Ci.nsIIcc.APPTYPE_SIM,
-                  Ci.nsIIcc.AUTHTYPE_EAP_SIM,
-                  base64Challenge,
-                  {
-                    notifyAuthResponse(iccResponse) {
-                      debug("Receive SIM iccResponse: " + iccResponse);
-                      iccResponseReady(iccResponse);
-                    },
-                    notifyError(aErrorMsg) {
-                      debug("Receive SIM iccResponse error: " + aErrorMsg);
-                      wifiCommand.simAuthFailedResponse(
-                        networkId,
-                        function() {}
-                      );
-                    },
-                  }
-                );
-              },
-            }
-          );
-        }
-      });
+    // imsi, mcc, mnc
+    let imsi = icc.imsi;
+    let mcc = icc.iccInfo.mcc;
+    let mnc =
+      icc.iccInfo.mnc.length === 2 ? "0" + icc.iccInfo.mnc : icc.iccInfo.mnc;
+    let identity = {
+      identity:
+        prefix + imsi + "@wlan.mnc" + mnc + ".mcc" + mcc + ".3gppnetwork.org",
+    };
 
-      function iccResponseReady(iccResponse) {
-        if (!iccResponse || iccResponse.length <= 4) {
-          debug("bad response - " + iccResponse);
-          wifiCommand.simAuthFailedResponse(networkId, function() {});
-          return;
-        }
-        let result = base64Tobytes(iccResponse);
-        let sres_len = result.charCodeAt(0);
-        let sres = bytesToHex(result, 1, sres_len);
-        let kc_offset = 1 + sres_len;
-        let kc_len = result.charCodeAt(kc_offset);
-        if (
-          sres_len >= result.length ||
-          kc_offset >= result.length ||
-          kc_offset + kc_len > result.length
-        ) {
-          debug("malfomed response - " + iccResponse);
-          wifiCommand.simAuthFailedResponse(networkId, function() {});
-          return;
-        }
-        let kc = bytesToHex(result, 1 + kc_offset, kc_len);
-        debug("kc:" + kc + ", sres:" + sres);
-        authResponse = authResponse + ":" + kc + ":" + sres;
-        count++;
-        if (count == 3) {
-          debug("Supplicant Response -" + authResponse);
-          wifiCommand.simAuthResponse(
-            networkId,
-            "GSM-AUTH",
-            authResponse,
-            function() {}
-          );
-        }
+    debug("identity = " + uneval(identity));
+    wifiCommand.simIdentityResponse(identity, function() {});
+  }
+
+  function simGsmAuthRequest(simIndex, data) {
+    let authResponse = [];
+    let count = 0;
+
+    let icc = gIccService.getIccByServiceId(simIndex - 1);
+    for (let value in data) {
+      let challenge = data[value];
+      if (!challenge.length) {
+        continue;
       }
+      let base64Challenge = gsmHexToBase64(challenge);
+      debug("base64Challenge = " + base64Challenge);
 
-      // EAP-AKA/AKA'
-    } else if (matchUmts) {
-      let networkId = parseInt(matchUmts[1]);
-      let rand = matchUmts[2];
-      let authn = matchUmts[3];
-
-      wifiCommand.getNetworkVariable(networkId, "sim_num", function(sim_num) {
-        let icc = gIccService.getIccByServiceId(sim_num - 1);
-        if (rand == null || authn == null) {
-          debug("null rand or authn");
-          return;
+      // Try USIM first for authentication.
+      icc.getIccAuthentication(
+        Ci.nsIIcc.APPTYPE_USIM,
+        Ci.nsIIcc.AUTHTYPE_EAP_SIM,
+        base64Challenge,
+        {
+          notifyAuthResponse(iccResponse) {
+            debug("Receive USIM iccResponse: " + iccResponse);
+            iccResponseReady(iccResponse);
+          },
+          notifyError(aErrorMsg) {
+            debug("Receive USIM iccResponse error: " + aErrorMsg);
+            // In case of failure, retry as a simple SIM.
+            icc.getIccAuthentication(
+              Ci.nsIIcc.APPTYPE_SIM,
+              Ci.nsIIcc.AUTHTYPE_EAP_SIM,
+              base64Challenge,
+              {
+                notifyAuthResponse(iccResponse) {
+                  debug("Receive SIM iccResponse: " + iccResponse);
+                  iccResponseReady(iccResponse);
+                },
+                notifyError(aErrorMsg) {
+                  debug("Receive SIM iccResponse error: " + aErrorMsg);
+                  wifiCommand.simGsmAuthFailure(function() {});
+                },
+              }
+            );
+          },
         }
-        let base64Challenge = umtsHexToBase64(rand, authn);
-        debug("base64Challenge = " + base64Challenge);
+      );
+    }
 
-        icc.getIccAuthentication(
-          Ci.nsIIcc.APPTYPE_USIM,
-          Ci.nsIIcc.AUTHTYPE_EAP_AKA,
-          base64Challenge,
-          {
-            notifyAuthResponse(iccResponse) {
-              debug("Receive iccResponse: " + iccResponse);
-              iccResponseReady(iccResponse);
-            },
-            notifyError(aErrorMsg) {
-              debug("Receive iccResponse error: " + aErrorMsg);
-            },
-          }
-        );
-      });
-
-      function iccResponseReady(iccResponse) {
-        if (!iccResponse || iccResponse.length <= 4) {
-          debug("bad response - " + iccResponse);
-          wifiCommand.simAuthFailedResponse(networkId, function() {});
-          return;
-        }
-        let result = base64Tobytes(iccResponse);
-        let tag = result.charCodeAt(0);
-        if (tag == 0xdb) {
-          debug("successful 3G authentication ");
-          let res_len = result.charCodeAt(1);
-          let res = bytesToHex(result, 2, res_len);
-          let ck_len = result.charCodeAt(res_len + 2);
-          let ck = bytesToHex(result, res_len + 3, ck_len);
-          let ik_len = result.charCodeAt(res_len + ck_len + 3);
-          let ik = bytesToHex(result, res_len + ck_len + 4, ik_len);
-          debug("ik:" + ik + " ck:" + ck + " res:" + res);
-          let authResponse = ":" + ik + ":" + ck + ":" + res;
-          wifiCommand.simAuthResponse(
-            networkId,
-            "UMTS-AUTH",
-            authResponse,
-            function() {}
-          );
-        } else if (tag == 0xdc) {
-          debug("synchronisation failure");
-          let auts_len = result.charCodeAt(1);
-          let auts = bytesToHex(result, 2, auts_len);
-          debug("auts:" + auts);
-          let authResponse = ":" + auts;
-          wifiCommand.simAuthResponse(
-            networkId,
-            "UMTS-AUTS",
-            authResponse,
-            function() {}
-          );
-        } else {
-          debug("bad authResponse - unknown tag = " + tag);
-          wifiCommand.umtsAuthFailedResponse(networkId, function() {});
-        }
+    function iccResponseReady(iccResponse) {
+      if (!iccResponse || iccResponse.length <= 4) {
+        debug("bad response - " + iccResponse);
+        wifiCommand.simGsmAuthFailure(function() {});
+        return;
       }
-    } else {
-      debug("couldn't parse SIM auth request - " + requestName);
+      let result = base64Tobytes(iccResponse);
+      let sres_len = result.charCodeAt(0);
+      let sres = bytesToHex(result, 1, sres_len);
+      let kc_offset = 1 + sres_len;
+      let kc_len = result.charCodeAt(kc_offset);
+      if (
+        sres_len >= result.length ||
+        kc_offset >= result.length ||
+        kc_offset + kc_len > result.length
+      ) {
+        debug("malfomed response - " + iccResponse);
+        wifiCommand.simGsmAuthFailure(function() {});
+        return;
+      }
+      let kc = bytesToHex(result, 1 + kc_offset, kc_len);
+      debug("kc:" + kc + ", sres:" + sres);
+      authResponse[count] = { kc, sres };
+      count++;
+      if (count == 3) {
+        debug("Supplicant Response -" + uneval(authResponse));
+        wifiCommand.simGsmAuthResponse(authResponse, function() {});
+      }
+    }
+  }
+
+  function simUmtsAuthRequest(simIndex, rand, autn) {
+    let icc = gIccService.getIccByServiceId(simIndex - 1);
+    if (rand == null || autn == null) {
+      debug("null rand or autn");
+      return;
+    }
+
+    let base64Challenge = umtsHexToBase64(rand, autn);
+    debug("base64Challenge = " + base64Challenge);
+
+    icc.getIccAuthentication(
+      Ci.nsIIcc.APPTYPE_USIM,
+      Ci.nsIIcc.AUTHTYPE_EAP_AKA,
+      base64Challenge,
+      {
+        notifyAuthResponse(iccResponse) {
+          debug("Receive iccResponse: " + iccResponse);
+          iccResponseReady(iccResponse);
+        },
+        notifyError(aErrorMsg) {
+          debug("Receive iccResponse error: " + aErrorMsg);
+        },
+      }
+    );
+
+    function iccResponseReady(iccResponse) {
+      if (!iccResponse || iccResponse.length <= 4) {
+        debug("bad response - " + iccResponse);
+        wifiCommand.simUmtsAuthFailure(function() {});
+        return;
+      }
+      let result = base64Tobytes(iccResponse);
+      let tag = result.charCodeAt(0);
+      if (tag == 0xdb) {
+        debug("successful 3G authentication ");
+        let res_len = result.charCodeAt(1);
+        let res = bytesToHex(result, 2, res_len);
+        let ck_len = result.charCodeAt(res_len + 2);
+        let ck = bytesToHex(result, res_len + 3, ck_len);
+        let ik_len = result.charCodeAt(res_len + ck_len + 3);
+        let ik = bytesToHex(result, res_len + ck_len + 4, ik_len);
+        debug("ik:" + ik + " ck:" + ck + " res:" + res);
+        let authResponse = { res, ik, ck };
+        wifiCommand.simUmtsAuthResponse(authResponse, function() {});
+      } else if (tag == 0xdc) {
+        debug("synchronisation failure");
+        let auts_len = result.charCodeAt(1);
+        let auts = bytesToHex(result, 2, auts_len);
+        debug("auts:" + auts);
+        let authResponse = { auts };
+        wifiCommand.simUmtsAutsResponse(authResponse, function() {});
+      } else {
+        debug("bad authResponse - unknown tag = " + tag);
+        wifiCommand.simUmtsAuthFailure(function() {});
+      }
     }
   }
 
@@ -1733,6 +1744,7 @@ var WifiManager = (function() {
       callback(true);
       return;
     }
+
     if (enabled) {
       debug("softap configuration -> " + uneval(configuration));
       manager.tetheringState = "INITIALIZING";
@@ -1740,8 +1752,6 @@ var WifiManager = (function() {
         if (result.status != SUCCESS) {
           callback(false);
           manager.tetheringState = "UNINITIALIZED";
-          // TODO: clean up
-          // wifiCommand.closeHostapdConnection(function(result) {});
           return;
         }
         var ifaceName = result.apInterface;
@@ -1761,7 +1771,8 @@ var WifiManager = (function() {
               "Enable Wifi tethering result: " +
                 (result ? result : "successfully")
             );
-          });
+          }
+        );
       });
     } else {
       gTetheringService.setWifiTethering(
@@ -1840,38 +1851,40 @@ var WifiManager = (function() {
   };
 
   manager.setAutoRoam = function(candidate, callback) {
-    if (candidate == null ||
-        candidate.netId === INVALID_NETWORK_ID) {
+    if (candidate == null || candidate.netId === INVALID_NETWORK_ID) {
       debug("Roam to invalid candidate");
-      return callback(false);
+      callback(false);
+      return;
     }
-    WifiConfigManager.getNetworkConfiguration(candidate.netId, function(network) {
+    WifiConfigManager.getNetworkConfiguration(candidate.netId, function(
+      network
+    ) {
       network.bssid = candidate.bssid;
       manager.startToRoam(network, callback);
     });
   };
 
   manager.setAutoConnect = function(candidate, callback) {
-    if (candidate == null ||
-        candidate.netId === INVALID_NETWORK_ID) {
+    if (candidate == null || candidate.netId === INVALID_NETWORK_ID) {
       debug("Connect to invalid candidate");
-      return callback(false);
+      callback(false);
+      return;
     }
-    WifiConfigManager.getNetworkConfiguration(candidate.netId, function(network) {
+    WifiConfigManager.getNetworkConfiguration(candidate.netId, function(
+      network
+    ) {
       network.bssid = candidate.bssid;
       manager.connect(network, callback);
     });
   };
 
   manager.setFirmwareRoamingConfiguration = function() {
-    let blackList = Array.from(
-      WifiNetworkSelector.bssidBlacklist.keys()
-    );
+    let blackList = Array.from(WifiNetworkSelector.bssidBlacklist.keys());
 
     let roamingConfig = {
       bssidBlacklist: blackList,
       ssidWhitelist: [],
-    }
+    };
     wifiCommand.configureFirmwareRoaming(roamingConfig, function() {});
   };
 
@@ -1989,8 +2002,8 @@ var WifiManager = (function() {
     var isPrevStateInHandShake = manager.isHandShakeState(prevState);
     var isStateInHandShake = manager.isHandShakeState(state);
 
-    if (isPrevStateInHandShake) {
-      if (isStateInHandShake) {
+    if (isStateInHandShake) {
+      if (isPrevStateInHandShake) {
         // Increase the count only if we are in the loop.
         if (manager.stateOrdinal(state) > manager.stateOrdinal(prevState)) {
           manager.loopDetectionCount++;
@@ -2009,10 +2022,8 @@ var WifiManager = (function() {
             }
           );
         }
-      }
-    } else {
-      // From others state to HandShake state. Reset the count.
-      if (isStateInHandShake) {
+      } else {
+        // From others state to HandShake state. Reset the count.
         manager.loopDetectionCount = 0;
       }
     }
@@ -2037,7 +2048,6 @@ var WifiManager = (function() {
   //
   // Public APIs for P2P.
   //
-
   manager.p2pSupported = function() {
     return p2pSupported;
   };
@@ -2128,7 +2138,10 @@ function quote(s) {
 
 function dequote(s) {
   if (s[0] != '"' || s[s.length - 1] != '"') {
-    throw "Invalid argument, not a quoted string: " + s;
+    throw Components.Exception(
+      "Invalid argument, not a quoted string: ",
+      Cr.NS_ERROR_INVALID_ARG
+    );
   }
   return s.substr(1, s.length - 2);
 }
@@ -2144,7 +2157,7 @@ const wepKeyList = ["wepKey0", "wepKey1", "wepKey2", "wepKey3"];
 function isInWepKeyList(name) {
   for (let i = 0; i < wepKeyList.length; i++) {
     let wepField = wepKeyList[i];
-    if ((wepField in name) && name[wepField]) {
+    if (wepField in name && name[wepField]) {
       return true;
     }
   }
@@ -2157,7 +2170,6 @@ var WifiNetworkInterface = {
   registered: false,
 
   // nsINetworkInterface
-
   NETWORK_STATE_UNKNOWN: Ci.nsINetworkInfo.NETWORK_STATE_UNKNOWN,
   NETWORK_STATE_CONNECTING: Ci.nsINetworkInfo.CONNECTING,
   NETWORK_STATE_CONNECTED: Ci.nsINetworkInfo.CONNECTED,
@@ -2289,8 +2301,6 @@ var netFromDOM;
 function WifiWorker() {
   var self = this;
 
-  //this._mm = Cc["@mozilla.org/parentprocessmessagemanager;1"]
-  //             .getService(Ci.nsIMessageListenerManager);
   const messages = [
     "WifiManager:getNetworks",
     "WifiManager:getKnownNetworks",
@@ -2311,7 +2321,6 @@ function WifiWorker() {
 
   messages.forEach(
     function(msgName) {
-      //this._mm.addMessageListener(msgName, this);
       ppmm.addMessageListener(msgName, this);
     }.bind(this)
   );
@@ -2351,7 +2360,6 @@ function WifiWorker() {
     // Add DOM message observerd by p2pObserver to the message listener as well.
     this._p2pObserver.getObservedDOMMessages().forEach(
       function(msgName) {
-        //this._mm.addMessageListener(msgName, this);
         ppmm.addMessageListener(msgName, this);
       }.bind(this)
     );
@@ -2373,12 +2381,10 @@ function WifiWorker() {
     var ssid = net.ssid ? dequote(net.ssid) : null;
     var mode = net.mode;
     var frequency = net.frequency;
+    var useKeyMgmt =
+      net.keyMgmt && net.keyMgmt !== "NONE" ? net.keyMgmt.split(" ")[0] : "";
     var security =
-      net.keyMgmt === "NONE" && isInWepKeyList(net)
-        ? "WEP"
-        : net.keyMgmt && net.keyMgmt !== "NONE"
-        ? net.keyMgmt.split(" ")[0]
-        : "";
+      net.keyMgmt === "NONE" && isInWepKeyList(net) ? "WEP" : useKeyMgmt;
     var password;
     if (
       ("psk" in net && net.psk) ||
@@ -2409,9 +2415,8 @@ function WifiWorker() {
         }
       }
     }
-    if (net.scanSsid) {
-      pub.hidden = true;
-    }
+    pub.hidden = net.scanSsid === 1;
+
     if (
       "ca_cert" in net &&
       net.ca_cert &&
@@ -2492,13 +2497,22 @@ function WifiWorker() {
             delete net[name];
           }
         } else {
-          configured[name] = net[name] = quote(value);
+          configured[name] = net[name] = value;
         }
       }
     }
 
-    // TODO: do not need to quote
-    //checkAssign("psk", true);
+    checkAssign("psk", true);
+    checkAssign("identity", false);
+    checkAssign("password", true);
+    if (wep && net.wep && net.wep != "*") {
+      net.keyIndex = net.keyIndex || 0;
+      configured["wepKey" + net.keyIndex] = net[
+        "wepKey" + net.keyIndex
+      ] = isWepHexKey(net.wep) ? net.wep : quote(net.wep);
+      configured.wepTxKeyIndex = net.wepTxKeyIndex = net.keyIndex;
+      configured.authAlg = net.authAlg = "OPEN SHARED";
+    }
 
     if (net.keyMgmt == "WAPI-PSK") {
       net.proto = configured.proto = "WAPI";
@@ -2525,17 +2539,6 @@ function WifiWorker() {
       }
     }
 
-    checkAssign("identity", false);
-    checkAssign("password", true);
-    if (wep && net.wep && net.wep != "*") {
-      net.keyIndex = net.keyIndex || 0;
-      configured["wepKey" + net.keyIndex] = net[
-        "wepKey" + net.keyIndex
-      ] = isWepHexKey(net.wep) ? net.wep : quote(net.wep);
-      configured.wepTxKeyIndex = net.wepTxKeyIndex = net.keyIndex;
-      configured.authAlg = net.authAlg = (AUTHALG_OPEN | AUTHALG_SHARED);
-    }
-
     function hasValidProperty(name) {
       return name in net && net[name] != null;
     }
@@ -2546,7 +2549,7 @@ function WifiWorker() {
       }
 
       if (net.eap === "SIM" || net.eap === "AKA" || net.eap === "AKA'") {
-        configured.sim_num = net.sim_num = net.sim_num || 1;
+        configured.simIndex = net.simIndex = net.simIndex || 1;
       }
 
       if (hasValidProperty("phase1")) {
@@ -2593,7 +2596,6 @@ function WifiWorker() {
         }
       }
     }
-
     return net;
   };
 
@@ -2601,8 +2603,9 @@ function WifiWorker() {
     debug("Connected to supplicant");
     // Register listener for mobileConnectionService
     if (!self.mobileConnectionRegistered) {
-      // gMobileConnectionService
-      //   .getItemByServiceId(WifiManager.telephonyServiceId).registerListener(self);
+      gMobileConnectionService
+        .getItemByServiceId(WifiManager.telephonyServiceId)
+        .registerListener(self);
       self.mobileConnectionRegistered = true;
     }
     // Set current country code
@@ -2868,9 +2871,9 @@ function WifiWorker() {
       let scanResults = data.getScanResults();
       // Check any open network and notify to user.
       // TODO: uncomplete
-      //if (WifiNetworkInterface.info.state == Ci.nsINetworkInfo.NETWORK_STATE_DISCONNECTED) {
-      //  OpenNetworkNotifier.handleScanResults(r);
-      //}
+      // if (WifiNetworkInterface.info.state == Ci.nsINetworkInfo.NETWORK_STATE_DISCONNECTED) {
+      //   OpenNetworkNotifier.handleScanResults(r);
+      // }
 
       WifiManager.cachedScanResults = [];
       if (scanResults.length <= 0 && self.wantScanResults.length !== 0) {
@@ -2890,14 +2893,21 @@ function WifiWorker() {
       for (let i = 0; i < scanResults.length; i++) {
         let result = scanResults[i];
         let ie = result.getInfoElement();
-        debug(" * " +
-          result.ssid + " " +
-          result.bssid + " " +
-          result.frequency + " " +
-          result.tsf + " " +
-          result.capability + " " +
-          result.signal + " " +
-          result.associated
+        debug(
+          " * " +
+            result.ssid +
+            " " +
+            result.bssid +
+            " " +
+            result.frequency +
+            " " +
+            result.tsf +
+            " " +
+            result.capability +
+            " " +
+            result.signal +
+            " " +
+            result.associated
         );
 
         let signalLevel = result.signal / 100;
@@ -2908,8 +2918,9 @@ function WifiWorker() {
         );
 
         /* Skip networks with unknown or unsupported modes. */
-        if (capabilities.mode.indexOf(WifiConfigUtils.getMode(flags)) == -1)
+        if (!capabilities.mode.includes(WifiConfigUtils.getMode(flags))) {
           continue;
+        }
 
         // If this is the first time that we've seen this SSID in the scan
         // results, add it to the list along with any other information.
@@ -2995,7 +3006,7 @@ function WifiWorker() {
       }
       self._fireEvent("scanresult", { scanResult: self.networksArray });
     });
-  }
+  };
 
   WifiManager.onregisterimslistener = function() {
     let imsService;
@@ -3009,10 +3020,7 @@ function WifiWorker() {
     if (this.register) {
       imsService.registerListener(self);
       let imsDelayTimeout = 7000;
-      try {
-        //FIXME: NS_ERROR_UNEXPECTED: Component returned failure code: 0x8000ffff (NS_ERROR_UNEXPECTED) [nsIPrefBranch.getIntPref]
-        imsDelayTimeout = 5000; //Services.prefs.getIntPref("vowifi.delay.timer");
-      } catch (e) {}
+      imsDelayTimeout = Services.prefs.getIntPref("vowifi.delay.timer", 5000);
       debug("delay " + imsDelayTimeout / 1000 + " secs for disabling wifi");
       self.wifiDisableDelayId = setTimeout(
         WifiManager.setWifiDisable,
@@ -3177,12 +3185,6 @@ function translateState(state) {
 WifiWorker.prototype = {
   classID: WIFIWORKER_CID,
   contractID: WIFIWORKER_CONTRACTID,
-  // classInfo: XPCOMUtils.generateCI({classID: WIFIWORKER_CID,
-  //                                   contractID: WIFIWORKER_CONTRACTID,
-  //                                   classDescription: "WifiWorker",
-  //                                   interfaces: [Ci.nsIWorkerHolder,
-  //                                                Ci.nsIWifi,
-  //                                                Ci.nsIObserver]}),
   QueryInterface: ChromeUtils.generateQI([
     Ci.nsIWorkerHolder,
     Ci.nsIWifi,
@@ -3279,7 +3281,8 @@ WifiWorker.prototype = {
   notifyClirModeChanged(aMode) {},
 
   notifyLastKnownNetworkChanged() {
-    let countryCode = PhoneNumberUtils.getCountryName().toUpperCase();
+    let countryCode = "US";
+    // FIXME: PhoneNumberUtils.getCountryName().toUpperCase();
     if (countryCode != "" && countryCode !== this.lastKnownCountryCode) {
       debug("Set country code = " + countryCode);
       this.lastKnownCountryCode = countryCode;
@@ -3303,8 +3306,8 @@ WifiWorker.prototype = {
     if (this.lastKnownCountryCode) {
       return this.lastKnownCountryCode;
     }
-    //FIXME: NS_ERROR_FILE_NOT_FOUND
-    return "US"; //PhoneNumberUtils.getCountryName().toUpperCase();
+    // FIXME: NS_ERROR_FILE_NOT_FOUND
+    return "US"; // PhoneNumberUtils.getCountryName().toUpperCase();
   },
 
   // nsIIccListener
@@ -3389,11 +3392,7 @@ WifiWorker.prototype = {
   },
 
   handleNetworkConnectionFailure(network, callback) {
-    let self = this;
     let netId = network.netId;
-    let currentKey = WifiConfigUtils.getNetworkKey(network);
-    const MIN_PRIORITY = 0;
-
     if (netId !== INVALID_NETWORK_ID) {
       WifiManager.disableNetwork(function() {
         debug("disable network - id: " + netId);
@@ -3444,15 +3443,21 @@ WifiWorker.prototype = {
           self._lastConnectionInfo = null;
           return;
         }
-        let [ rssi, linkSpeed, frequency, rxLinkSpeed ] =
-            [ connInfo[0], connInfo[1], connInfo[2], connInfo[3] ];
+        let [rssi, linkSpeed, frequency, rxLinkSpeed] = [
+          connInfo[0],
+          connInfo[1],
+          connInfo[2],
+          connInfo[3],
+        ];
 
-        if (rssi > 0)
+        if (rssi > 0) {
           rssi -= 256;
-        if (rssi <= WifiConfigUtils.MIN_RSSI)
+        }
+        if (rssi <= WifiConfigUtils.MIN_RSSI) {
           rssi = WifiConfigUtils.MIN_RSSI;
-        else if (rssi >= WifiConfigUtils.MAX_RSSI)
+        } else if (rssi >= WifiConfigUtils.MAX_RSSI) {
           rssi = WifiConfigUtils.MAX_RSSI;
+        }
 
         if (shouldBroadcastRSSIForIMS(rssi, wifiInfo.rssi)) {
           self.deliverListenerEvent("notifyRssiChanged", [rssi]);
@@ -3468,8 +3473,8 @@ WifiWorker.prototype = {
         let info = {
           signalStrength: rssi,
           relSignalStrength: WifiConfigUtils.calculateSignal(rssi),
-          linkSpeed: linkSpeed,
-          ipAddress: self.ipAddress
+          linkSpeed,
+          ipAddress: self.ipAddress,
         };
         let last = self._lastConnectionInfo;
         // Only fire the event if the link speed changed or the signal
@@ -3477,9 +3482,13 @@ WifiWorker.prototype = {
         function tensPlace(percent) {
           return (percent / 10) | 0;
         }
-        if (last && last.linkSpeed === info.linkSpeed &&
-            last.ipAddress === info.ipAddress &&
-            tensPlace(last.relSignalStrength) === tensPlace(info.relSignalStrength)) {
+        if (
+          last &&
+          last.linkSpeed === info.linkSpeed &&
+          last.ipAddress === info.ipAddress &&
+          tensPlace(last.relSignalStrength) ===
+            tensPlace(info.relSignalStrength)
+        ) {
           return;
         }
         self._lastConnectionInfo = info;
@@ -3594,7 +3603,7 @@ WifiWorker.prototype = {
           this._domRequest.splice(i, 1);
         }
       }
-      return;
+      return true;
     }
 
     // FIXME: aMessage.target.assertPermission is not a function
@@ -3648,8 +3657,7 @@ WifiWorker.prototype = {
         this.setWifiTethering(msg);
         break;
       case "WifiManager:getState": {
-        let i;
-        if ((i = this._domManagers.indexOf(msg.manager)) === -1) {
+        if (!this._domManagers.includes(msg.manager)) {
           this._domManagers.push(msg.manager);
         }
 
@@ -3699,8 +3707,10 @@ WifiWorker.prototype = {
 
         sent = true;
         // if last results are available, return the cached scan results.
-        if (WifiManager.cachedScanTime > 0 &&
-            Date.now() - WifiManager.cachedScanTime < WIFI_MAX_SCAN_CACHED_TIME) {
+        if (
+          WifiManager.cachedScanTime > 0 &&
+          Date.now() - WifiManager.cachedScanTime < WIFI_MAX_SCAN_CACHED_TIME
+        ) {
           this._sendMessage(
             message,
             WifiManager.cachedScanResults.length > 0,
@@ -3708,10 +3718,10 @@ WifiWorker.prototype = {
             msg
           );
           return;
-        } else {
-          WifiManager.cachedScanTime = 0;
-          WifiManager.cachedScanResults = [];
         }
+
+        WifiManager.cachedScanTime = 0;
+        WifiManager.cachedScanResults = [];
         // Otherwise, let the client know that it failed, it's responsible for
         // trying again in a few seconds.
         this._sendMessage(message, false, "ScanFailed", msg);
@@ -3761,8 +3771,7 @@ WifiWorker.prototype = {
         return;
       }
 
-      var wifiScanResults = new Array();
-      var net;
+      var wifiScanResults = new Array([]);
       for (let net in networks) {
         let value = networks[net];
         wifiScanResults.push(transformResult(value));
@@ -3806,8 +3815,8 @@ WifiWorker.prototype = {
   },
 
   registerListener(aListener) {
-    if (this._listeners.indexOf(aListener) >= 0) {
-      throw Cr.NS_ERROR_UNEXPECTED;
+    if (this._listeners.includes(aListener)) {
+      throw Components.Exception("", Cr.NS_ERROR_UNEXPECTED);
     }
     this._listeners.push(aListener);
   },
@@ -3822,7 +3831,7 @@ WifiWorker.prototype = {
   deliverListenerEvent(aName, aArgs) {
     let listeners = this._listeners.slice();
     for (let listener of listeners) {
-      if (this._listeners.indexOf(listener) === -1) {
+      if (!this._listeners.includes(listener)) {
         continue;
       }
       let handler = listener[aName];
@@ -3884,7 +3893,6 @@ WifiWorker.prototype = {
   },
   setWifiEnabled(msg) {
     const message = "WifiManager:setWifiEnabled:Return";
-    let self = this;
     let enabled = msg.data;
     // No change.
     if (enabled === WifiManager.enabled) {
@@ -3893,23 +3901,58 @@ WifiWorker.prototype = {
     }
 
     // Make sure Wifi hotspot is idle before switching to Wifi mode.
-    if (enabled && WifiManager.isWifiTetheringEnabled(WifiManager.tetheringState)) {
-      this.queueRequest({ command: "setWifiApEnabled", value: false }, function(data) {
-        this.disconnectedByWifi = true;
-        this.handleHotspotEnabled(false, this.handleHotspotEnabledCallback.bind(this, message, msg));
-      }.bind(this));
+    if (
+      enabled &&
+      WifiManager.isWifiTetheringEnabled(WifiManager.tetheringState)
+    ) {
+      this.queueRequest(
+        {
+          command: "setWifiApEnabled",
+          value: false,
+        },
+        function(data) {
+          this.disconnectedByWifi = true;
+          this.handleHotspotEnabled(
+            false,
+            this.handleHotspotEnabledCallback.bind(this, message, msg)
+          );
+        }.bind(this)
+      );
     }
-    this.queueRequest({ command: "setWifiEnabled", value: enabled }, function(data) {
-      this.handleWifiEnabled(enabled, this.handleWifiEnabledCallback.bind(this, message, msg));
-    }.bind(this));
+
+    this.queueRequest(
+      {
+        command: "setWifiEnabled",
+        value: enabled,
+      },
+      function(data) {
+        this.handleWifiEnabled(
+          enabled,
+          this.handleWifiEnabledCallback.bind(this, message, msg)
+        );
+      }.bind(this)
+    );
 
     if (!enabled) {
       // TODO: NS_ERROR_UNEXPECTED on nsIPrefBranch.getBoolPref
-      //let isWifiAffectTethering = Services.prefs.getBoolPref("wifi.affect.tethering");
-      if (/* isWifiAffectTethering && */this.disconnectedByWifi && this.isAirplaneMode() === false) {
-        this.queueRequest({ command: "setWifiApEnabled", value: true }, function(data) {
-          this.handleHotspotEnabled(true, this.handleHotspotEnabledCallback.bind(this, message, msg));
-        }.bind(this));
+      // let isWifiAffectTethering = Services.prefs.getBoolPref("wifi.affect.tethering");
+      if (
+        /* isWifiAffectTethering && */
+        this.disconnectedByWifi &&
+        this.isAirplaneMode() === false
+      ) {
+        this.queueRequest(
+          {
+            command: "setWifiApEnabled",
+            value: true,
+          },
+          function(data) {
+            this.handleHotspotEnabled(
+              true,
+              this.handleHotspotEnabledCallback.bind(this, message, msg)
+            );
+          }.bind(this)
+        );
       }
       this.disconnectedByWifi = false;
     }
@@ -3917,14 +3960,16 @@ WifiWorker.prototype = {
 
   // requestDone() must be called to before callback complete(or error)
   // so next queue in the request quene can be executed.
-  // TODO: Remove command queue in Bug 1050147
   queueRequest(data, callback) {
     if (!callback) {
-      throw "Try to enqueue a request without callback";
+      throw Components.Exception(
+        "Try to enqueue a request without callback",
+        Cr.NS_ERROR_INVALID_ARG
+      );
     }
 
     let optimizeCommandList = ["setWifiEnabled", "setWifiApEnabled"];
-    if (optimizeCommandList.indexOf(data.command) != -1) {
+    if (optimizeCommandList.includes(data.command)) {
       this._stateRequests = this._stateRequests.filter(function(element) {
         return element.data.command !== data.command;
       });
@@ -3945,9 +3990,7 @@ WifiWorker.prototype = {
     return this.getWifiTetheringParametersBySetting(enable);
   },
 
-  getWifiTetheringConfiguration(
-    enable
-  ) {
+  getWifiTetheringConfiguration(enable) {
     let config = {};
     let params = this.tetheringConfig;
     // TODO: need more conditions if we support 5GHz hotspot.
@@ -4036,9 +4079,7 @@ WifiWorker.prototype = {
     return config;
   },
 
-  getWifiTetheringParametersBySetting(
-    enable
-  ) {
+  getWifiTetheringParametersBySetting(enable) {
     let ssid;
     let securityType;
     let securityId;
@@ -4083,10 +4124,12 @@ WifiWorker.prototype = {
       debug("Invalid security type.");
       return null;
     }
+
     if (securityType != WIFI_SECURITY_TYPE_NONE && !securityId) {
       debug("Invalid security password.");
       return null;
     }
+
     // Using the default values here until application supports these settings.
     if (
       interfaceIp == "" ||
@@ -4133,9 +4176,9 @@ WifiWorker.prototype = {
 
   handleHotspotEnabledCallback(message, msg, result) {
     if (!result) {
-      msg.data.reason = msg.data.enabled ?
-        "Enable WIFI tethering failed" :
-        "Disable WIFI tethering failed";
+      msg.data.reason = msg.data.enabled
+        ? "Enable WIFI tethering failed"
+        : "Disable WIFI tethering failed";
       this._sendMessage(message, false, msg.data, msg);
     } else {
       this._sendMessage(message, true, msg.data, msg);
@@ -4149,36 +4192,66 @@ WifiWorker.prototype = {
 
   setWifiTethering(msg) {
     const message = "WifiManager:setWifiTethering:Return";
-    let self = this;
     let enabled = msg.data.enabled;
 
     this.useTetheringAPI = true;
     this.tetheringConfig = msg.data.config;
 
-    if (enabled && WifiManager.enabled == true) {
-      this.queueRequest({ command: "setWifiEnabled", value: false }, function(data) {
-        this.disconnectedByWifiTethering = true;
-        this.handleWifiEnabled(false, this.handleWifiEnabledCallback.bind(this, message, msg));
-      }.bind(this));
+    if (enabled && WifiManager.enabled) {
+      this.queueRequest(
+        {
+          command: "setWifiEnabled",
+          value: false,
+        },
+        function(data) {
+          this.disconnectedByWifiTethering = true;
+          this.handleWifiEnabled(
+            false,
+            this.handleWifiEnabledCallback.bind(this, message, msg)
+          );
+        }.bind(this)
+      );
     }
-    this.queueRequest({ command: "setWifiApEnabled", value: enabled }, function(data) {
-      this.handleHotspotEnabled(enabled, this.handleHotspotEnabledCallback.bind(this, message, msg));
-    }.bind(this));
+
+    this.queueRequest(
+      {
+        command: "setWifiApEnabled",
+        value: enabled,
+      },
+      function(data) {
+        this.handleHotspotEnabled(
+          enabled,
+          this.handleHotspotEnabledCallback.bind(this, message, msg)
+        );
+      }.bind(this)
+    );
 
     if (!enabled) {
       // TODO: NS_ERROR_UNEXPECTED on nsIPrefBranch.getBoolPref
       // let isTetheringAffectWifi = Services.prefs.getBoolPref("tethering.affect.wifi");
-      if (/* isTetheringAffectWifi && */this.disconnectedByWifiTethering && this.isAirplaneMode() === false) {
-        this.queueRequest({ command: "setWifiEnabled", value: true }, function(data) {
-          this.handleWifiEnabled(true, this.handleWifiEnabledCallback.bind(this, message, msg));
-        }.bind(this));
+      if (
+        /* isTetheringAffectWifi && */
+        this.disconnectedByWifiTethering &&
+        this.isAirplaneMode() === false
+      ) {
+        this.queueRequest(
+          {
+            command: "setWifiEnabled",
+            value: true,
+          },
+          function(data) {
+            this.handleWifiEnabled(
+              true,
+              this.handleWifiEnabledCallback.bind(this, message, msg)
+            );
+          }.bind(this)
+        );
       }
       this.disconnectedByWifiTethering = false;
     }
   },
 
   associate(msg) {
-    const MAX_PRIORITY = 9999;
     const message = "WifiManager:associate:Return";
     let network = msg.data;
 
@@ -4194,14 +4267,11 @@ WifiWorker.prototype = {
     function networkReady() {
       function makeConnection() {
         WifiManager.loopDetectionCount = 0;
-        WifiConfigManager.updateLastSelectedNetwork(
-          privnet.netId,
-          function() {
-            WifiManager.connect(privnet, function (ok) {
-              self._sendMessage(message, ok, ok, msg);
-            });
-          }
-        );
+        WifiConfigManager.updateLastSelectedNetwork(privnet.netId, function() {
+          WifiManager.connect(privnet, function(ok) {
+            self._sendMessage(message, ok, ok, msg);
+          });
+        });
       }
       if (dontConnect) {
         self._sendMessage(message, true, "Wifi has been recorded", msg);
@@ -4394,7 +4464,7 @@ WifiWorker.prototype = {
         let lastNetworkKey = lastNetwork
           ? WifiConfigUtils.getNetworkKey(lastNetwork)
           : null;
-        if (setNetworkKey === curNetworkKey) {
+        if (setNetworkKey === lastNetworkKey) {
           WifiManager.setHttpProxy(network);
         }
 
@@ -4538,7 +4608,7 @@ WifiWorker.prototype = {
   // This is a bit ugly, but works. In particular, this depends on the fact
   // that RadioManager never actually tries to get the worker from us.
   get worker() {
-    throw "Not implemented";
+    throw Components.Exception("Not implemented", Cr.NS_ERROR_INVALID_ARG);
   },
 
   shutdown() {
@@ -4591,14 +4661,14 @@ WifiWorker.prototype = {
   },
 
   _getDefaultServiceId() {
-    //FIXME: NS_ERROR_UNEXPECTED: Component returned failure code: 0x8000ffff (NS_ERROR_UNEXPECTED) [nsIPrefBranch.getIntPref]
+    // FIXME: Component returned failure code: 0x8000ffff (NS_ERROR_UNEXPECTED)
+    // [nsIPrefBranch.getIntPref]
     let id = 0; //Services.prefs.getIntPref(kPrefDefaultServiceId);
-    let numRil = 1; //Services.prefs.getIntPref(kPrefRilNumRadioInterfaces);
+    let numRil = Services.prefs.getIntPref(kPrefRilNumRadioInterfaces);
 
     if (id >= numRil || id < 0) {
       id = 0;
     }
-
     return id;
   },
 
@@ -4611,10 +4681,10 @@ WifiWorker.prototype = {
         if ("wrappedJSObject" in subject) {
           subject = subject.wrappedJSObject;
         }
+
         if (subject.isInternalChange) {
           return;
         }
-
         this.handle(subject.key, subject.value);
         break;
 
@@ -4641,11 +4711,13 @@ WifiWorker.prototype = {
         Services.obs.removeObserver(this, kOpenCaptivePortalLoginEvent);
         Services.obs.removeObserver(this, kCaptivePortalLoginSuccessEvent);
         Services.prefs.removeObserver(kPrefDefaultServiceId, this);
+
         if (this.mobileConnectionRegistered) {
-          // gMobileConnectionService
-          //   .getItemByServiceId(WifiManager.telephonyServiceId).unregisterListener(this);
+          gMobileConnectionService
+            .getItemByServiceId(WifiManager.telephonyServiceId).unregisterListener(this);
           this.mobileConnectionRegistered = false;
         }
+
         for (let simId = 0; simId < WifiManager.numRil; simId++) {
           gIccService.getIccByServiceId(simId).unregisterListener(this);
         }
@@ -4658,13 +4730,13 @@ WifiWorker.prototype = {
             return;
           }
           if (this.mobileConnectionRegistered) {
-            // gMobileConnectionService
-            //   .getItemByServiceId(WifiManager.telephonyServiceId).unregisterListener(this);
+            gMobileConnectionService
+              .getItemByServiceId(WifiManager.telephonyServiceId).unregisterListener(this);
             this.mobileConnectionRegistered = false;
           }
           WifiManager.telephonyServiceId = defaultServiceId;
-          // gMobileConnectionService
-          //   .getItemByServiceId(WifiManager.telephonyServiceId).registerListener(this);
+          gMobileConnectionService
+            .getItemByServiceId(WifiManager.telephonyServiceId).registerListener(this);
           this.mobileConnectionRegistered = true;
         }
         break;
@@ -4689,7 +4761,6 @@ WifiWorker.prototype = {
         var action = token[1];
         var addr = token[2].split("/")[0];
         var prefix = token[2].split("/")[1];
-
         // We only handle IPv6 route advertisement address here.
         if (!addr.includes(":")) {
           return;
@@ -4880,7 +4951,7 @@ WifiWorker.prototype = {
         if (aResult !== null) {
           this.tetheringSettings[aName] = aResult;
         }
-        debug("'" + aName + "'" + " is now " + this.tetheringSettings[aName]);
+        debug("'" + aName + "' is now " + this.tetheringSettings[aName]);
         let index = this._wifiTetheringSettingsToRead.indexOf(aName);
 
         if (index != -1) {
@@ -4935,7 +5006,7 @@ var debug;
 function updateDebug() {
   if (DEBUG) {
     debug = function(s) {
-      console.log("-*- WifiWorker component: ", s, "\n");
+      dump("-*- WifiWorker component: " + s + "\n");
     };
   } else {
     debug = function(s) {};
