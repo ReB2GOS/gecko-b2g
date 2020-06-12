@@ -102,11 +102,105 @@ add_task(async function test_enable() {
   }
 });
 
+add_task(async function test_notifyPendingChanges() {
+  let engine = new ExtensionStorageEngineBridge(Service);
+
+  let extension = { id: "ext-1" };
+  let expectedChange = {
+    a: "b",
+    c: "d",
+  };
+
+  let lastSync = 0;
+  let syncID = Utils.makeGUID();
+  let error = null;
+  engine._bridge = {
+    QueryInterface: ChromeUtils.generateQI([
+      Ci.mozIBridgedSyncEngine,
+      Ci.mozISyncedExtensionStorageArea,
+    ]),
+    ensureCurrentSyncId(id, callback) {
+      if (syncID != id) {
+        syncID = id;
+        lastSync = 0;
+      }
+      callback.handleSuccess(id);
+    },
+    resetSyncId(callback) {
+      callback.handleSuccess(syncID);
+    },
+    syncStarted(callback) {
+      callback.handleSuccess();
+    },
+    getLastSync(callback) {
+      callback.handleSuccess(lastSync);
+    },
+    setLastSync(lastSyncMillis, callback) {
+      lastSync = lastSyncMillis;
+      callback.handleSuccess();
+    },
+    apply(callback) {
+      callback.handleSuccess([]);
+    },
+    fetchPendingSyncChanges(callback) {
+      if (error) {
+        callback.handleError(Cr.NS_ERROR_FAILURE, error.message);
+      } else {
+        callback.onChanged(extension.id, JSON.stringify(expectedChange));
+        callback.handleSuccess();
+      }
+    },
+    setUploaded(modified, ids, callback) {
+      callback.handleSuccess();
+    },
+    syncFinished(callback) {
+      callback.handleSuccess();
+    },
+  };
+
+  let server = await serverForFoo(engine);
+
+  let actualChanges = [];
+  let listener = changes => actualChanges.push(changes);
+  extensionStorageSync.addOnChangedListener(extension, listener);
+
+  try {
+    await SyncTestingInfrastructure(server);
+
+    info("Sync engine; notify about changes");
+    await sync_engine_and_validate_telem(engine, false);
+    deepEqual(
+      actualChanges,
+      [expectedChange],
+      "Should notify about changes during sync"
+    );
+
+    error = new Error("oops!");
+    actualChanges = [];
+    await sync_engine_and_validate_telem(engine, false);
+    deepEqual(
+      actualChanges,
+      [],
+      "Should finish syncing even if notifying about changes fails"
+    );
+  } finally {
+    extensionStorageSync.removeOnChangedListener(extension, listener);
+    await promiseStopServer(server);
+    await engine.finalize();
+  }
+});
+
 // It's difficult to know what to test - there's already tests for the bridged
 // engine etc - so we just try and check that this engine conforms to the
 // mozIBridgedSyncEngine interface guarantees.
 add_task(async function test_engine() {
-  let engine = new ExtensionStorageEngineBridge(Service);
+  // Forcibly set the bridged engine in the engine manager. the reason we do
+  // this, unlike the other tests where we just create the engine, is so that
+  // telemetry can get at the engine's `overrideTelemetryName`, which it gets
+  // through the engine manager.
+  await Service.engineManager.unregister("extension-storage");
+  await Service.engineManager.register(ExtensionStorageEngineBridge);
+  let engine = Service.engineManager.get("extension-storage");
   Assert.equal(engine.version, 1);
 
   Assert.deepEqual(await engine.getSyncID(), null);
@@ -143,7 +237,13 @@ add_task(async function test_engine() {
     );
 
     info("Sync the engine");
-    await sync_engine_and_validate_telem(engine, false);
+
+    let ping = await sync_engine_and_validate_telem(engine, false);
+    Assert.ok(ping.engines.find(e => e.name == "rust-webext-storage"));
+    Assert.equal(
+      ping.engines.find(e => e.name == "extension-storage"),
+      null
+    );
 
     // We should have applied the data from the existing collection record.
     Assert.deepEqual(await extensionStorageSync.get({ id: "ext-1" }, null), {

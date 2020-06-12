@@ -59,6 +59,7 @@ size_t js::jit::NumInputsForCacheKind(CacheKind kind) {
       return 0;
     case CacheKind::GetProp:
     case CacheKind::TypeOf:
+    case CacheKind::ToPropertyKey:
     case CacheKind::GetIterator:
     case CacheKind::ToBool:
     case CacheKind::UnaryArith:
@@ -4789,6 +4790,8 @@ CallIRGenerator::CallIRGenerator(JSContext* cx, HandleScript script,
       cacheIRStubKind_(BaselineCacheIRStubKind::Regular) {}
 
 void CallIRGenerator::emitNativeCalleeGuard(HandleFunction callee) {
+  // Note: we rely on GuardSpecificFunction to also guard against the same
+  // native from a different realm.
   MOZ_ASSERT(callee->isNativeWithoutJitEntry());
   ValOperandId calleeValId =
       writer.loadArgumentFixedSlot(ArgumentKind::Callee, argc_);
@@ -5011,9 +5014,11 @@ AttachDecision CallIRGenerator::tryAttachIsSuspendedGenerator(
   return AttachDecision::Attach;
 }
 
-AttachDecision CallIRGenerator::tryAttachToString(HandleFunction callee) {
+AttachDecision CallIRGenerator::tryAttachToString(HandleFunction callee,
+                                                  InlinableNative native) {
   // Need a single string argument.
   // TODO(Warp): Support all or more conversions to strings.
+  // Note: Unlike String, ToString requires exactly one argument.
   if (argc_ != 1 || !args_[0].isString()) {
     return AttachDecision::NoAction;
   }
@@ -5021,7 +5026,7 @@ AttachDecision CallIRGenerator::tryAttachToString(HandleFunction callee) {
   // Initialize the input operand.
   Int32OperandId argcId(writer.setInputOperandId(0));
 
-  // Guard callee is the 'ToString' intrinsic native function.
+  // Guard callee is the 'ToString' or 'String' function.
   emitNativeCalleeGuard(callee);
 
   // Guard that the argument is a string.
@@ -5036,13 +5041,20 @@ AttachDecision CallIRGenerator::tryAttachToString(HandleFunction callee) {
   writer.returnFromIC();
   cacheIRStubKind_ = BaselineCacheIRStubKind::Regular;
 
-  trackAttached("ToString");
+  if (native == InlinableNative::IntrinsicToString) {
+    trackAttached("ToString");
+  } else {
+    MOZ_ASSERT(native == InlinableNative::String);
+    trackAttached("String");
+  }
   return AttachDecision::Attach;
 }
 
-AttachDecision CallIRGenerator::tryAttachToObject(HandleFunction callee) {
+AttachDecision CallIRGenerator::tryAttachToObject(HandleFunction callee,
+                                                  InlinableNative native) {
   // Need a single object argument.
   // TODO(Warp): Support all or more conversions to object.
+  // Note: ToObject and Object differ in their behavior for undefined/null.
   if (argc_ != 1 || !args_[0].isObject()) {
     return AttachDecision::NoAction;
   }
@@ -5050,7 +5062,7 @@ AttachDecision CallIRGenerator::tryAttachToObject(HandleFunction callee) {
   // Initialize the input operand.
   Int32OperandId argcId(writer.setInputOperandId(0));
 
-  // Guard callee is the 'ToObject' intrinsic native function.
+  // Guard callee is the 'ToObject' or 'Object' function.
   emitNativeCalleeGuard(callee);
 
   // Guard that the argument is an object.
@@ -5064,7 +5076,12 @@ AttachDecision CallIRGenerator::tryAttachToObject(HandleFunction callee) {
   writer.typeMonitorResult();
   cacheIRStubKind_ = BaselineCacheIRStubKind::Monitored;
 
-  trackAttached("ToObject");
+  if (native == InlinableNative::IntrinsicToObject) {
+    trackAttached("ToObject");
+  } else {
+    MOZ_ASSERT(native == InlinableNative::Object);
+    trackAttached("Object");
+  }
   return AttachDecision::Attach;
 }
 
@@ -5177,6 +5194,43 @@ AttachDecision CallIRGenerator::tryAttachIsConstructor(HandleFunction callee) {
   return AttachDecision::Attach;
 }
 
+AttachDecision CallIRGenerator::tryAttachGuardToClass(HandleFunction callee,
+                                                      InlinableNative native) {
+  // Need a single object argument.
+  if (argc_ != 1 || !args_[0].isObject()) {
+    return AttachDecision::NoAction;
+  }
+
+  // Class must match.
+  const JSClass* clasp = InlinableNativeGuardToClass(native);
+  if (args_[0].toObject().getClass() != clasp) {
+    return AttachDecision::NoAction;
+  }
+
+  // Initialize the input operand.
+  Int32OperandId argcId(writer.setInputOperandId(0));
+
+  // Guard callee is the 'GuardToXXX' native function.
+  emitNativeCalleeGuard(callee);
+
+  // Guard that the argument is an object.
+  ValOperandId argId = writer.loadArgumentFixedSlot(ArgumentKind::Arg0, argc_);
+  ObjOperandId objId = writer.guardToObject(argId);
+
+  // Guard that the object has the correct class.
+  writer.guardAnyClass(objId, clasp);
+
+  // Return the object.
+  writer.loadObjectResult(objId);
+
+  // Monitor the returned object.
+  writer.typeMonitorResult();
+  cacheIRStubKind_ = BaselineCacheIRStubKind::Monitored;
+
+  trackAttached("GuardToClass");
+  return AttachDecision::Attach;
+}
+
 AttachDecision CallIRGenerator::tryAttachStringChar(HandleFunction callee,
                                                     StringChar kind) {
   // Need one argument.
@@ -5234,6 +5288,61 @@ AttachDecision CallIRGenerator::tryAttachStringCharCodeAt(
 
 AttachDecision CallIRGenerator::tryAttachStringCharAt(HandleFunction callee) {
   return tryAttachStringChar(callee, StringChar::At);
+}
+
+AttachDecision CallIRGenerator::tryAttachStringFromCharCode(
+    HandleFunction callee) {
+  // Need one int32 argument.
+  if (argc_ != 1 || !args_[0].isInt32()) {
+    return AttachDecision::NoAction;
+  }
+
+  // Initialize the input operand.
+  Int32OperandId argcId(writer.setInputOperandId(0));
+
+  // Guard callee is the 'fromCharCode' native function.
+  emitNativeCalleeGuard(callee);
+
+  // Guard int32 argument.
+  ValOperandId argId = writer.loadArgumentFixedSlot(ArgumentKind::Arg0, argc_);
+  Int32OperandId codeId = writer.guardToInt32(argId);
+
+  // Return string created from code.
+  writer.stringFromCharCodeResult(codeId);
+
+  // This stub does not need to be monitored, because it always
+  // returns a string.
+  writer.returnFromIC();
+  cacheIRStubKind_ = BaselineCacheIRStubKind::Regular;
+
+  trackAttached("StringFromCharCode");
+  return AttachDecision::Attach;
+}
+
+AttachDecision CallIRGenerator::tryAttachMathRandom(HandleFunction callee) {
+  // Expecting no arguments.
+  if (argc_ != 0) {
+    return AttachDecision::NoAction;
+  }
+
+  MOZ_ASSERT(cx_->realm() == callee->realm(),
+             "Shouldn't inline cross-realm Math.random because per-realm RNG");
+
+  // Initialize the input operand.
+  Int32OperandId argcId(writer.setInputOperandId(0));
+
+  // Guard callee is the 'random' native function.
+  emitNativeCalleeGuard(callee);
+
+  mozilla::non_crypto::XorShift128PlusRNG* rng =
+      &cx_->realm()->getOrCreateRandomNumberGenerator();
+  writer.mathRandomResult(rng);
+
+  writer.returnFromIC();
+  cacheIRStubKind_ = BaselineCacheIRStubKind::Regular;
+
+  trackAttached("MathRandom");
+  return AttachDecision::Attach;
 }
 
 AttachDecision CallIRGenerator::tryAttachMathAbs(HandleFunction callee) {
@@ -5402,6 +5511,141 @@ AttachDecision CallIRGenerator::tryAttachMathSqrt(HandleFunction callee) {
   cacheIRStubKind_ = BaselineCacheIRStubKind::Regular;
 
   trackAttached("MathSqrt");
+  return AttachDecision::Attach;
+}
+
+static bool CanAttachInt32Pow(const Value& baseVal, const Value& powerVal) {
+  MOZ_ASSERT(baseVal.isInt32() || baseVal.isBoolean());
+  MOZ_ASSERT(powerVal.isInt32() || powerVal.isBoolean());
+
+  int32_t base = baseVal.isInt32() ? baseVal.toInt32() : baseVal.toBoolean();
+  int32_t power =
+      powerVal.isInt32() ? powerVal.toInt32() : powerVal.toBoolean();
+
+  // x^y where y < 0 is most of the time not an int32, except when x is 1 or y
+  // gets large enough. It's hard to determine when exactly y is "large enough",
+  // so we don't use Int32PowResult when x != 1 and y < 0.
+  // Note: it's important for this condition to match the code generated by
+  // MacroAssembler::pow32 to prevent failure loops.
+  if (power < 0) {
+    return base == 1;
+  }
+
+  double res = powi(base, power);
+  int32_t unused;
+  return mozilla::NumberIsInt32(res, &unused);
+}
+
+AttachDecision CallIRGenerator::tryAttachMathPow(HandleFunction callee) {
+  // Need two number arguments.
+  if (argc_ != 2 || !args_[0].isNumber() || !args_[1].isNumber()) {
+    return AttachDecision::NoAction;
+  }
+
+  // Initialize the input operand.
+  Int32OperandId argcId(writer.setInputOperandId(0));
+
+  // Guard callee is the 'pow' function.
+  emitNativeCalleeGuard(callee);
+
+  ValOperandId baseId = writer.loadArgumentFixedSlot(ArgumentKind::Arg0, argc_);
+  ValOperandId exponentId =
+      writer.loadArgumentFixedSlot(ArgumentKind::Arg1, argc_);
+
+  if (args_[0].isInt32() && args_[1].isInt32() &&
+      CanAttachInt32Pow(args_[0], args_[1])) {
+    Int32OperandId baseInt32Id = writer.guardToInt32(baseId);
+    Int32OperandId exponentInt32Id = writer.guardToInt32(exponentId);
+    writer.int32PowResult(baseInt32Id, exponentInt32Id);
+  } else {
+    NumberOperandId baseNumberId = writer.guardIsNumber(baseId);
+    NumberOperandId exponentNumberId = writer.guardIsNumber(exponentId);
+    writer.doublePowResult(baseNumberId, exponentNumberId);
+  }
+
+  writer.typeMonitorResult();
+  cacheIRStubKind_ = BaselineCacheIRStubKind::Monitored;
+
+  trackAttached("MathPow");
+  return AttachDecision::Attach;
+}
+
+AttachDecision CallIRGenerator::tryAttachMathATan2(HandleFunction callee) {
+  // Requires two numbers as arguments.
+  if (argc_ != 2 || !args_[0].isNumber() || !args_[1].isNumber()) {
+    return AttachDecision::NoAction;
+  }
+
+  // Initialize the input operand.
+  Int32OperandId argcId(writer.setInputOperandId(0));
+
+  // Guard callee is the 'atan2' native function.
+  emitNativeCalleeGuard(callee);
+
+  ValOperandId yId = writer.loadArgumentFixedSlot(ArgumentKind::Arg0, argc_);
+  ValOperandId xId = writer.loadArgumentFixedSlot(ArgumentKind::Arg1, argc_);
+
+  NumberOperandId yNumberId = writer.guardIsNumber(yId);
+  NumberOperandId xNumberId = writer.guardIsNumber(xId);
+
+  writer.mathAtan2NumberResult(yNumberId, xNumberId);
+
+  // Math.atan2 always returns a double so we don't need type monitoring.
+  writer.returnFromIC();
+  cacheIRStubKind_ = BaselineCacheIRStubKind::Regular;
+
+  trackAttached("MathAtan2");
+  return AttachDecision::Attach;
+}
+
+AttachDecision CallIRGenerator::tryAttachMathMinMax(HandleFunction callee,
+                                                    bool isMax) {
+  // For now only optimize if there are 1-4 arguments.
+  if (argc_ < 1 || argc_ > 4) {
+    return AttachDecision::NoAction;
+  }
+
+  // Ensure all arguments are numbers.
+  bool allInt32 = true;
+  for (size_t i = 0; i < argc_; i++) {
+    if (!args_[i].isNumber()) {
+      return AttachDecision::NoAction;
+    }
+    if (!args_[i].isInt32()) {
+      allInt32 = false;
+    }
+  }
+
+  // Initialize the input operand.
+  Int32OperandId argcId(writer.setInputOperandId(0));
+
+  // Guard callee is this Math function.
+  emitNativeCalleeGuard(callee);
+
+  if (allInt32) {
+    ValOperandId valId = writer.loadStandardCallArgument(0, argc_);
+    Int32OperandId resId = writer.guardToInt32(valId);
+    for (size_t i = 1; i < argc_; i++) {
+      ValOperandId argId = writer.loadStandardCallArgument(i, argc_);
+      Int32OperandId argInt32Id = writer.guardToInt32(argId);
+      resId = writer.int32MinMax(isMax, resId, argInt32Id);
+    }
+    writer.loadInt32Result(resId);
+  } else {
+    ValOperandId valId = writer.loadStandardCallArgument(0, argc_);
+    NumberOperandId resId = writer.guardIsNumber(valId);
+    for (size_t i = 1; i < argc_; i++) {
+      ValOperandId argId = writer.loadStandardCallArgument(i, argc_);
+      NumberOperandId argNumId = writer.guardIsNumber(argId);
+      resId = writer.numberMinMax(isMax, resId, argNumId);
+    }
+    writer.loadDoubleResult(resId);
+  }
+
+  writer.typeMonitorResult();
+  cacheIRStubKind_ = BaselineCacheIRStubKind::Monitored;
+
+  trackAttached(isMax ? "MathMax" : "MathMin");
   return AttachDecision::Attach;
 }
 
@@ -5594,8 +5838,15 @@ AttachDecision CallIRGenerator::tryAttachInlinableNative(
     return AttachDecision::NoAction;
   }
 
+  InlinableNative native = callee->jitInfo()->inlinableNative;
+
+  // Not all natives can be inlined cross-realm.
+  if (cx_->realm() != callee->realm() && !CanInlineNativeCrossRealm(native)) {
+    return AttachDecision::NoAction;
+  }
+
   // Check for special-cased native functions.
-  switch (callee->jitInfo()->inlinableNative) {
+  switch (native) {
     // Array natives.
     case InlinableNative::ArrayPush:
       return tryAttachArrayPush(callee);
@@ -5604,13 +5855,23 @@ AttachDecision CallIRGenerator::tryAttachInlinableNative(
     case InlinableNative::ArrayIsArray:
       return tryAttachArrayIsArray(callee);
 
+    // Intl natives.
+    case InlinableNative::IntlGuardToCollator:
+    case InlinableNative::IntlGuardToDateTimeFormat:
+    case InlinableNative::IntlGuardToDisplayNames:
+    case InlinableNative::IntlGuardToListFormat:
+    case InlinableNative::IntlGuardToNumberFormat:
+    case InlinableNative::IntlGuardToPluralRules:
+    case InlinableNative::IntlGuardToRelativeTimeFormat:
+      return tryAttachGuardToClass(callee, native);
+
     // Intrinsics.
     case InlinableNative::IntrinsicIsSuspendedGenerator:
       return tryAttachIsSuspendedGenerator(callee);
     case InlinableNative::IntrinsicToString:
-      return tryAttachToString(callee);
+      return tryAttachToString(callee, native);
     case InlinableNative::IntrinsicToObject:
-      return tryAttachToObject(callee);
+      return tryAttachToObject(callee, native);
     case InlinableNative::IntrinsicToInteger:
       return tryAttachToInteger(callee);
     case InlinableNative::IntrinsicIsObject:
@@ -5619,14 +5880,27 @@ AttachDecision CallIRGenerator::tryAttachInlinableNative(
       return tryAttachIsCallable(callee);
     case InlinableNative::IntrinsicIsConstructor:
       return tryAttachIsConstructor(callee);
+    case InlinableNative::IntrinsicGuardToArrayIterator:
+    case InlinableNative::IntrinsicGuardToMapIterator:
+    case InlinableNative::IntrinsicGuardToSetIterator:
+    case InlinableNative::IntrinsicGuardToStringIterator:
+    case InlinableNative::IntrinsicGuardToRegExpStringIterator:
+    case InlinableNative::IntrinsicGuardToWrapForValidIterator:
+      return tryAttachGuardToClass(callee, native);
 
     // String natives.
+    case InlinableNative::String:
+      return tryAttachToString(callee, native);
     case InlinableNative::StringCharCodeAt:
       return tryAttachStringCharCodeAt(callee);
     case InlinableNative::StringCharAt:
       return tryAttachStringCharAt(callee);
+    case InlinableNative::StringFromCharCode:
+      return tryAttachStringFromCharCode(callee);
 
     // Math natives.
+    case InlinableNative::MathRandom:
+      return tryAttachMathRandom(callee);
     case InlinableNative::MathAbs:
       return tryAttachMathAbs(callee);
     case InlinableNative::MathFloor:
@@ -5637,6 +5911,8 @@ AttachDecision CallIRGenerator::tryAttachInlinableNative(
       return tryAttachMathRound(callee);
     case InlinableNative::MathSqrt:
       return tryAttachMathSqrt(callee);
+    case InlinableNative::MathATan2:
+      return tryAttachMathATan2(callee);
     case InlinableNative::MathSin:
       return tryAttachMathFunction(callee, UnaryMathFunction::Sin);
     case InlinableNative::MathTan:
@@ -5675,6 +5951,32 @@ AttachDecision CallIRGenerator::tryAttachInlinableNative(
       return tryAttachMathFunction(callee, UnaryMathFunction::ATanH);
     case InlinableNative::MathCbrt:
       return tryAttachMathFunction(callee, UnaryMathFunction::Cbrt);
+    case InlinableNative::MathPow:
+      return tryAttachMathPow(callee);
+    case InlinableNative::MathMin:
+      return tryAttachMathMinMax(callee, /* isMax = */ false);
+    case InlinableNative::MathMax:
+      return tryAttachMathMinMax(callee, /* isMax = */ true);
+
+    // Map intrinsics.
+    case InlinableNative::IntrinsicGuardToMapObject:
+      return tryAttachGuardToClass(callee, native);
+
+    // Object natives.
+    case InlinableNative::Object:
+      return tryAttachToObject(callee, native);
+
+    // Set intrinsics.
+    case InlinableNative::IntrinsicGuardToSetObject:
+      return tryAttachGuardToClass(callee, native);
+
+    // ArrayBuffer intrinsics.
+    case InlinableNative::IntrinsicGuardToArrayBuffer:
+      return tryAttachGuardToClass(callee, native);
+
+    // SharedArrayBuffer intrinsics.
+    case InlinableNative::IntrinsicGuardToSharedArrayBuffer:
+      return tryAttachGuardToClass(callee, native);
 
     default:
       return AttachDecision::NoAction;
@@ -7122,6 +7424,98 @@ AttachDecision UnaryArithIRGenerator::tryAttachStringNumber() {
   return AttachDecision::Attach;
 }
 
+ToPropertyKeyIRGenerator::ToPropertyKeyIRGenerator(JSContext* cx,
+                                                   HandleScript script,
+                                                   jsbytecode* pc,
+                                                   ICState::Mode mode,
+                                                   HandleValue val)
+    : IRGenerator(cx, script, pc, CacheKind::ToPropertyKey, mode), val_(val) {}
+
+void ToPropertyKeyIRGenerator::trackAttached(const char* name) {
+#ifdef JS_CACHEIR_SPEW
+  if (const CacheIRSpewer::Guard& sp = CacheIRSpewer::Guard(*this, name)) {
+    sp.valueProperty("val", val_);
+  }
+#endif
+}
+
+AttachDecision ToPropertyKeyIRGenerator::tryAttachStub() {
+  AutoAssertNoPendingException aanpe(cx_);
+  TRY_ATTACH(tryAttachInt32());
+  TRY_ATTACH(tryAttachNumber());
+  TRY_ATTACH(tryAttachString());
+  TRY_ATTACH(tryAttachSymbol());
+
+  trackAttached(IRGenerator::NotAttached);
+  return AttachDecision::NoAction;
+}
+
+AttachDecision ToPropertyKeyIRGenerator::tryAttachInt32() {
+  if (!val_.isInt32()) {
+    return AttachDecision::NoAction;
+  }
+
+  ValOperandId valId(writer.setInputOperandId(0));
+
+  Int32OperandId intId = writer.guardToInt32(valId);
+  writer.loadInt32Result(intId);
+  writer.returnFromIC();
+
+  trackAttached("ToPropertyKey.Int32");
+  return AttachDecision::Attach;
+}
+
+AttachDecision ToPropertyKeyIRGenerator::tryAttachNumber() {
+  if (!val_.isNumber()) {
+    return AttachDecision::NoAction;
+  }
+
+  // We allow negative zero here because ToPropertyKey(-0.0) is 0.
+  int32_t unused;
+  if (!mozilla::NumberEqualsInt32(val_.toNumber(), &unused)) {
+    return AttachDecision::NoAction;
+  }
+
+  ValOperandId valId(writer.setInputOperandId(0));
+
+  Int32OperandId intId = writer.guardToInt32Index(valId);
+  writer.loadInt32Result(intId);
+  writer.returnFromIC();
+
+  trackAttached("ToPropertyKey.Number");
+  return AttachDecision::Attach;
+}
+
+AttachDecision ToPropertyKeyIRGenerator::tryAttachString() {
+  if (!val_.isString()) {
+    return AttachDecision::NoAction;
+  }
+
+  ValOperandId valId(writer.setInputOperandId(0));
+
+  StringOperandId strId = writer.guardToString(valId);
+  writer.loadStringResult(strId);
+  writer.returnFromIC();
+
+  trackAttached("ToPropertyKey.String");
+  return AttachDecision::Attach;
+}
+
+AttachDecision ToPropertyKeyIRGenerator::tryAttachSymbol() {
+  if (!val_.isSymbol()) {
+    return AttachDecision::NoAction;
+  }
+
+  ValOperandId valId(writer.setInputOperandId(0));
+
+  SymbolOperandId strId = writer.guardToSymbol(valId);
+  writer.loadSymbolResult(strId);
+  writer.returnFromIC();
+
+  trackAttached("ToPropertyKey.Symbol");
+  return AttachDecision::Attach;
+}
+
 BinaryArithIRGenerator::BinaryArithIRGenerator(
     JSContext* cx, HandleScript script, jsbytecode* pc, ICState::Mode mode,
     JSOp op, HandleValue lhs, HandleValue rhs, HandleValue res)
@@ -7311,10 +7705,7 @@ AttachDecision BinaryArithIRGenerator::tryAttachInt32() {
     return AttachDecision::NoAction;
   }
 
-  // x^y where y < 0 is most of the time not an int32, except when y gets large
-  // enough. It's hard to determine when exactly y is "large enough", so we
-  // don't attach an IC for any negative exponent.
-  if (op_ == JSOp::Pow && rhs_.isInt32() && rhs_.toInt32() < 0) {
+  if (op_ == JSOp::Pow && !CanAttachInt32Pow(lhs_, rhs_)) {
     return AttachDecision::NoAction;
   }
 
@@ -7594,16 +7985,10 @@ AttachDecision BinaryArithIRGenerator::tryAttachStringInt32Arith() {
   }
 
   // Must _not_ support Add, because it would be string concatenation instead.
+  // For Pow we can't easily determine the CanAttachInt32Pow conditions so we
+  // reject that as well.
   if (op_ != JSOp::Sub && op_ != JSOp::Mul && op_ != JSOp::Div &&
-      op_ != JSOp::Mod && op_ != JSOp::Pow) {
-    return AttachDecision::NoAction;
-  }
-
-  // See tryAttachInt32() for why negative exponents are rejected. We can't
-  // easily determine if a string exponent is negative, so any strings are
-  // rejected as well.
-  if (op_ == JSOp::Pow &&
-      ((rhs_.isInt32() && rhs_.toInt32() < 0) || rhs_.isString())) {
+      op_ != JSOp::Mod) {
     return AttachDecision::NoAction;
   }
 
@@ -7639,10 +8024,6 @@ AttachDecision BinaryArithIRGenerator::tryAttachStringInt32Arith() {
     case JSOp::Mod:
       writer.int32ModResult(lhsIntId, rhsIntId);
       trackAttached("BinaryArith.StringInt32.Mod");
-      break;
-    case JSOp::Pow:
-      writer.int32PowResult(lhsIntId, rhsIntId);
-      trackAttached("BinaryArith.StringInt32.Pow");
       break;
     default:
       MOZ_CRASH("Unhandled op in tryAttachStringInt32Arith");

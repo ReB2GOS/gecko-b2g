@@ -32,8 +32,21 @@ NS_IMPL_RELEASE_INHERITED(DOMLocalization, Localization)
 NS_INTERFACE_MAP_BEGIN_CYCLE_COLLECTION(DOMLocalization)
 NS_INTERFACE_MAP_END_INHERITING(Localization)
 
-DOMLocalization::DOMLocalization(nsIGlobalObject* aGlobal)
-    : Localization(aGlobal) {
+/* static */
+already_AddRefed<DOMLocalization> DOMLocalization::Create(
+    nsIGlobalObject* aGlobal, const bool aSync,
+    const BundleGenerator& aBundleGenerator) {
+  RefPtr<DOMLocalization> domLoc =
+      new DOMLocalization(aGlobal, aSync, aBundleGenerator);
+
+  domLoc->Init();
+
+  return domLoc.forget();
+}
+
+DOMLocalization::DOMLocalization(nsIGlobalObject* aGlobal, const bool aSync,
+                                 const BundleGenerator& aBundleGenerator)
+    : Localization(aGlobal, aSync, aBundleGenerator) {
   mMutations = new L10nMutations(this);
 }
 
@@ -47,13 +60,14 @@ already_AddRefed<DOMLocalization> DOMLocalization::Constructor(
     return nullptr;
   }
 
-  RefPtr<DOMLocalization> domLoc = new DOMLocalization(global);
+  RefPtr<DOMLocalization> domLoc =
+      DOMLocalization::Create(global, aSync, aBundleGenerator);
 
   if (aResourceIds.Length()) {
     domLoc->AddResourceIds(aResourceIds);
   }
 
-  domLoc->Activate(aSync, true, aBundleGenerator);
+  domLoc->Activate(true);
 
   return domLoc.forget();
 }
@@ -63,7 +77,9 @@ JSObject* DOMLocalization::WrapObject(JSContext* aCx,
   return DOMLocalization_Binding::Wrap(aCx, this, aGivenProto);
 }
 
-DOMLocalization::~DOMLocalization() { DisconnectMutations(); }
+void DOMLocalization::Destroy() { DisconnectMutations(); }
+
+DOMLocalization::~DOMLocalization() { Destroy(); }
 
 /**
  * DOMLocalization API
@@ -131,7 +147,7 @@ void DOMLocalization::SetAttributes(
   }
 }
 
-void DOMLocalization::GetAttributes(Element& aElement, L10nKey& aResult,
+void DOMLocalization::GetAttributes(Element& aElement, L10nIdArgs& aResult,
                                     ErrorResult& aRv) {
   nsAutoString l10nId;
   nsAutoString l10nArgs;
@@ -274,8 +290,8 @@ already_AddRefed<Promise> DOMLocalization::TranslateElements(
     const Sequence<OwningNonNull<Element>>& aElements,
     nsXULPrototypeDocument* aProto, ErrorResult& aRv) {
   JS::RootingContext* rcx = RootingCx();
-  Sequence<L10nKey> l10nKeys;
-  SequenceRooter<L10nKey> rooter(rcx, &l10nKeys);
+  Sequence<OwningUTF8StringOrL10nIdArgs> l10nKeys;
+  SequenceRooter<OwningUTF8StringOrL10nIdArgs> rooter(rcx, &l10nKeys);
   RefPtr<ElementTranslationHandler> nativeHandler =
       new ElementTranslationHandler(this, aProto);
   nsTArray<nsCOMPtr<Element>>& domElements = nativeHandler->Elements();
@@ -293,13 +309,13 @@ already_AddRefed<Promise> DOMLocalization::TranslateElements(
       continue;
     }
 
-    L10nKey* key = l10nKeys.AppendElement(fallible);
+    OwningUTF8StringOrL10nIdArgs* key = l10nKeys.AppendElement(fallible);
     if (!key) {
       aRv.Throw(NS_ERROR_OUT_OF_MEMORY);
       return nullptr;
     }
 
-    GetAttributes(*domElement, *key, aRv);
+    GetAttributes(*domElement, key->SetAsL10nIdArgs(), aRv);
     if (NS_WARN_IF(aRv.Failed())) {
       return nullptr;
     }
@@ -498,7 +514,7 @@ bool DOMLocalization::ApplyTranslations(
 
 void DOMLocalization::OnChange() {
   Localization::OnChange();
-  if (mLocalization) {
+  if (mLocalization && !mResourceIds.IsEmpty()) {
     ErrorResult rv;
     RefPtr<Promise> promise = TranslateRoots(rv);
   }

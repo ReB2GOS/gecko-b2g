@@ -66,7 +66,7 @@ use crate::glyph_rasterizer::{GlyphFormat, GlyphRasterizer};
 use crate::gpu_cache::{GpuBlockData, GpuCacheUpdate, GpuCacheUpdateList};
 use crate::gpu_cache::{GpuCacheDebugChunk, GpuCacheDebugCmd};
 use crate::gpu_types::{PrimitiveHeaderI, PrimitiveHeaderF, ScalingInstance, SvgFilterInstance, TransformData};
-use crate::gpu_types::{CompositeInstance, ResolveInstanceData, ZBufferId};
+use crate::gpu_types::{ClearInstance, CompositeInstance, ResolveInstanceData, ZBufferId};
 use crate::internal_types::{TextureSource, ResourceCacheError};
 use crate::internal_types::{CacheTextureId, DebugOutput, FastHashMap, FastHashSet, LayerIndex, RenderedDocument, ResultMsg};
 use crate::internal_types::{TextureCacheAllocationKind, TextureCacheUpdate, TextureUpdateList, TextureUpdateSource};
@@ -252,6 +252,10 @@ const GPU_TAG_SVG_FILTER: GpuProfileTag = GpuProfileTag {
 const GPU_TAG_COMPOSITE: GpuProfileTag = GpuProfileTag {
     label: "Composite",
     color: debug_colors::TOMATO,
+};
+const GPU_TAG_CLEAR: GpuProfileTag = GpuProfileTag {
+    label: "Clear",
+    color: debug_colors::CHOCOLATE,
 };
 
 /// The clear color used for the texture cache when the debug display is enabled.
@@ -881,6 +885,28 @@ pub(crate) mod desc {
             },
         ],
     };
+
+    pub const CLEAR: VertexDescriptor = VertexDescriptor {
+        vertex_attributes: &[
+            VertexAttribute {
+                name: "aPosition",
+                count: 2,
+                kind: VertexAttributeKind::F32,
+            },
+        ],
+        instance_attributes: &[
+            VertexAttribute {
+                name: "aRect",
+                count: 4,
+                kind: VertexAttributeKind::F32,
+            },
+            VertexAttribute {
+                name: "aColor",
+                count: 4,
+                kind: VertexAttributeKind::F32,
+            },
+        ],
+    };
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -897,6 +923,7 @@ pub(crate) enum VertexArrayKind {
     Resolve,
     SvgFilter,
     Composite,
+    Clear,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1099,12 +1126,16 @@ impl TextureResolver {
         // generally prevent any sustained build-up of unused textures, unless we don't
         // generate frames for a long period. This can happen when the window is
         // minimized, and we probably want to flush all the WebRender caches in that case [1].
+        // There is also a second "red line" memory threshold which prevents
+        // memory exhaustion if many render targets are allocated within a small
+        // number of frames. For now this is set at 320 MB (10x the normal memory threshold).
         //
         // [1] https://bugzilla.mozilla.org/show_bug.cgi?id=1494099
         self.gc_targets(
             device,
             frame_id,
             32 * 1024 * 1024,
+            32 * 1024 * 1024 * 10,
             60,
         );
     }
@@ -1132,6 +1163,7 @@ impl TextureResolver {
         device: &mut Device,
         current_frame_id: GpuFrameId,
         total_bytes_threshold: usize,
+        total_bytes_red_line_threshold: usize,
         frames_threshold: usize,
     ) {
         // Get the total GPU memory size used by the current render target pool
@@ -1157,8 +1189,9 @@ impl TextureResolver {
             // However, if it's been used in very recently, it is always kept around,
             // which ensures we don't thrash texture allocations on pages that do
             // require a very large render target pool and are regularly changing.
-            if rt_pool_size_in_bytes > total_bytes_threshold &&
-               !target.used_recently(current_frame_id, frames_threshold)
+            if (rt_pool_size_in_bytes > total_bytes_red_line_threshold) ||
+               (rt_pool_size_in_bytes > total_bytes_threshold &&
+                !target.used_recently(current_frame_id, frames_threshold))
             {
                 rt_pool_size_in_bytes -= target.size_in_bytes();
                 device.delete_texture(target);
@@ -1878,6 +1911,7 @@ pub struct RendererVAOs {
     resolve_vao: VAO,
     svg_filter_vao: VAO,
     composite_vao: VAO,
+    clear_vao: VAO,
 }
 
 /// Information about the state of the debugging / profiler overlay in native compositing mode.
@@ -2007,6 +2041,7 @@ pub struct Renderer {
     clear_color: Option<ColorF>,
     enable_clear_scissor: bool,
     enable_advanced_blend_barriers: bool,
+    clear_caches_with_quads: bool,
 
     debug: LazyInitializedDebugRenderer,
     debug_flags: DebugFlags,
@@ -2360,6 +2395,7 @@ impl Renderer {
         let resolve_vao = device.create_vao_with_new_instances(&desc::RESOLVE, &prim_vao);
         let svg_filter_vao = device.create_vao_with_new_instances(&desc::SVG_FILTER, &prim_vao);
         let composite_vao = device.create_vao_with_new_instances(&desc::COMPOSITE, &prim_vao);
+        let clear_vao = device.create_vao_with_new_instances(&desc::CLEAR, &prim_vao);
         let texture_cache_upload_pbo = device.create_pbo();
 
         let texture_resolver = TextureResolver::new(&mut device);
@@ -2630,6 +2666,7 @@ impl Renderer {
             clear_color: options.clear_color,
             enable_clear_scissor: options.enable_clear_scissor,
             enable_advanced_blend_barriers: !ext_blend_equation_advanced_coherent,
+            clear_caches_with_quads: options.clear_caches_with_quads,
             last_time: 0,
             gpu_profile,
             vaos: RendererVAOs {
@@ -2643,6 +2680,7 @@ impl Renderer {
                 line_vao,
                 svg_filter_vao,
                 composite_vao,
+                clear_vao,
             },
             vertex_data_textures,
             current_vertex_data_textures: 0,
@@ -4056,8 +4094,8 @@ impl Renderer {
             RenderTaskKind::Picture(ref task_info) => (task_info.content_origin, task_info.device_pixel_scale),
             _ => panic!("bug: composite on non-picture?"),
         };
-        let source_screen_origin = match source.kind {
-            RenderTaskKind::Picture(ref task_info) => task_info.content_origin,
+        let (source_screen_origin, source_scale) = match source.kind {
+            RenderTaskKind::Picture(ref task_info) => (task_info.content_origin, task_info.device_pixel_scale),
             _ => panic!("bug: composite on non-picture?"),
         };
 
@@ -4071,7 +4109,7 @@ impl Renderer {
             false,
         );
 
-        let source_in_backdrop_space = source_screen_origin.to_f32() * backdrop_scale.0;
+        let source_in_backdrop_space = source_screen_origin.to_f32() * (backdrop_scale.0 / source_scale.0);
 
         let mut src = DeviceIntRect::new(
             (source_in_backdrop_space + (backdrop_rect.origin - backdrop_screen_origin).to_f32()).to_i32(),
@@ -4238,25 +4276,54 @@ impl Renderer {
         {
             let _timer = self.gpu_profile.start_timer(GPU_TAG_SETUP_TARGET);
             self.device.bind_draw_target(draw_target);
-            self.device.disable_depth();
             self.device.enable_depth_write();
             self.set_blend(false, framebuffer_kind);
 
-            // If updating only a dirty rect within a picture cache target, the
-            // clear must also be scissored to that dirty region.
-            let scissor_rect = target.alpha_batch_container.task_scissor_rect.map(|rect| {
-                draw_target.build_scissor_rect(
-                    Some(rect),
-                    content_origin,
-                )
-            });
-
-            self.device.clear_target(
-                target.clear_color.map(|c| c.to_array()),
-                Some(1.0),
-                scissor_rect,
-            );
-
+            let clear_color = target.clear_color.map(|c| c.to_array());
+            match target.alpha_batch_container.task_scissor_rect {
+                // If updating only a dirty rect within a picture cache target, the
+                // clear must also be scissored to that dirty region.
+                Some(r) if self.clear_caches_with_quads => {
+                    self.device.enable_depth(DepthFunction::Always);
+                    // Save the draw call count so that our reftests don't get confused...
+                    let old_draw_call_count = stats.total_draw_calls;
+                    if clear_color.is_none() {
+                        self.device.disable_color_write();
+                    }
+                    let instance = ClearInstance {
+                        rect: [
+                            r.origin.x as f32, r.origin.y as f32,
+                            r.size.width as f32, r.size.height as f32,
+                        ],
+                        color: clear_color.unwrap_or([0.0; 4]),
+                    };
+                    self.shaders.borrow_mut().ps_clear.bind(
+                        &mut self.device,
+                        &projection,
+                        &mut self.renderer_errors,
+                    );
+                    self.draw_instanced_batch(
+                        &[instance],
+                        VertexArrayKind::Clear,
+                        &BatchTextures::no_texture(),
+                        stats,
+                    );
+                    if clear_color.is_none() {
+                        self.device.enable_color_write();
+                    }
+                    stats.total_draw_calls = old_draw_call_count;
+                    self.device.disable_depth();
+                }
+                other => {
+                    let scissor_rect = other.map(|rect| {
+                        draw_target.build_scissor_rect(
+                            Some(rect),
+                            content_origin,
+                        )
+                    });
+                    self.device.clear_target(clear_color, Some(1.0), scissor_rect);
+                }
+            };
             self.device.disable_depth_write();
         }
 
@@ -4300,8 +4367,7 @@ impl Renderer {
             let opaque_sampler = self.gpu_profile.start_sampler(GPU_SAMPLER_TAG_OPAQUE);
             self.set_blend(false, framebuffer_kind);
             //Note: depth equality is needed for split planes
-            self.device.set_depth_func(DepthFunction::LessEqual);
-            self.device.enable_depth();
+            self.device.enable_depth(DepthFunction::LessEqual);
             self.device.enable_depth_write();
 
             // Draw opaque batches front-to-back for maximum
@@ -4333,6 +4399,8 @@ impl Renderer {
 
             self.device.disable_depth_write();
             self.gpu_profile.finish_sampler(opaque_sampler);
+        } else {
+            self.device.disable_depth();
         }
 
         if !alpha_batch_container.alpha_batches.is_empty()
@@ -4496,11 +4564,11 @@ impl Renderer {
                 );
             }
 
-            self.device.disable_depth();
             self.set_blend(false, framebuffer_kind);
             self.gpu_profile.finish_sampler(transparent_sampler);
         }
 
+        self.device.disable_depth();
         if uses_scissor {
             self.device.disable_scissor();
         }
@@ -4893,7 +4961,7 @@ impl Renderer {
         let _timer = self.gpu_profile.start_timer(GPU_TAG_COMPOSITE);
 
         self.device.bind_draw_target(draw_target);
-        self.device.enable_depth();
+        self.device.enable_depth(DepthFunction::LessEqual);
         self.device.enable_depth_write();
 
         // Determine the partial present mode for this frame, which is used during
@@ -5440,6 +5508,8 @@ impl Renderer {
         self.set_blend(false, FramebufferKind::Other);
 
         {
+            let _timer = self.gpu_profile.start_timer(GPU_TAG_CLEAR);
+
             let (texture, _) = self.texture_resolver
                 .resolve(&texture_source)
                 .expect("BUG: invalid target texture");
@@ -5454,12 +5524,37 @@ impl Renderer {
             self.device.disable_depth_write();
             self.set_blend(false, FramebufferKind::Other);
 
-            for rect in &target.clears {
-                self.device.clear_target(
-                    Some([0.0, 0.0, 0.0, 0.0]),
-                    None,
-                    Some(draw_target.to_framebuffer_rect(*rect)),
+            let color = [0.0, 0.0, 0.0, 0.0];
+            if self.clear_caches_with_quads && !target.clears.is_empty() {
+                let instances = target.clears
+                    .iter()
+                    .map(|r| ClearInstance {
+                        rect: [
+                            r.origin.x as f32, r.origin.y as f32,
+                            r.size.width as f32, r.size.height as f32,
+                        ],
+                        color,
+                    })
+                    .collect::<Vec<_>>();
+                self.shaders.borrow_mut().ps_clear.bind(
+                    &mut self.device,
+                    &projection,
+                    &mut self.renderer_errors,
                 );
+                self.draw_instanced_batch(
+                    &instances,
+                    VertexArrayKind::Clear,
+                    &BatchTextures::no_texture(),
+                    stats,
+                );
+            } else {
+                for rect in &target.clears {
+                    self.device.clear_target(
+                        Some(color),
+                        None,
+                        Some(draw_target.to_framebuffer_rect(*rect)),
+                    );
+                }
             }
 
             // Handle any blits to this texture from child tasks.
@@ -6659,6 +6754,7 @@ impl Renderer {
         self.device.delete_vao(self.vaos.scale_vao);
         self.device.delete_vao(self.vaos.svg_filter_vao);
         self.device.delete_vao(self.vaos.composite_vao);
+        self.device.delete_vao(self.vaos.clear_vao);
 
         self.debug.deinit(&mut self.device);
 
@@ -6911,6 +7007,11 @@ pub struct RendererOptions {
     /// Number of batches to look back in history for adding the current
     /// transparent instance into.
     pub batch_lookback_count: usize,
+    /// Use `ps_clear` shader with batched quad rendering to clear the rects
+    /// in texture cache and picture cache tasks.
+    /// This helps to work around some Intel drivers
+    /// that incorrectly synchronize clears to following draws.
+    pub clear_caches_with_quads: bool,
     /// Start the debug server for this renderer.
     pub start_debug_server: bool,
     /// Output the source of the shader with the given name.
@@ -6966,6 +7067,7 @@ impl Default for RendererOptions {
             allow_texture_storage_support: true,
             allow_texture_swizzling: true,
             batch_lookback_count: DEFAULT_BATCH_LOOKBACK_COUNT,
+            clear_caches_with_quads: true,
             // For backwards compatibility we set this to true by default, so
             // that if the debugger feature is enabled, the debug server will
             // be started automatically. Users can explicitly disable this as
@@ -7511,6 +7613,7 @@ fn get_vao(vertex_array_kind: VertexArrayKind, vaos: &RendererVAOs) -> &VAO {
         VertexArrayKind::Resolve => &vaos.resolve_vao,
         VertexArrayKind::SvgFilter => &vaos.svg_filter_vao,
         VertexArrayKind::Composite => &vaos.composite_vao,
+        VertexArrayKind::Clear => &vaos.clear_vao,
     }
 }
 #[derive(Clone, Copy, PartialEq)]

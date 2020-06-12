@@ -80,6 +80,7 @@ MSG_DEF(JSMSG_UTF8_CHAR_TOO_LARGE,     1, JSEXN_TYPEERR, "UTF-8 character {0} to
 MSG_DEF(JSMSG_MALFORMED_UTF8_CHAR,     1, JSEXN_TYPEERR, "malformed UTF-8 character sequence at offset {0}")
 MSG_DEF(JSMSG_BUILTIN_CTOR_NO_NEW,     1, JSEXN_TYPEERR, "calling a builtin {0} constructor without new is forbidden")
 MSG_DEF(JSMSG_EMPTY_ARRAY_REDUCE,      0, JSEXN_TYPEERR, "reduce of empty array with no initial value")
+MSG_DEF(JSMSG_EMPTY_ITERATOR_REDUCE,   0, JSEXN_TYPEERR, "reduce of empty iterator with no initial value")
 MSG_DEF(JSMSG_UNEXPECTED_TYPE,         2, JSEXN_TYPEERR, "{0} is {1}")
 MSG_DEF(JSMSG_MISSING_FUN_ARG,         2, JSEXN_TYPEERR, "missing argument {0} when calling function {1}")
 MSG_DEF(JSMSG_OBJECT_REQUIRED,         1, JSEXN_TYPEERR, "{0} is not a non-null object")
@@ -548,7 +549,6 @@ MSG_DEF(JSMSG_UNDEFINED_CURRENCY,      0, JSEXN_TYPEERR, "undefined currency in 
 MSG_DEF(JSMSG_UNDEFINED_UNIT,          0, JSEXN_TYPEERR, "undefined unit in NumberFormat() with unit style")
 
 // RegExp
-MSG_DEF(JSMSG_BACK_REF_OUT_OF_RANGE,   0, JSEXN_SYNTAXERR, "back reference out of range in regular expression")
 MSG_DEF(JSMSG_BAD_CLASS_RANGE,         0, JSEXN_SYNTAXERR, "invalid range in character class")
 MSG_DEF(JSMSG_ESCAPE_AT_END_OF_REGEXP, 0, JSEXN_SYNTAXERR, "\\ at end of pattern")
 MSG_DEF(JSMSG_EXEC_NOT_OBJORNULL,      0, JSEXN_TYPEERR, "RegExp exec method should return object or null")
@@ -561,7 +561,6 @@ MSG_DEF(JSMSG_NEWREGEXP_FLAGGED,       0, JSEXN_TYPEERR, "can't supply flags whe
 MSG_DEF(JSMSG_NOTHING_TO_REPEAT,       0, JSEXN_SYNTAXERR, "nothing to repeat")
 MSG_DEF(JSMSG_NUMBERS_OUT_OF_ORDER,    0, JSEXN_SYNTAXERR, "numbers out of order in {} quantifier.")
 MSG_DEF(JSMSG_RANGE_WITH_CLASS_ESCAPE, 0, JSEXN_SYNTAXERR, "character class escape cannot be used in class range in regular expression")
-MSG_DEF(JSMSG_RAW_BRACE_IN_REGEXP,     0, JSEXN_SYNTAXERR, "raw brace is not allowed in regular expression with unicode flag")
 MSG_DEF(JSMSG_RAW_BRACKET_IN_REGEXP,   0, JSEXN_SYNTAXERR, "raw bracket is not allowed in regular expression with unicode flag")
 MSG_DEF(JSMSG_TOO_MANY_PARENS,         0, JSEXN_INTERNALERR, "too many parentheses in regular expression")
 MSG_DEF(JSMSG_UNICODE_OVERFLOW,        1, JSEXN_SYNTAXERR, "Unicode codepoint must not be greater than 0x10FFFF in {0}")

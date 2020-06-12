@@ -46,6 +46,7 @@
 #include "mozilla/ipc/URIUtils.h"
 #include "mozilla/net/DNS.h"
 #include "mozilla/net/DocumentLoadListener.h"
+#include "mozilla/net/DocumentChannel.h"
 
 using namespace mozilla;
 using namespace mozilla::dom;
@@ -140,6 +141,16 @@ nsMixedContentBlocker::AsyncOnChannelRedirect(
   RefPtr<net::DocumentLoadListener> docListener =
       do_QueryObject(is_ipc_channel);
   if (is_ipc_channel && !docListener) {
+    return NS_OK;
+  }
+
+  // Don't do these checks if we're switching from DocumentChannel
+  // to a real channel. In that case, we should already have done
+  // the checks in the parent process. AsyncOnChannelRedirect
+  // isn't called in the content process if we switch process,
+  // so checking here would just hide bugs in the process switch
+  // cases.
+  if (RefPtr<net::DocumentChannel> docChannel = do_QueryObject(aOldChannel)) {
     return NS_OK;
   }
 
@@ -700,22 +711,23 @@ nsresult nsMixedContentBlocker::ShouldLoad(bool aHadInsecureImageRedirect,
   // Determine if the rootDoc is https and if the user decided to allow Mixed
   // Content
   WindowContext* topWC = requestingWindow->TopWindowContext();
-  bool rootHasSecureConnection = topWC->GetIsSecure();
+  bool rootIsPotentiallyTrustWorthy = topWC->GetIsPotentiallyTrustWorthy();
   bool allowMixedContent = topWC->GetAllowMixedContent();
 
   // When navigating an iframe, the iframe may be https
   // but its parents may not be.  Check the parents to see if any of them are
   // https. If none of the parents are https, allow the load.
-  if (contentType == TYPE_SUBDOCUMENT && !rootHasSecureConnection) {
-    bool httpsParentExists = false;
+  if (contentType == TYPE_SUBDOCUMENT && !rootIsPotentiallyTrustWorthy) {
+    bool potentiallyTrustWorthyParentExists = false;
 
     RefPtr<WindowContext> curWindow = requestingWindow;
-    while (!httpsParentExists && curWindow) {
-      httpsParentExists = curWindow->GetIsSecure();
+    while (!potentiallyTrustWorthyParentExists && curWindow) {
+      potentiallyTrustWorthyParentExists =
+          curWindow->GetIsPotentiallyTrustWorthy();
       curWindow = curWindow->GetParentWindowContext();
     }
 
-    if (!httpsParentExists) {
+    if (!potentiallyTrustWorthyParentExists) {
       *aDecision = nsIContentPolicy::ACCEPT;
       return NS_OK;
     }

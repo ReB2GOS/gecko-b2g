@@ -479,6 +479,7 @@ nsWindow::nsWindow() {
 
   mHasAlphaVisual = false;
   mIsPIPWindow = false;
+  mAlwaysOnTop = false;
 
   mWindowScaleFactorChanged = true;
   mWindowScaleFactor = 1;
@@ -2657,12 +2658,6 @@ gboolean nsWindow::OnExposeEvent(cairo_t* cr) {
     // don't have a compositing window manager, our pixels could be stale.
     GetLayerManager()->SetNeedsComposite(true);
     GetLayerManager()->SendInvalidRegion(region.ToUnknownRegion());
-    if (WebRenderLayerManager* wrlm =
-            GetLayerManager()->AsWebRenderLayerManager()) {
-      if (WebRenderBridgeChild* bridge = wrlm->WrBridge()) {
-        bridge->SendInvalidateRenderedFrame();
-      }
-    }
   }
 
   RefPtr<nsWindow> strongThis(this);
@@ -4183,6 +4178,7 @@ nsresult nsWindow::Create(nsIWidget* aParent, nsNativeWidget aNativeParent,
     }
   }
 
+  mAlwaysOnTop = aInitData && aInitData->mAlwaysOnTop;
   mIsPIPWindow = aInitData && aInitData->mPIPWindow;
 
   // ok, create our windows
@@ -4400,7 +4396,7 @@ nsresult nsWindow::Create(nsIWidget* aParent, nsNativeWidget aNativeParent,
         g_object_unref(group);
       }
 
-      if (aInitData->mAlwaysOnTop) {
+      if (mAlwaysOnTop) {
         gtk_window_set_keep_above(GTK_WINDOW(mShell), TRUE);
       }
 
@@ -4457,11 +4453,21 @@ nsresult nsWindow::Create(nsIWidget* aParent, nsNativeWidget aNativeParent,
       gtk_widget_set_has_window(container, mDrawToContainer);
 
       gtk_container_add(GTK_CONTAINER(mShell), container);
+
+      // alwaysontop windows are generally used for peripheral indicators,
+      // so we don't focus them by default.
+      if (mAlwaysOnTop) {
+        gtk_window_set_focus_on_map(GTK_WINDOW(mShell), FALSE);
+      }
+
       gtk_widget_realize(container);
 
       // make sure this is the focus widget in the container
       gtk_widget_show(container);
-      gtk_widget_grab_focus(container);
+
+      if (!mAlwaysOnTop) {
+        gtk_widget_grab_focus(container);
+      }
 
       // the drawing window
       mGdkWindow = gtk_widget_get_window(eventWidget);
@@ -4931,26 +4937,11 @@ void nsWindow::WaylandStartVsync() {
 
   if (!mWaylandVsyncSource) {
     mWaylandVsyncSource = new mozilla::WaylandVsyncSource(mContainer);
-    WaylandVsyncSource::WaylandDisplay& display =
-        static_cast<WaylandVsyncSource::WaylandDisplay&>(
-            mWaylandVsyncSource->GetGlobalDisplay());
-    if (!display.Setup()) {
-      NS_WARNING("Could not start Wayland vsync monitor");
-    }
   }
-
-  // The widget is going to be shown, so reconfigure the surface
-  // of our vsync source.
-  RefPtr<nsWindow> self(this);
-  moz_container_wayland_add_initial_draw_callback(mContainer, [self]() -> void {
-    WaylandVsyncSource::WaylandDisplay& display =
-        static_cast<WaylandVsyncSource::WaylandDisplay&>(
-            self->mWaylandVsyncSource->GetGlobalDisplay());
-    display.EnableMonitor();
-    if (display.IsVsyncEnabled()) {
-      display.Notify();
-    }
-  });
+  WaylandVsyncSource::WaylandDisplay& display =
+      static_cast<WaylandVsyncSource::WaylandDisplay&>(
+          mWaylandVsyncSource->GetGlobalDisplay());
+  display.EnableMonitor();
 #endif
 }
 
@@ -4984,6 +4975,7 @@ void nsWindow::NativeShow(bool aAction) {
           return;
         }
       }
+
       gtk_widget_show(mShell);
       if (!mIsX11Display) {
         WaylandStartVsync();

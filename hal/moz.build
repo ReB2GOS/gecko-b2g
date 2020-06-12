@@ -41,9 +41,9 @@ if CONFIG['MOZ_WIDGET_TOOLKIT'] == 'android':
     ]
     UNIFIED_SOURCES += [
         'android/AndroidProcessPriority.cpp',
+        'android/AndroidSensor.cpp',
         'fallback/FallbackAlarm.cpp',
         'fallback/FallbackFlashlightManager.cpp',
-        'android/AndroidSensor.cpp',
     ]
     # AndroidHal.cpp cannot be built in unified mode because it relies on HalImpl.h.
     SOURCES += [
@@ -177,8 +177,8 @@ elif CONFIG['OS_TARGET'] in ('OpenBSD', 'NetBSD', 'FreeBSD', 'DragonFly'):
 else:
     UNIFIED_SOURCES += [
         'fallback/FallbackAlarm.cpp',
-        'fallback/FallbackFlashlightManager.cpp',
         'fallback/FallbackBattery.cpp',
+        'fallback/FallbackFlashlightManager.cpp',
         'fallback/FallbackMemory.cpp',
         'fallback/FallbackNetwork.cpp',
         'fallback/FallbackProcessPriority.cpp',

@@ -46,13 +46,8 @@
 #include "frontend/ParseNode.h"
 #include "frontend/ParseNodeVerify.h"
 #include "frontend/TokenStream.h"
-#ifndef ENABLE_NEW_REGEXP
-#  include "irregexp/RegExpParser.h"
-#endif
+#include "irregexp/RegExpAPI.h"
 #include "js/RegExpFlags.h"  // JS::RegExpFlags
-#ifdef ENABLE_NEW_REGEXP
-#  include "new-regexp/RegExpAPI.h"
-#endif
 #include "vm/BigIntType.h"
 #include "vm/BytecodeUtil.h"
 #include "vm/FunctionFlags.h"          // js::FunctionFlags
@@ -1873,7 +1868,7 @@ static bool SetTypeForExposedFunctions(JSContext* cx, FunctionBox* listHead) {
 
     // If the function was not referenced by enclosing script's bytecode, we do
     // not generate a BaseScript for it. For example, `(function(){});`.
-    if (!funbox->wasEmitted) {
+    if (!funbox->wasEmitted && !funbox->isStandalone) {
       continue;
     }
 
@@ -2022,10 +2017,71 @@ static AwaitHandling GetAwaitHandling(FunctionAsyncKind asyncKind) {
   return AwaitIsKeyword;
 }
 
+FunctionFlags InitialFunctionFlags(FunctionSyntaxKind kind,
+                                   GeneratorKind generatorKind,
+                                   FunctionAsyncKind asyncKind,
+                                   bool isSelfHosting, bool hasUnclonedName) {
+  FunctionFlags flags = {};
+  gc::AllocKind allocKind = gc::AllocKind::FUNCTION;
+
+  // The SetCanonicalName mechanism is only allowed on normal functions.
+  MOZ_ASSERT_IF(hasUnclonedName, kind == FunctionSyntaxKind::Statement);
+
+  switch (kind) {
+    case FunctionSyntaxKind::Expression:
+      flags = (generatorKind == GeneratorKind::NotGenerator &&
+                       asyncKind == FunctionAsyncKind::SyncFunction
+                   ? FunctionFlags::INTERPRETED_LAMBDA
+                   : FunctionFlags::INTERPRETED_LAMBDA_GENERATOR_OR_ASYNC);
+      break;
+    case FunctionSyntaxKind::Arrow:
+      flags = FunctionFlags::INTERPRETED_LAMBDA_ARROW;
+      allocKind = gc::AllocKind::FUNCTION_EXTENDED;
+      break;
+    case FunctionSyntaxKind::Method:
+    case FunctionSyntaxKind::FieldInitializer:
+      flags = FunctionFlags::INTERPRETED_METHOD;
+      allocKind = gc::AllocKind::FUNCTION_EXTENDED;
+      break;
+    case FunctionSyntaxKind::ClassConstructor:
+    case FunctionSyntaxKind::DerivedClassConstructor:
+      flags = FunctionFlags::INTERPRETED_CLASS_CTOR;
+      allocKind = gc::AllocKind::FUNCTION_EXTENDED;
+      break;
+    case FunctionSyntaxKind::Getter:
+      flags = FunctionFlags::INTERPRETED_GETTER;
+      allocKind = gc::AllocKind::FUNCTION_EXTENDED;
+      break;
+    case FunctionSyntaxKind::Setter:
+      flags = FunctionFlags::INTERPRETED_SETTER;
+      allocKind = gc::AllocKind::FUNCTION_EXTENDED;
+      break;
+    default:
+      MOZ_ASSERT(kind == FunctionSyntaxKind::Statement);
+      if (hasUnclonedName) {
+        allocKind = gc::AllocKind::FUNCTION_EXTENDED;
+      }
+      flags = (generatorKind == GeneratorKind::NotGenerator &&
+                       asyncKind == FunctionAsyncKind::SyncFunction
+                   ? FunctionFlags::INTERPRETED_NORMAL
+                   : FunctionFlags::INTERPRETED_GENERATOR_OR_ASYNC);
+  }
+
+  if (isSelfHosting) {
+    flags.setIsSelfHostedBuiltin();
+  }
+
+  if (allocKind == gc::AllocKind::FUNCTION_EXTENDED) {
+    flags.setIsExtended();
+  }
+
+  return flags;
+}
+
 template <typename Unit>
 FunctionNode* Parser<FullParseHandler, Unit>::standaloneFunction(
-    HandleFunction fun, HandleScope enclosingScope,
-    const Maybe<uint32_t>& parameterListEnd, GeneratorKind generatorKind,
+    HandleScope enclosingScope, const Maybe<uint32_t>& parameterListEnd,
+    FunctionSyntaxKind syntaxKind, GeneratorKind generatorKind,
     FunctionAsyncKind asyncKind, Directives inheritedDirectives,
     Directives* newDirectives) {
   MOZ_ASSERT(checkOptionsCalled_);
@@ -2053,14 +2109,13 @@ FunctionNode* Parser<FullParseHandler, Unit>::standaloneFunction(
   }
 
   // Skip function name, if present.
+  RootedAtom explicitName(cx_);
   if (TokenKindIsPossibleIdentifierName(tt)) {
-    MOZ_ASSERT(anyChars.currentName() == fun->explicitName());
+    explicitName = anyChars.currentName();
   } else {
-    MOZ_ASSERT(fun->explicitName() == nullptr);
     anyChars.ungetToken();
   }
 
-  FunctionSyntaxKind syntaxKind = FunctionSyntaxKind::Statement;
   FunctionNodeType funNode = handler_.newFunction(syntaxKind, pos());
   if (!funNode) {
     return null();
@@ -2072,12 +2127,18 @@ FunctionNode* Parser<FullParseHandler, Unit>::standaloneFunction(
   }
   funNode->setBody(argsbody);
 
+  bool isSelfHosting = options().selfHostingMode;
+  FunctionFlags flags =
+      InitialFunctionFlags(syntaxKind, generatorKind, asyncKind, isSelfHosting);
   FunctionBox* funbox =
-      newFunctionBox(funNode, fun, /* toStringStart = */ 0, inheritedDirectives,
-                     generatorKind, asyncKind);
+      newFunctionBox(funNode, explicitName, flags, /* toStringStart = */ 0,
+                     inheritedDirectives, generatorKind, asyncKind);
   if (!funbox) {
     return null();
   }
+
+  // Function is not syntactically part of another script.
+  funbox->isStandalone = true;
 
   // Standalone functions are always scoped to the global. Note: HTML form event
   // handlers are standalone functions, but have a non-syntactic global scope
@@ -2085,7 +2146,7 @@ FunctionNode* Parser<FullParseHandler, Unit>::standaloneFunction(
   MOZ_ASSERT(enclosingScope->is<GlobalScope>());
 
   funbox->initWithEnclosingScope(this->compilationInfo_.scopeContext,
-                                 enclosingScope, fun->flags(), syntaxKind);
+                                 enclosingScope, flags, syntaxKind);
 
   SourceParseContext funpc(this, funbox, newDirectives);
   if (!funpc.init()) {
@@ -2230,67 +2291,6 @@ GeneralParser<ParseHandler, Unit>::functionBody(InHandling inHandling,
   }
 
   return finishLexicalScope(pc_->varScope(), body, ScopeKind::FunctionLexical);
-}
-
-FunctionFlags InitialFunctionFlags(FunctionSyntaxKind kind,
-                                   GeneratorKind generatorKind,
-                                   FunctionAsyncKind asyncKind,
-                                   bool isSelfHosting, bool hasUnclonedName) {
-  FunctionFlags flags = {};
-  gc::AllocKind allocKind = gc::AllocKind::FUNCTION;
-
-  // The SetCanonicalName mechanism is only allowed on normal functions.
-  MOZ_ASSERT_IF(hasUnclonedName, kind == FunctionSyntaxKind::Statement);
-
-  switch (kind) {
-    case FunctionSyntaxKind::Expression:
-      flags = (generatorKind == GeneratorKind::NotGenerator &&
-                       asyncKind == FunctionAsyncKind::SyncFunction
-                   ? FunctionFlags::INTERPRETED_LAMBDA
-                   : FunctionFlags::INTERPRETED_LAMBDA_GENERATOR_OR_ASYNC);
-      break;
-    case FunctionSyntaxKind::Arrow:
-      flags = FunctionFlags::INTERPRETED_LAMBDA_ARROW;
-      allocKind = gc::AllocKind::FUNCTION_EXTENDED;
-      break;
-    case FunctionSyntaxKind::Method:
-    case FunctionSyntaxKind::FieldInitializer:
-      flags = FunctionFlags::INTERPRETED_METHOD;
-      allocKind = gc::AllocKind::FUNCTION_EXTENDED;
-      break;
-    case FunctionSyntaxKind::ClassConstructor:
-    case FunctionSyntaxKind::DerivedClassConstructor:
-      flags = FunctionFlags::INTERPRETED_CLASS_CTOR;
-      allocKind = gc::AllocKind::FUNCTION_EXTENDED;
-      break;
-    case FunctionSyntaxKind::Getter:
-      flags = FunctionFlags::INTERPRETED_GETTER;
-      allocKind = gc::AllocKind::FUNCTION_EXTENDED;
-      break;
-    case FunctionSyntaxKind::Setter:
-      flags = FunctionFlags::INTERPRETED_SETTER;
-      allocKind = gc::AllocKind::FUNCTION_EXTENDED;
-      break;
-    default:
-      MOZ_ASSERT(kind == FunctionSyntaxKind::Statement);
-      if (hasUnclonedName) {
-        allocKind = gc::AllocKind::FUNCTION_EXTENDED;
-      }
-      flags = (generatorKind == GeneratorKind::NotGenerator &&
-                       asyncKind == FunctionAsyncKind::SyncFunction
-                   ? FunctionFlags::INTERPRETED_NORMAL
-                   : FunctionFlags::INTERPRETED_GENERATOR_OR_ASYNC);
-  }
-
-  if (isSelfHosting) {
-    flags.setIsSelfHostedBuiltin();
-  }
-
-  if (allocKind == gc::AllocKind::FUNCTION_EXTENDED) {
-    flags.setIsExtended();
-  }
-
-  return flags;
 }
 
 template <class ParseHandler, typename Unit>
@@ -9890,16 +9890,9 @@ RegExpLiteral* Parser<FullParseHandler, Unit>::newRegExp() {
     // instantiate it. If we have already done a syntax parse, we can
     // skip this.
     LifoAllocScope allocScope(&cx_->tempLifoAlloc());
-#ifdef ENABLE_NEW_REGEXP
     if (!irregexp::CheckPatternSyntax(cx_, anyChars, range, flags)) {
       return nullptr;
     }
-#else
-    if (!irregexp::ParsePatternSyntax(anyChars, allocScope.alloc(), range,
-                                      flags.unicode())) {
-      return nullptr;
-    }
-#endif
   }
 
   RegExpIndex index(this->getCompilationInfo().regExpData.length());
@@ -9926,16 +9919,9 @@ Parser<SyntaxParseHandler, Unit>::newRegExp() {
   mozilla::Range<const char16_t> source(chars.begin(), chars.length());
   {
     LifoAllocScope scopeAlloc(&alloc_);
-#ifdef ENABLE_NEW_REGEXP
     if (!irregexp::CheckPatternSyntax(cx_, anyChars, source, flags)) {
       return null();
     }
-#else
-    if (!js::irregexp::ParsePatternSyntax(anyChars, scopeAlloc.alloc(), source,
-                                          flags.unicode())) {
-      return null();
-    }
-#endif
   }
 
   return handler_.newRegExp(SyntaxParseHandler::NodeGeneric, pos());

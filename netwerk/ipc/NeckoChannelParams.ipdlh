@@ -47,7 +47,7 @@ struct CookieJarSettingsArgs
   bool isOnContentBlockingAllowList;
   CookiePermissionData[] cookiePermissions;
   bool isFixed;
-  nsString firstPartyDomain;
+  nsString partitionKey;
 };
 
 //-----------------------------------------------------------------------------
@@ -109,13 +109,6 @@ struct LoadInfoArgs
   OriginAttributes            originAttributes;
   RedirectHistoryEntryInfo[]  redirectChainIncludingInternalRedirects;
   RedirectHistoryEntryInfo[]  redirectChain;
-
-  /**
-   * Ancestor data for use with the WebRequest API.
-   * See nsILoadInfo.idl for details.
-   */
-  PrincipalInfo[]             ancestorPrincipals;
-  uint64_t[]                  ancestorOuterWindowIDs;
 
   /**
    * ClientInfo structure representing the window or worker that triggered

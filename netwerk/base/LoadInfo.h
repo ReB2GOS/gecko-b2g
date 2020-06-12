@@ -83,6 +83,20 @@ class LoadInfo final : public nsILoadInfo {
            const OriginAttributes& aOriginAttributes, uint64_t aOuterWindowID,
            nsSecurityFlags aSecurityFlags, uint32_t aSandboxFlags);
 
+  // Used for loads initiated by DocumentLoadListener.
+  LoadInfo(dom::WindowGlobalParent* aParentWGP,
+           nsIPrincipal* aTriggeringPrincipal, uint64_t aFrameOuterWindowID,
+           nsContentPolicyType aContentPolicyType,
+           nsSecurityFlags aSecurityFlags, uint32_t aSandboxFlags);
+
+  // Compute a list of ancestor principals and outer windowIDs.
+  // See methods AncestorPrincipals and AncestorOuterWindowIDs
+  // in nsILoadInfo.idl for details.
+  static void ComputeAncestors(
+      dom::CanonicalBrowsingContext* aBC,
+      nsTArray<nsCOMPtr<nsIPrincipal>>& aAncestorPrincipals,
+      nsTArray<uint64_t>& aOuterWindowIDs);
+
   // create an exact copy of the loadinfo
   already_AddRefed<nsILoadInfo> Clone() const;
 

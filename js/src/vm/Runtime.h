@@ -31,9 +31,6 @@
 #include "frontend/NameCollections.h"
 #include "gc/GCRuntime.h"
 #include "gc/Tracer.h"
-#ifndef ENABLE_NEW_REGEXP
-#  include "irregexp/RegExpStack.h"
-#endif
 #include "js/AllocationRecording.h"
 #include "js/BuildId.h"  // JS::BuildIdOp
 #include "js/CompilationAndEvaluation.h"
@@ -431,6 +428,7 @@ struct JSRuntime {
 
   js::MainThreadData<const JSWrapObjectCallbacks*> wrapObjectCallbacks;
   js::MainThreadData<js::PreserveWrapperCallback> preserveWrapperCallback;
+  js::MainThreadData<js::HasReleasedWrapperCallback> hasReleasedWrapperCallback;
 
   js::MainThreadData<js::ScriptEnvironmentPreparer*> scriptEnvironmentPreparer;
 

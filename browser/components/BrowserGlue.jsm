@@ -436,6 +436,17 @@ let JSWINDOWACTORS = {
     allFrames: true,
   },
 
+  Pdfjs: {
+    parent: {
+      moduleURI: "resource://pdf.js/PdfjsParent.jsm",
+    },
+    child: {
+      moduleURI: "resource://pdf.js/PdfjsChild.jsm",
+    },
+    enablePreference: PREF_PDFJS_ISDEFAULT_CACHE_STATE,
+    allFrames: true,
+  },
+
   Plugin: {
     parent: {
       moduleURI: "resource:///actors/PluginParent.jsm",
@@ -3123,7 +3134,7 @@ BrowserGlue.prototype = {
   _migrateUI: function BG__migrateUI() {
     // Use an increasing number to keep track of the current migration state.
     // Completely unrelated to the current Firefox release number.
-    const UI_VERSION = 95;
+    const UI_VERSION = 96;
     const BROWSER_DOCURL = AppConstants.BROWSER_CHROME_URL;
 
     if (!Services.prefs.prefHasUserValue("browser.migration.version")) {
@@ -3698,6 +3709,16 @@ BrowserGlue.prototype = {
       const oldPrefValue = Services.prefs.getBoolPref(oldPrefName, true);
       const newPrefValue = oldPrefValue ? 0 : 1;
       Services.prefs.setIntPref("media.autoplay.blocking_policy", newPrefValue);
+      Services.prefs.clearUserPref(oldPrefName);
+    }
+
+    if (currentUIVersion < 96) {
+      const oldPrefName = "browser.urlbar.openViewOnFocus";
+      const oldPrefValue = Services.prefs.getBoolPref(oldPrefName, true);
+      Services.prefs.setBoolPref(
+        "browser.urlbar.suggest.topsites",
+        oldPrefValue
+      );
       Services.prefs.clearUserPref(oldPrefName);
     }
 

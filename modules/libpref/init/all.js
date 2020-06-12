@@ -19,11 +19,7 @@
 // improves readability, particular for conditional blocks that exceed a single
 // screen.
 
-#if MOZ_UPDATE_CHANNEL == release || MOZ_UPDATE_CHANNEL == esr
-  pref("security.tls.version.min", 1);
-#else
-  pref("security.tls.version.min", 3);
-#endif
+pref("security.tls.version.min", 3);
 pref("security.tls.version.max", 4);
 pref("security.tls.version.enable-deprecated", false);
 pref("security.tls.version.fallback-limit", 4);
@@ -427,10 +423,12 @@ pref("media.videocontrols.picture-in-picture.video-toggle.min-video-secs", 45);
   pref("media.navigator.video.use_remb", true);
   #ifdef EARLY_BETA_OR_EARLIER
     pref("media.navigator.video.use_transport_cc", true);
+    pref("media.peerconnection.video.use_rtx", true);
   #else
     pref("media.navigator.video.use_transport_cc", false);
+    pref("media.peerconnection.video.use_rtx", false);
   #endif
-  pref("media.peerconnection.video.use_rtx", false);
+  pref("media.peerconnection.video.use_rtx.blocklist", "*.google.com");
   pref("media.navigator.video.use_tmmbr", false);
   pref("media.navigator.audio.use_fec", true);
   pref("media.navigator.video.red_ulpfec_enabled", false);
@@ -813,7 +811,6 @@ pref("toolkit.telemetry.debugSlowSql", false);
 pref("toolkit.telemetry.unified", true);
 // AsyncShutdown delay before crashing in case of shutdown freeze
 #if !defined(MOZ_ASAN) && !defined(MOZ_TSAN)
-  pref("toolkit.asyncshutdown.report_writes_after", 40000); // 40 seconds
   pref("toolkit.asyncshutdown.crash_timeout", 60000); // 1 minute
 #else
   // ASan and TSan builds can be considerably slower. Extend the grace period
@@ -4149,12 +4146,6 @@ pref("memory.blob_report.stack_frames", 0);
 // Activates the activity monitor
 pref("io.activity.enabled", false);
 
-// If true, reuse the same global for (almost) everything loaded by the component
-// loader (JS components, JSMs, etc). This saves memory, but makes it possible
-// for the scripts to interfere with each other.  A restart is required for this
-// to take effect.
-pref("jsloader.shareGlobal", true);
-
 // path to OSVR DLLs
 pref("gfx.vr.osvr.utilLibPath", "");
 pref("gfx.vr.osvr.commonLibPath", "");
@@ -4517,7 +4508,7 @@ pref("webextensions.webRequest.requestBodyMaxRawBytes", 16777216);
 
 pref("webextensions.storage.sync.enabled", true);
 // Should we use the old kinto-based implementation of storage.sync? To be removed in bug 1637465.
-pref("webextensions.storage.sync.kinto", true);
+pref("webextensions.storage.sync.kinto", false);
 // Server used by the old kinto-based implementation of storage.sync.
 pref("webextensions.storage.sync.serverURL", "https://webextensions.settings.services.mozilla.com/v1");
 
@@ -4855,8 +4846,8 @@ pref("devtools.debugger.force-local", true);
 pref("devtools.netmonitor.responseBodyLimit", 1048576);
 pref("devtools.netmonitor.requestBodyLimit", 1048576);
 
-// Limit for WebSocket frames (100 KB).
-pref("devtools.netmonitor.ws.messageDataLimit", 100000);
+// Limit for WebSocket/EventSource messages (100 KB).
+pref("devtools.netmonitor.msg.messageDataLimit", 100000);
 
 // DevTools default color unit.
 pref("devtools.defaultColorUnit", "authored");

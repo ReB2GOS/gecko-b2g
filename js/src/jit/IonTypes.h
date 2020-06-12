@@ -106,6 +106,9 @@ enum BailoutKind {
   // We hit a hole in an array.
   Bailout_Hole,
 
+  // The object has dense array elements
+  Bailout_NoDenseElementsGuard,
+
   // Array access with negative index
   Bailout_NegativeIndex,
 
@@ -122,6 +125,9 @@ enum BailoutKind {
 
   // JSString was not equal to the expected JSAtom
   Bailout_SpecificAtomGuard,
+
+  // Symbol was not equal the expected JS::Symbol.
+  Bailout_SpecificSymbolGuard,
 
   // Unbox expects a given type, bails out if it doesn't get it.
   Bailout_NonInt32Input,
@@ -214,6 +220,8 @@ inline const char* BailoutKindString(BailoutKind kind) {
       return "Bailout_MonitorTypes";
     case Bailout_Hole:
       return "Bailout_Hole";
+    case Bailout_NoDenseElementsGuard:
+      return "Bailout_NoDenseElementsGuard";
     case Bailout_NegativeIndex:
       return "Bailout_NegativeIndex";
     case Bailout_NonIntegerIndex:
@@ -222,6 +230,8 @@ inline const char* BailoutKindString(BailoutKind kind) {
       return "Bailout_ObjectIdentityOrTypeGuard";
     case Bailout_SpecificAtomGuard:
       return "Bailout_SpecifcAtomGuard";
+    case Bailout_SpecificSymbolGuard:
+      return "Bailout_SpecifcSymbolGuard";
     case Bailout_NonInt32Input:
       return "Bailout_NonInt32Input";
     case Bailout_NonNumericInput:

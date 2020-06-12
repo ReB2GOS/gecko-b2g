@@ -10,7 +10,7 @@ import statistics
 from mozperftest.layers import Layer
 from mozperftest.metrics.exceptions import PerfherderValidDataError
 from mozperftest.metrics.common import filtered_metrics
-from mozperftest.metrics.utils import write_json
+from mozperftest.metrics.utils import write_json, is_number
 
 
 PERFHERDER_SCHEMA = pathlib.Path(
@@ -61,7 +61,7 @@ class Perfherder(Layer):
         },
     }
 
-    def __call__(self, metadata):
+    def run(self, metadata):
         """Processes the given results into a perfherder-formatted data blob.
 
         If the `--perfherder` flag isn't provided, then the
@@ -111,11 +111,7 @@ class Perfherder(Layer):
             # overall values.
             subtests = {}
             for r in res:
-                vals = [
-                    v["value"]
-                    for v in r["data"]
-                    if isinstance(v["value"], (int, float))
-                ]
+                vals = [v["value"] for v in r["data"] if is_number(v["value"])]
                 if vals:
                     subtests[r["subtest"]] = vals
 

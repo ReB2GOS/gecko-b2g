@@ -121,7 +121,8 @@
 #include "js/StableStringChars.h"
 #include "js/StructuredClone.h"
 #include "js/SweepingAPI.h"
-#include "js/Warnings.h"  // JS::SetWarningReporter
+#include "js/Warnings.h"    // JS::SetWarningReporter
+#include "js/WasmModule.h"  // JS::WasmModule
 #include "js/Wrapper.h"
 #include "shell/jsoptparse.h"
 #include "shell/jsshell.h"
@@ -3672,6 +3673,8 @@ static bool DummyPreserveWrapperCallback(JSContext* cx, HandleObject obj) {
   return true;
 }
 
+static bool DummyHasReleasedWrapperCallback(HandleObject obj) { return true; }
+
 static bool Intern(JSContext* cx, unsigned argc, Value* vp) {
   CallArgs args = CallArgsFromVp(argc, vp);
 
@@ -4142,7 +4145,8 @@ static void WorkerMain(WorkerInput* input) {
 
   JS_SetFutexCanWait(cx);
   JS::SetWarningReporter(cx, WarningReporter);
-  js::SetPreserveWrapperCallback(cx, DummyPreserveWrapperCallback);
+  js::SetPreserveWrapperCallbacks(cx, DummyPreserveWrapperCallback,
+                                  DummyHasReleasedWrapperCallback);
   JS_InitDestroyPrincipalsCallback(cx, ShellPrincipals::destroy);
   JS_SetDestroyCompartmentCallback(cx, DestroyShellCompartmentPrivate);
   JS::SetGetElementCallback(cx, &GetElementCallback);
@@ -10473,12 +10477,10 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
     jit::JitOptions.baselineJitWarmUpThreshold = warmUpThreshold;
   }
 
-#ifdef ENABLE_NEW_REGEXP
   warmUpThreshold = op.getIntOption("regexp-warmup-threshold");
   if (warmUpThreshold >= 0) {
     jit::JitOptions.regexpWarmUpThreshold = warmUpThreshold;
   }
-#endif
 
   if (op.getBoolOption("baseline-eager")) {
     jit::JitOptions.setEagerBaselineCompilation();
@@ -10513,7 +10515,6 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
     jit::JitOptions.nativeRegExp = false;
   }
 
-#ifdef ENABLE_NEW_REGEXP
   if (op.getBoolOption("trace-regexp-parser")) {
     jit::JitOptions.traceRegExpParser = true;
   }
@@ -10526,7 +10527,6 @@ static bool SetContextOptions(JSContext* cx, const OptionParser& op) {
   if (op.getBoolOption("trace-regexp-peephole")) {
     jit::JitOptions.traceRegExpPeephole = true;
   }
-#endif
 
 #ifdef NIGHTLY_BUILD
   if (op.getBoolOption("no-ti")) {
@@ -11102,7 +11102,6 @@ int main(int argc, char** argv, char** envp) {
 #endif
       !op.addBoolOption('\0', "no-native-regexp",
                         "Disable native regexp compilation") ||
-#ifdef ENABLE_NEW_REGEXP
       !op.addIntOption(
           '\0', "regexp-warmup-threshold", "COUNT",
           "Wait for COUNT invocations before compiling regexps to native code "
@@ -11115,7 +11114,6 @@ int main(int argc, char** argv, char** envp) {
                         "Trace regexp interpreter") ||
       !op.addBoolOption('\0', "trace-regexp-peephole",
                         "Trace regexp peephole optimization") ||
-#endif
       !op.addBoolOption('\0', "no-unboxed-objects",
                         "Disable creating unboxed plain objects") ||
       !op.addBoolOption('\0', "enable-streams",
@@ -11576,7 +11574,8 @@ int main(int argc, char** argv, char** envp) {
 
   JS::SetProcessLargeAllocationFailureCallback(my_LargeAllocFailCallback);
 
-  js::SetPreserveWrapperCallback(cx, DummyPreserveWrapperCallback);
+  js::SetPreserveWrapperCallbacks(cx, DummyPreserveWrapperCallback,
+                                  DummyHasReleasedWrapperCallback);
 
   if (op.getBoolOption("disable-wasm-huge-memory")) {
     if (!sCompilerProcessFlags.append("--disable-wasm-huge-memory")) {

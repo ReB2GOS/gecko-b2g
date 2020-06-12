@@ -218,6 +218,12 @@ function shru(count, width) {
     }
 }
 
+function popcount(n) {
+  n = n - ((n >> 1) & 0x55555555)
+  n = (n & 0x33333333) + ((n >> 2) & 0x33333333)
+  return ((n + (n >> 4) & 0xF0F0F0F) * 0x1010101) >> 24
+}
+
 // For each input array, a set of arrays of the proper length for v128, with
 // values in range but possibly of the wrong signedness (eg, for Int8Array, 128
 // is in range but is really -128).  Also a unary operator `rectify` that
@@ -256,7 +262,9 @@ Int32Array.rectify = (x) => sign_extend(x,32);
 Uint32Array.inputs = Int32Array.inputs;
 Uint32Array.rectify = (x) => zero_extend(x,32);
 
-BigInt64Array.inputs = [[1,2],[2,1],[-1,-2],[-2,-1],[2n ** 32n, 2n ** 32n - 5n]];
+BigInt64Array.inputs = [[1,2],[2,1],[-1,-2],[-2,-1],[2n ** 32n, 2n ** 32n - 5n],
+                        [(2n ** 38n) / 5n, (2n ** 41n) / 7n],
+                        [-((2n ** 38n) / 5n), (2n ** 41n) / 7n]];
 BigInt64Array.rectify = (x) => BigInt(x);
 
 Float32Array.inputs = [[1, -1, 1e10, -1e10],
@@ -654,48 +662,72 @@ for ( let [op, memtype, rop, resultmemtype] of
         testIt(a,b);
 }
 
-// Splat
+// Splat, with and without constants (different code paths in ion)
 
 var ins = wasmEvalText(`
   (module
     (memory (export "mem") 1 1)
     (func (export "splat_i8x16") (param $src i32)
       (v128.store (i32.const 0) (i8x16.splat (local.get $src))))
+    (func (export "csplat_i8x16")
+      (v128.store (i32.const 0) (i8x16.splat (i32.const 37))))
     (func (export "splat_i16x8") (param $src i32)
       (v128.store (i32.const 0) (i16x8.splat (local.get $src))))
+    (func (export "csplat_i16x8")
+      (v128.store (i32.const 0) (i16x8.splat (i32.const 1175))))
     (func (export "splat_i32x4") (param $src i32)
       (v128.store (i32.const 0) (i32x4.splat (local.get $src))))
+    (func (export "csplat_i32x4")
+      (v128.store (i32.const 0) (i32x4.splat (i32.const 127639))))
     (func (export "splat_i64x2") (param $src i64)
       (v128.store (i32.const 0) (i64x2.splat (local.get $src))))
+    (func (export "csplat_i64x2")
+      (v128.store (i32.const 0) (i64x2.splat (i64.const 0x1234_5678_4365))))
     (func (export "splat_f32x4") (param $src f32)
       (v128.store (i32.const 0) (f32x4.splat (local.get $src))))
+    (func (export "csplat_f32x4")
+      (v128.store (i32.const 0) (f32x4.splat (f32.const 9121.25))))
     (func (export "splat_f64x2") (param $src f64)
       (v128.store (i32.const 0) (f64x2.splat (local.get $src))))
+    (func (export "csplat_f64x2")
+      (v128.store (i32.const 0) (f64x2.splat (f64.const 26789.125))))
 )`);
 
-ins.exports.splat_i8x16(3);
 var mem8 = new Uint8Array(ins.exports.mem.buffer);
-assertSame(get(mem8, 0, 16), [3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3]);
+ins.exports.splat_i8x16(3);
+assertSame(get(mem8, 0, 16), iota(16).map(_=>3));
+ins.exports.csplat_i8x16();
+assertSame(get(mem8, 0, 16), iota(16).map(_=>37));
 
-ins.exports.splat_i16x8(976);
 var mem16 = new Uint16Array(ins.exports.mem.buffer);
-assertSame(get(mem16, 0, 8), [976, 976, 976, 976, 976, 976, 976, 976]);
+ins.exports.splat_i16x8(976);
+assertSame(get(mem16, 0, 8), iota(8).map(_=>976));
+ins.exports.csplat_i16x8();
+assertSame(get(mem16, 0, 8), iota(8).map(_=>1175));
 
-ins.exports.splat_i32x4(147812);
 var mem32 = new Uint32Array(ins.exports.mem.buffer);
+ins.exports.splat_i32x4(147812);
 assertSame(get(mem32, 0, 4), [147812, 147812, 147812, 147812]);
+ins.exports.csplat_i32x4();
+assertSame(get(mem32, 0, 4), [127639, 127639, 127639, 127639]);
 
-ins.exports.splat_i64x2(147812n);
 var mem64 = new BigInt64Array(ins.exports.mem.buffer);
+ins.exports.splat_i64x2(147812n);
 assertSame(get(mem64, 0, 2), [147812, 147812]);
+ins.exports.csplat_i64x2();
+assertSame(get(mem64, 0, 2), [0x1234_5678_4365n, 0x1234_5678_4365n]);
 
-ins.exports.splat_f32x4(147812.5);
 var memf32 = new Float32Array(ins.exports.mem.buffer);
+ins.exports.splat_f32x4(147812.5);
 assertSame(get(memf32, 0, 4), [147812.5, 147812.5, 147812.5, 147812.5]);
+ins.exports.csplat_f32x4();
+assertSame(get(memf32, 0, 4), [9121.25, 9121.25, 9121.25, 9121.25]);
 
-ins.exports.splat_f64x2(147812.5);
 var memf64 = new Float64Array(ins.exports.mem.buffer);
+ins.exports.splat_f64x2(147812.5);
 assertSame(get(memf64, 0, 2), [147812.5, 147812.5]);
+ins.exports.csplat_f64x2();
+assertSame(get(memf64, 0, 2), [26789.125, 26789.125]);
 
 // Simple unary operators.  Place parameter in memory at offset 16,
 // read the result at offset 0.
@@ -819,6 +851,54 @@ for ( let dope of [1, 7, 32, 195 ] ) {
     set(mem32, 4, iota(4).map((x) => x == 2 ? 0 : dope));
     assertEq(ins.exports.alltrue_i32x4(), 0);
 }
+
+// Bitmask
+
+var ins = wasmEvalText(`
+  (module
+    (memory (export "mem") 1 1)
+    (func (export "bitmask_i8x16") (result i32)
+      (i8x16.bitmask (v128.load (i32.const 16))))
+    (func (export "bitmask_i16x8") (result i32)
+      (i16x8.bitmask (v128.load (i32.const 16))))
+    (func (export "bitmask_i32x4") (result i32)
+      (i32x4.bitmask (v128.load (i32.const 16)))))`);
+
+var mem8 = new Uint8Array(ins.exports.mem.buffer);
+var mem16 = new Uint16Array(ins.exports.mem.buffer);
+var mem32 = new Uint32Array(ins.exports.mem.buffer);
+
+set(mem8, 16, iota(16).map((_) => 0));
+assertEq(ins.exports.bitmask_i8x16(), 0);
+assertEq(ins.exports.bitmask_i16x8(), 0);
+assertEq(ins.exports.bitmask_i32x4(), 0);
+
+set(mem8, 16, iota(16).map((_) => 0x80));
+assertEq(ins.exports.bitmask_i8x16(), 0xFFFF);
+
+set(mem8, 16, iota(16).map((_) => 0x7F));
+assertEq(ins.exports.bitmask_i8x16(), 0);
+
+set(mem8, 16, iota(16).map((i) => popcount(i) == 1 ? 0x80 : 0));
+assertEq(ins.exports.bitmask_i8x16(), (1 << 1) | (1 << 2) | (1 << 4) | (1 << 8));
+
+set(mem16, 8, iota(8).map((i) => 0x8000))
+assertEq(ins.exports.bitmask_i16x8(), 0xFF)
+
+set(mem16, 8, iota(8).map((i) => 0x7FFF))
+assertEq(ins.exports.bitmask_i16x8(), 0)
+
+set(mem16, 8, iota(8).map((i) => popcount(i) == 1 ? 0x8000 : 0))
+assertEq(ins.exports.bitmask_i16x8(), (1 << 1) | (1 << 2) | (1 << 4));
+
+set(mem32, 4, iota(4).map((_) => 0x80000000))
+assertEq(ins.exports.bitmask_i32x4(), 0xF);
+
+set(mem32, 4, iota(4).map((_) => 0x7FFFFFFF))
+assertEq(ins.exports.bitmask_i32x4(), 0);
+
+set(mem32, 4, iota(4).map((i) => popcount(i) == 1 ? 0x80000000 : 0))
+assertEq(ins.exports.bitmask_i32x4(), (1 << 1) | (1 << 2));
 
 // Shifts
 //

@@ -12693,7 +12693,7 @@ static void MulF32x4(MacroAssembler& masm, RegV128 rs, RegV128 rsd) {
 }
 
 static void MulI64x2(MacroAssembler& masm, RegV128 rs, RegV128 rsd,
-                     RegI64 temp) {
+                     RegV128 temp) {
   masm.mulInt64x2(rs, rsd, temp);
 }
 
@@ -13093,6 +13093,18 @@ static void AllTrueI32x4(MacroAssembler& masm, RegV128 rs, RegI32 rd) {
   masm.allTrueInt32x4(rs, rd);
 }
 
+static void BitmaskI8x16(MacroAssembler& masm, RegV128 rs, RegI32 rd) {
+  masm.bitmaskInt8x16(rs, rd);
+}
+
+static void BitmaskI16x8(MacroAssembler& masm, RegV128 rs, RegI32 rd) {
+  masm.bitmaskInt16x8(rs, rd);
+}
+
+static void BitmaskI32x4(MacroAssembler& masm, RegV128 rs, RegI32 rd) {
+  masm.bitmaskInt32x4(rs, rd);
+}
+
 static void Swizzle(MacroAssembler& masm, RegV128 rs, RegV128 rsd,
                     RegV128 temp) {
   masm.swizzleInt8x16(rs, rsd, temp);
@@ -13405,8 +13417,15 @@ bool BaseCompiler::emitVectorShiftRightI64x2() {
   needI32(specific_.ecx);
   RegI32 count = popI32ToSpecific(specific_.ecx);
   RegV128 lhsDest = popV128();
+  RegI64 tmp = needI64();
   masm.and32(Imm32(63), count);
-  masm.rightShiftInt64x2(count, lhsDest);
+  masm.extractLaneInt64x2(0, lhsDest, tmp);
+  masm.rshift64Arithmetic(count, tmp);
+  masm.replaceLaneInt64x2(0, tmp, lhsDest);
+  masm.extractLaneInt64x2(1, lhsDest, tmp);
+  masm.rshift64Arithmetic(count, tmp);
+  masm.replaceLaneInt64x2(1, tmp, lhsDest);
+  freeI64(tmp);
   freeI32(count);
   pushV128(lhsDest);
 
@@ -14229,6 +14248,12 @@ bool BaseCompiler::emitBody() {
             CHECK_NEXT(dispatchVectorReduction(AllTrueI16x8));
           case uint32_t(SimdOp::I32x4AllTrue):
             CHECK_NEXT(dispatchVectorReduction(AllTrueI32x4));
+          case uint32_t(SimdOp::I8x16Bitmask):
+            CHECK_NEXT(dispatchVectorReduction(BitmaskI8x16));
+          case uint32_t(SimdOp::I16x8Bitmask):
+            CHECK_NEXT(dispatchVectorReduction(BitmaskI16x8));
+          case uint32_t(SimdOp::I32x4Bitmask):
+            CHECK_NEXT(dispatchVectorReduction(BitmaskI32x4));
           case uint32_t(SimdOp::I8x16ReplaceLane):
             CHECK_NEXT(dispatchReplaceLane(ReplaceLaneI8x16, ValType::I32, 16));
           case uint32_t(SimdOp::I16x8ReplaceLane):

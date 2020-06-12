@@ -296,7 +296,7 @@ class GeckoInstance(object):
             instance_class = apps[app]
         except (IOError, KeyError):
             exc, val, tb = sys.exc_info()
-            msg = 'Application "{0}" unknown (should be one of {1})'.format(app, apps.keys())
+            msg = 'Application "{0}" unknown (should be one of {1})'.format(app, list(apps.keys()))
             reraise(NotImplementedError, NotImplementedError(msg), tb)
 
         return instance_class(*args, **kwargs)
@@ -565,9 +565,6 @@ class DesktopInstance(GeckoInstance):
         "browser.startup.homepage_override.mstone": "ignore",
         # Start with a blank page by default
         "browser.startup.page": 0,
-
-        # Disable browser animations
-        "toolkit.cosmeticAnimations.enabled": False,
 
         # Bug 1557457: Disable because modal dialogs might not appear in Firefox
         "browser.tabs.remote.separatePrivilegedContentProcess": False,

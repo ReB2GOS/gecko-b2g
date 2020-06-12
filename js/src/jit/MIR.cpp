@@ -2958,30 +2958,53 @@ MDefinition* MMinMax::foldsTo(TempAllocator& alloc) {
 
 MDefinition* MPow::foldsConstant(TempAllocator& alloc) {
   // Both `x` and `p` in `x^p` must be constants in order to precompute.
-  if (!(input()->isConstant() && power()->isConstant())) return nullptr;
-  if (!power()->toConstant()->isTypeRepresentableAsDouble()) return nullptr;
-  if (!input()->toConstant()->isTypeRepresentableAsDouble()) return nullptr;
+  if (!input()->isConstant() || !power()->isConstant()) {
+    return nullptr;
+  }
+  if (!power()->toConstant()->isTypeRepresentableAsDouble()) {
+    return nullptr;
+  }
+  if (!input()->toConstant()->isTypeRepresentableAsDouble()) {
+    return nullptr;
+  }
 
   double x = input()->toConstant()->numberToDouble();
   double p = power()->toConstant()->numberToDouble();
-  return MConstant::New(alloc, DoubleValue(js::ecmaPow(x, p)));
+  double result = js::ecmaPow(x, p);
+  if (type() == MIRType::Int32) {
+    int32_t cast;
+    if (!mozilla::NumberIsInt32(result, &cast)) {
+      // Reject folding if the result isn't an int32, because we'll bail anyway.
+      return nullptr;
+    }
+    return MConstant::New(alloc, Int32Value(cast));
+  }
+  return MConstant::New(alloc, DoubleValue(result));
 }
 
 MDefinition* MPow::foldsConstantPower(TempAllocator& alloc) {
   // If `p` in `x^p` isn't constant, we can't apply these folds.
-  if (!power()->isConstant()) return nullptr;
-  if (!power()->toConstant()->isTypeRepresentableAsDouble()) return nullptr;
+  if (!power()->isConstant()) {
+    return nullptr;
+  }
+  if (!power()->toConstant()->isTypeRepresentableAsDouble()) {
+    return nullptr;
+  }
+
+  MOZ_ASSERT(type() == MIRType::Double || type() == MIRType::Int32);
 
   double pow = power()->toConstant()->numberToDouble();
   MIRType outputType = type();
 
   // Math.pow(x, 0.5) is a sqrt with edge-case detection.
   if (pow == 0.5) {
+    MOZ_ASSERT(type() == MIRType::Double);
     return MPowHalf::New(alloc, input());
   }
 
   // Math.pow(x, -0.5) == 1 / Math.pow(x, 0.5), even for edge cases.
   if (pow == -0.5) {
+    MOZ_ASSERT(type() == MIRType::Double);
     MPowHalf* half = MPowHalf::New(alloc, input());
     block()->insertBefore(this, half);
     MConstant* one = MConstant::New(alloc, DoubleValue(1.0));
@@ -4916,6 +4939,46 @@ bool MWasmLoadGlobalCell::congruentTo(const MDefinition* ins) const {
   return congruentIfOperandsEqual(other);
 }
 
+MDefinition* MWasmScalarToSimd128::foldsTo(TempAllocator& alloc) {
+#ifdef ENABLE_WASM_SIMD
+  if (input()->isConstant()) {
+    MConstant* c = input()->toConstant();
+    switch (simdOp()) {
+      case wasm::SimdOp::I8x16Splat:
+        return MWasmFloatConstant::NewSimd128(
+            alloc, SimdConstant::SplatX16(c->toInt32()));
+      case wasm::SimdOp::I16x8Splat:
+        return MWasmFloatConstant::NewSimd128(
+            alloc, SimdConstant::SplatX8(c->toInt32()));
+      case wasm::SimdOp::I32x4Splat:
+        return MWasmFloatConstant::NewSimd128(
+            alloc, SimdConstant::SplatX4(c->toInt32()));
+      case wasm::SimdOp::I64x2Splat:
+        return MWasmFloatConstant::NewSimd128(
+            alloc, SimdConstant::SplatX2(c->toInt64()));
+      default:
+        return this;
+    }
+  }
+  if (input()->isWasmFloatConstant()) {
+    MWasmFloatConstant* c = input()->toWasmFloatConstant();
+    switch (simdOp()) {
+      case wasm::SimdOp::F32x4Splat:
+        return MWasmFloatConstant::NewSimd128(
+            alloc, SimdConstant::SplatX4(c->toFloat32()));
+      case wasm::SimdOp::F64x2Splat:
+        return MWasmFloatConstant::NewSimd128(
+            alloc, SimdConstant::SplatX2(c->toDouble()));
+      default:
+        return this;
+    }
+  }
+  return this;
+#else
+  MOZ_CRASH("No SIMD");
+#endif
+}
+
 MDefinition::AliasType MLoadDynamicSlot::mightAlias(
     const MDefinition* def) const {
   if (def->isStoreDynamicSlot()) {
@@ -5640,6 +5703,16 @@ MDefinition* MGuardSpecificAtom::foldsTo(TempAllocator& alloc) {
     JSAtom* cstAtom = &str()->toConstant()->toString()->asAtom();
     if (cstAtom == atom()) {
       return str();
+    }
+  }
+
+  return this;
+}
+
+MDefinition* MGuardSpecificSymbol::foldsTo(TempAllocator& alloc) {
+  if (symbol()->isConstant()) {
+    if (symbol()->toConstant()->toSymbol() == expected()) {
+      return symbol();
     }
   }
 

@@ -456,20 +456,14 @@ ParentShowInfo BrowserParent::GetShowInfo() {
   if (mFrameElement) {
     nsAutoString name;
     mFrameElement->GetAttr(kNameSpaceID_None, nsGkAtoms::name, name);
-    // FIXME(emilio, bug 1606660): allowfullscreen should probably move to
-    // OwnerShowInfo.
-    bool allowFullscreen =
-        mFrameElement->HasAttr(kNameSpaceID_None, nsGkAtoms::allowfullscreen) ||
-        mFrameElement->HasAttr(kNameSpaceID_None,
-                               nsGkAtoms::mozallowfullscreen);
     bool isTransparent =
         nsContentUtils::IsChromeDoc(mFrameElement->OwnerDoc()) &&
         mFrameElement->HasAttr(kNameSpaceID_None, nsGkAtoms::transparent);
-    return ParentShowInfo(name, allowFullscreen, false, isTransparent, mDPI,
-                          mRounding, mDefaultScale.scale);
+    return ParentShowInfo(name, false, isTransparent, mDPI, mRounding,
+                          mDefaultScale.scale);
   }
 
-  return ParentShowInfo(EmptyString(), false, false, false, mDPI, mRounding,
+  return ParentShowInfo(EmptyString(), false, false, mDPI, mRounding,
                         mDefaultScale.scale);
 }
 
@@ -1845,11 +1839,8 @@ void BrowserParent::SendRealTouchEvent(WidgetTouchEvent& aEvent) {
   // that the added touches are part of the touchend/cancel, when actually
   // they're not.
   if (aEvent.mMessage == eTouchEnd || aEvent.mMessage == eTouchCancel) {
-    for (int i = aEvent.mTouches.Length() - 1; i >= 0; i--) {
-      if (!aEvent.mTouches[i]->mChanged) {
-        aEvent.mTouches.RemoveElementAt(i);
-      }
-    }
+    aEvent.mTouches.RemoveElementsBy(
+        [](const auto& touch) { return !touch->mChanged; });
   }
 
   APZData apzData;

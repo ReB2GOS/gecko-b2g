@@ -501,6 +501,12 @@ nsresult nsLookAndFeel::NativeGetColor(ColorID aID, nscolor& aColor) {
     case ColorID::MozGtkInfoBarText:
       aColor = mInfoBarText;
       break;
+    case ColorID::MozColheadertext:
+      aColor = mMozColHeaderText;
+      break;
+    case ColorID::MozColheaderhovertext:
+      aColor = mMozColHeaderHoverText;
+      break;
     default:
       /* default color is BLACK */
       aColor = 0;
@@ -1191,6 +1197,13 @@ void nsLookAndFeel::EnsureInit() {
   mOddCellBackground = GDK_RGBA_TO_NS_RGBA(color);
   gtk_style_context_restore(style);
 
+  // Column header colors
+  style = GetStyleContext(MOZ_GTK_TREE_HEADER_CELL);
+  gtk_style_context_get_color(style, GTK_STATE_FLAG_NORMAL, &color);
+  mMozColHeaderText = GDK_RGBA_TO_NS_RGBA(color);
+  gtk_style_context_get_color(style, GTK_STATE_FLAG_PRELIGHT, &color);
+  mMozColHeaderHoverText = GDK_RGBA_TO_NS_RGBA(color);
+
   // Compute cell highlight colors
   InitCellHighlightColors();
 
@@ -1285,39 +1298,36 @@ void nsLookAndFeel::EnsureInit() {
   // as -moz-gtk* media features.
   ButtonLayout buttonLayout[TOOLBAR_BUTTONS];
 
-  int activeButtons = GetGtkHeaderBarButtonLayout(buttonLayout, TOOLBAR_BUTTONS,
-                                                  &mCSDReversedPlacement);
-  for (int i = 0; i < activeButtons; i++) {
+  size_t activeButtons = GetGtkHeaderBarButtonLayout(MakeSpan(buttonLayout),
+                                                     &mCSDReversedPlacement);
+  for (size_t i = 0; i < activeButtons; i++) {
     // We check if a button is represented on the right side of the tabbar.
     // Then we assign it a value from 3 to 5, instead of 0 to 2 when it is on
     // the left side.
-    switch (buttonLayout[i].mType) {
+    const ButtonLayout& layout = buttonLayout[i];
+    int32_t* pos = nullptr;
+    switch (layout.mType) {
       case MOZ_GTK_HEADER_BAR_BUTTON_MINIMIZE:
         mCSDMinimizeButton = true;
-        if (buttonLayout[i].mAtRight) {
-          mCSDMinimizeButtonPosition = i + TOOLBAR_BUTTONS;
-        } else {
-          mCSDMinimizeButtonPosition = i;
-        }
+        pos = &mCSDMinimizeButtonPosition;
         break;
       case MOZ_GTK_HEADER_BAR_BUTTON_MAXIMIZE:
         mCSDMaximizeButton = true;
-        if (buttonLayout[i].mAtRight) {
-          mCSDMaximizeButtonPosition = i + TOOLBAR_BUTTONS;
-        } else {
-          mCSDMaximizeButtonPosition = i;
-        }
+        pos = &mCSDMaximizeButtonPosition;
         break;
       case MOZ_GTK_HEADER_BAR_BUTTON_CLOSE:
         mCSDCloseButton = true;
-        if (buttonLayout[i].mAtRight) {
-          mCSDCloseButtonPosition = i + TOOLBAR_BUTTONS;
-        } else {
-          mCSDCloseButtonPosition = i;
-        }
+        pos = &mCSDCloseButtonPosition;
         break;
       default:
         break;
+    }
+
+    if (pos) {
+      *pos = i;
+      if (layout.mAtRight) {
+        *pos += TOOLBAR_BUTTONS;
+      }
     }
   }
 

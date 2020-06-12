@@ -26,6 +26,7 @@ namespace js {
 namespace jit {
 
 enum class BaselineCacheIRStubKind;
+enum class InlinableNative : uint16_t;
 
 // [SMDOC] CacheIR
 //
@@ -166,6 +167,7 @@ class TypedOperandId : public OperandId {
   _(In)                   \
   _(HasOwn)               \
   _(TypeOf)               \
+  _(ToPropertyKey)        \
   _(InstanceOf)           \
   _(GetIterator)          \
   _(Compare)              \
@@ -781,6 +783,14 @@ class MOZ_RAII CacheIRWriter : public JS::CustomAutoRooter {
     if (addArgc) {
       slotIndex += argc;
     }
+    MOZ_ASSERT(slotIndex >= 0);
+    MOZ_ASSERT(slotIndex <= UINT8_MAX);
+    return loadArgumentFixedSlot_(slotIndex);
+  }
+
+  ValOperandId loadStandardCallArgument(uint32_t index, uint32_t argc) {
+    int32_t slotIndex = -int32_t(index + 1);
+    slotIndex += argc;
     MOZ_ASSERT(slotIndex >= 0);
     MOZ_ASSERT(slotIndex <= UINT8_MAX);
     return loadArgumentFixedSlot_(slotIndex);
@@ -1522,22 +1532,31 @@ class MOZ_RAII CallIRGenerator : public IRGenerator {
   AttachDecision tryAttachArrayJoin(HandleFunction callee);
   AttachDecision tryAttachArrayIsArray(HandleFunction callee);
   AttachDecision tryAttachIsSuspendedGenerator(HandleFunction callee);
-  AttachDecision tryAttachToString(HandleFunction callee);
-  AttachDecision tryAttachToObject(HandleFunction callee);
+  AttachDecision tryAttachToString(HandleFunction callee,
+                                   InlinableNative native);
+  AttachDecision tryAttachToObject(HandleFunction callee,
+                                   InlinableNative native);
   AttachDecision tryAttachToInteger(HandleFunction callee);
   AttachDecision tryAttachIsObject(HandleFunction callee);
   AttachDecision tryAttachIsCallable(HandleFunction callee);
   AttachDecision tryAttachIsConstructor(HandleFunction callee);
+  AttachDecision tryAttachGuardToClass(HandleFunction callee,
+                                       InlinableNative native);
   AttachDecision tryAttachStringChar(HandleFunction callee, StringChar kind);
   AttachDecision tryAttachStringCharCodeAt(HandleFunction callee);
   AttachDecision tryAttachStringCharAt(HandleFunction callee);
+  AttachDecision tryAttachStringFromCharCode(HandleFunction callee);
+  AttachDecision tryAttachMathRandom(HandleFunction callee);
   AttachDecision tryAttachMathAbs(HandleFunction callee);
   AttachDecision tryAttachMathFloor(HandleFunction callee);
   AttachDecision tryAttachMathCeil(HandleFunction callee);
   AttachDecision tryAttachMathRound(HandleFunction callee);
   AttachDecision tryAttachMathSqrt(HandleFunction callee);
+  AttachDecision tryAttachMathATan2(HandleFunction callee);
   AttachDecision tryAttachMathFunction(HandleFunction callee,
                                        UnaryMathFunction fun);
+  AttachDecision tryAttachMathPow(HandleFunction callee);
+  AttachDecision tryAttachMathMinMax(HandleFunction callee, bool isMax);
 
   AttachDecision tryAttachFunCall(HandleFunction calleeFunc);
   AttachDecision tryAttachFunApply(HandleFunction calleeFunc);
@@ -1651,6 +1670,23 @@ class MOZ_RAII UnaryArithIRGenerator : public IRGenerator {
   UnaryArithIRGenerator(JSContext* cx, HandleScript, jsbytecode* pc,
                         ICState::Mode mode, JSOp op, HandleValue val,
                         HandleValue res);
+
+  AttachDecision tryAttachStub();
+};
+
+class MOZ_RAII ToPropertyKeyIRGenerator : public IRGenerator {
+  HandleValue val_;
+
+  AttachDecision tryAttachInt32();
+  AttachDecision tryAttachNumber();
+  AttachDecision tryAttachString();
+  AttachDecision tryAttachSymbol();
+
+  void trackAttached(const char* name);
+
+ public:
+  ToPropertyKeyIRGenerator(JSContext* cx, HandleScript, jsbytecode* pc,
+                           ICState::Mode mode, HandleValue val);
 
   AttachDecision tryAttachStub();
 };

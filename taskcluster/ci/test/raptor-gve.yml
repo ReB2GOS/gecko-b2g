@@ -29,8 +29,7 @@ job-defaults:
         config:
             - raptor/android_hw_config.py
     optimization:
-        push-interval-25:
-            - android
+        push-interval-25: null
 
 raptor-tp6m-1-geckoview:
     description: "Raptor tp6m-1 on GeckoView"
@@ -360,6 +359,24 @@ raptor-youtube-playback-h264-sfr-geckoview:
     mozharness:
         extra-options:
             - --test=raptor-youtube-playback-h264-sfr
+            - --app=geckoview
+            - --binary=org.mozilla.geckoview_example
+            - --activity=org.mozilla.geckoview_example.GeckoViewActivity
+
+raptor-youtube-playback-h264-geckoview:
+    description: "Raptor YouTube Playback H264 on GeckoView"
+    try-name: raptor-youtube-playback-h264-geckoview
+    treeherder-symbol: Rap(ytp-h264)
+    run-on-projects:
+        by-test-platform:
+            android-hw-p2.*aarch64.*/pgo: ['mozilla-central']
+            android-hw-p2.*aarch64-shippable/opt: ['mozilla-central']
+            android-hw-g5.*/pgo: ['mozilla-central']
+            android-hw-g5.*-shippable/opt: ['mozilla-central']
+            default: []
+    mozharness:
+        extra-options:
+            - --test=raptor-youtube-playback-h264-std
             - --app=geckoview
             - --binary=org.mozilla.geckoview_example
             - --activity=org.mozilla.geckoview_example.GeckoViewActivity

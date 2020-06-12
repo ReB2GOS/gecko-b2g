@@ -42,6 +42,7 @@ from mozboot.solus import SolusBootstrapper
 from mozboot.void import VoidBootstrapper
 from mozboot.windows import WindowsBootstrapper
 from mozboot.mozillabuild import MozillaBuildBootstrapper
+from mozboot.mozconfig import find_mozconfig
 from mozboot.util import (
     get_state_dir,
 )
@@ -111,6 +112,15 @@ FINISHED = '''
 Your system should be ready to build %s!
 '''
 
+MOZCONFIG_SUGGESTION_TEMPLATE = '''
+Paste the lines between the chevrons (>>> and <<<) into
+%s:
+
+>>>
+%s
+<<<
+'''.strip()
+
 SOURCE_ADVERTISE = '''
 Source code can be obtained by running
 
@@ -175,6 +185,7 @@ DEBIAN_DISTROS = (
     'linuxmint',
     'elementary',
     'neon',
+    'pop',
 )
 
 ADD_GIT_TOOLS_PATH = '''
@@ -554,8 +565,21 @@ class Bootstrapper(object):
         if not self.instance.which("moz-phab"):
             print(MOZ_PHAB_ADVERTISE)
 
-        # Like 'suggest_browser_mozconfig' or 'suggest_mobile_android_mozconfig'.
-        getattr(self.instance, 'suggest_%s_mozconfig' % application)()
+        # Like 'generate_browser_mozconfig' or 'generate_mobile_android_mozconfig'.
+        mozconfig = getattr(self.instance, 'generate_%s_mozconfig' % application)()
+
+        if mozconfig:
+            mozconfig_path = find_mozconfig(self.mach_context.topdir)
+            if not mozconfig_path:
+                # No mozconfig file exists yet
+                mozconfig_path = os.path.join(self.mach_context.topdir, 'mozconfig')
+                with open(mozconfig_path, 'w') as mozconfig_file:
+                    mozconfig_file.write(mozconfig)
+                print('Your requested configuration has been written to "%s".'
+                      % mozconfig_path)
+            else:
+                suggestion = MOZCONFIG_SUGGESTION_TEMPLATE % (mozconfig_path, mozconfig)
+                print(suggestion)
 
 
 def update_vct(hg, root_state_dir):

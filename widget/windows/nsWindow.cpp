@@ -597,6 +597,7 @@ nsWindow::nsWindow(bool aIsChildWindow)
   mMouseInDraggableArea = false;
   mDestroyCalled = false;
   mIsEarlyBlankWindow = false;
+  mResizable = false;
   mHasTaskbarIconBeenCreated = false;
   mMouseTransparent = false;
   mPickerDisplayCount = 0;
@@ -832,6 +833,7 @@ nsresult nsWindow::Create(nsIWidget* aParent, nsNativeWidget aNativeParent,
   mIsRTL = aInitData->mRTL;
   mOpeningAnimationSuppressed = aInitData->mIsAnimationSuppressed;
   mAlwaysOnTop = aInitData->mAlwaysOnTop;
+  mResizable = aInitData->mResizable;
 
   DWORD style = WindowStyle();
   DWORD extendedStyle = WindowExStyle();
@@ -1612,7 +1614,7 @@ void nsWindow::Show(bool bState) {
             ::ShowWindow(mWnd, SW_SHOWMINIMIZED);
             break;
           default:
-            if (CanTakeFocus()) {
+            if (CanTakeFocus() && !mAlwaysOnTop) {
               ::ShowWindow(mWnd, SW_SHOWNORMAL);
             } else {
               ::ShowWindow(mWnd, SW_SHOWNOACTIVATE);
@@ -1626,6 +1628,7 @@ void nsWindow::Show(bool bState) {
       } else {
         DWORD flags = SWP_NOSIZE | SWP_NOMOVE | SWP_SHOWWINDOW;
         if (wasVisible) flags |= SWP_NOZORDER;
+        if (mAlwaysOnTop) flags |= SWP_NOACTIVATE;
 
         if (mWindowType == eWindowType_popup) {
           // ensure popups are the topmost of the TOPMOST
@@ -1797,7 +1800,8 @@ void nsWindow::SetWindowMouseTransparent(bool aIsTransparent) {
 
 void nsWindow::SetSizeConstraints(const SizeConstraints& aConstraints) {
   SizeConstraints c = aConstraints;
-  if (mWindowType != eWindowType_popup) {
+
+  if (mWindowType != eWindowType_popup && mResizable) {
     c.mMinSize.width =
         std::max(int32_t(::GetSystemMetrics(SM_CXMINTRACK)), c.mMinSize.width);
     c.mMinSize.height =

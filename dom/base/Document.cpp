@@ -35,7 +35,6 @@
 #include "mozilla/RestyleManager.h"
 #include "mozilla/StaticPrefs_browser.h"
 #include "mozilla/StaticPrefs_dom.h"
-#include "mozilla/StaticPrefs_fission.h"
 #include "mozilla/StaticPrefs_full_screen_api.h"
 #include "mozilla/StaticPrefs_layout.h"
 #include "mozilla/StaticPrefs_network.h"
@@ -73,6 +72,7 @@
 #include "nsIObserver.h"
 #include "nsIBaseWindow.h"
 #include "nsILayoutHistoryState.h"
+#include "nsIXULRuntime.h"
 #include "mozilla/GlobalStyleSheetCache.h"
 #include "mozilla/css/Loader.h"
 #include "mozilla/css/ImageLoader.h"
@@ -3858,7 +3858,12 @@ bool Document::GetAllowPlugins() {
 
 void Document::EnsureL10n() {
   if (!mDocumentL10n) {
-    mDocumentL10n = DocumentL10n::Create(this);
+    Element* elem = GetDocumentElement();
+    if (NS_WARN_IF(!elem)) {
+      return;
+    }
+    bool isSync = elem->HasAttr(kNameSpaceID_None, nsGkAtoms::datal10nsync);
+    mDocumentL10n = DocumentL10n::Create(this, isSync);
     MOZ_ASSERT(mDocumentL10n);
   }
 }
@@ -6838,9 +6843,6 @@ void Document::SetContainer(nsDocShell* aContainer) {
     }
     SetIsContentDocument(true);
   }
-
-  mAncestorPrincipals = aContainer->AncestorPrincipals().Clone();
-  mAncestorOuterWindowIDs = aContainer->AncestorOuterWindowIDs().Clone();
 }
 
 nsISupports* Document::GetContainer() const {
@@ -8077,7 +8079,8 @@ void Document::SetDomain(const nsAString& aDomain, ErrorResult& rv) {
     return;
   }
 
-  if (StaticPrefs::dom_postMessage_sharedArrayBuffer_withCOOP_COEP() &&
+  if (StaticPrefs::
+          dom_postMessage_sharedArrayBuffer_withCOOP_COEP_AtStartup() &&
       GetBrowsingContext() && GetBrowsingContext()->CrossOriginIsolated()) {
     WarnOnceAbout(Document::eDocumentSetDomainNotAllowed);
     return;
@@ -10524,6 +10527,10 @@ void Document::Destroy() {
 
   // To break cycles.
   mPreloadService.ClearAllPreloads();
+
+  if (mDocumentL10n) {
+    mDocumentL10n->Destroy();
+  }
 }
 
 void Document::RemovedFromDocShell() {
@@ -13581,12 +13588,13 @@ static const char* GetFullscreenError(Document* aDoc, CallerType aCallerType) {
     return "FullscreenDeniedHidden";
   }
 
-  // Ensure that all containing elements are <iframe> and have
-  // allowfullscreen attribute set.
-  nsCOMPtr<nsIDocShell> docShell(aDoc->GetDocShell());
-  if (!docShell || !docShell->GetFullscreenAllowed()) {
+  // Ensure that all containing elements are <iframe> and have allowfullscreen
+  // attribute set.
+  BrowsingContext* bc = aDoc->GetBrowsingContext();
+  if (!bc || !bc->FullscreenAllowed()) {
     return "FullscreenDeniedContainerNotAllowed";
   }
+
   return nullptr;
 }
 
@@ -15425,8 +15433,7 @@ void Document::TraceProtos(JSTracer* aTrc) {
 FlashClassification Document::DocumentFlashClassification() {
   // Disable flash blocking when fission is enabled(See Bug 1584931).
   const auto fnIsFlashBlockingEnabled = [] {
-    return StaticPrefs::plugins_flashBlock_enabled() &&
-           !StaticPrefs::fission_autostart();
+    return StaticPrefs::plugins_flashBlock_enabled() && !FissionAutostart();
   };
 
   // If neither pref is on, skip the null-principal and principal URI checks.
@@ -16238,7 +16245,7 @@ nsICookieJarSettings* Document::CookieJarSettings() {
                   inProcessParent->CookieJarSettings()->GetCookieBehavior(),
                   mozilla::net::CookieJarSettings::Cast(
                       inProcessParent->CookieJarSettings())
-                      ->GetFirstPartyDomain(),
+                      ->GetPartitionKey(),
                   inProcessParent->CookieJarSettings()
                       ->GetIsFirstPartyIsolated())
             : net::CookieJarSettings::Create();

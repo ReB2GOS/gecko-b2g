@@ -295,6 +295,9 @@ const TEST_GLOBAL = {
       getBaseDomain({ spec }) {
         return spec.match(/\/([^/]+)/)[1];
       },
+      getBaseDomainFromHost(host) {
+        return host.match(/.*?(\w+\.\w+)$/)[1];
+      },
       getPublicSuffix() {},
     },
     io: {
@@ -331,6 +334,7 @@ const TEST_GLOBAL = {
           __internalAliases: ["@bing"],
         },
       },
+      getEngineByAlias: () => null,
     },
     scriptSecurityManager: {
       createNullPrincipal() {},

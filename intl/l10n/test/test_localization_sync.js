@@ -53,6 +53,20 @@ key-attr =
   }
 
   {
+    let values = l10n.formatValuesSync([
+      "key-value1",
+      "key-value2",
+      "key-missing",
+      "key-attr"
+    ]);
+
+    strictEqual(values[0], "[de] Value2");
+    strictEqual(values[1], "[en] Value3");
+    strictEqual(values[2], null);
+    strictEqual(values[3], null);
+  }
+
+  {
     strictEqual(l10n.formatValueSync("key-missing"), null);
     strictEqual(l10n.formatValueSync("key-value1"), "[de] Value2");
     strictEqual(l10n.formatValueSync("key-value2"), "[en] Value3");
@@ -159,6 +173,16 @@ add_task(function test_add_remove_resourceIds() {
   strictEqual(values[0], "Value1");
   strictEqual(values[1], "Value2");
 
+  values = l10n.formatValuesSync(["key1", {id: "key2"}]);
+
+  strictEqual(values[0], "Value1");
+  strictEqual(values[1], "Value2");
+
+  values = l10n.formatValuesSync([{id: "key1"}, "key2"]);
+
+  strictEqual(values[0], "Value1");
+  strictEqual(values[1], "Value2");
+
   l10n.removeResourceIds(["/browser/menu.ftl"]);
 
   values = l10n.formatValuesSync([{id: "key1"}, {id: "key2"}]);
@@ -176,13 +200,13 @@ add_task(function test_calling_sync_methods_in_async_mode_fails() {
 
   Assert.throws(() => {
     l10n.formatValuesSync([{ id: "key1" }, { id: "key2" }]);
-  }, /Can't use sync formatWithFallback when state is async./);
+  }, /Can't use formatValuesSync when state is async./);
 
   Assert.throws(() => {
     l10n.formatValueSync("key1");
-  }, /Can't use sync formatWithFallback when state is async./);
+  }, /Can't use formatValueSync when state is async./);
 
   Assert.throws(() => {
     l10n.formatMessagesSync([{ id: "key1"}]);
-  }, /Can't use sync formatWithFallback when state is async./);
+  }, /Can't use formatMessagesSync when state is async./);
 });

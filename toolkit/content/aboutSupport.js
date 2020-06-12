@@ -650,7 +650,7 @@ var snapshotFormatters = {
         if (value === undefined || value === "") {
           continue;
         }
-        trs.push(buildRow(key, value));
+        trs.push(buildRow(key, [new Text(value)]));
       }
 
       if (!trs.length) {
@@ -915,23 +915,39 @@ var snapshotFormatters = {
       }
     }
 
+    function roundtripAudioLatency() {
+      insertBasicInfo("roundtrip-latency", "...");
+      window.windowUtils
+        .defaultDevicesRoundTripLatency()
+        .then(latency => {
+          var latencyString = `${(latency[0] * 1000).toFixed(2)}ms (${(
+            latency[1] * 1000
+          ).toFixed(2)})`;
+          data.defaultDevicesRoundTripLatency = latencyString;
+          document.querySelector(
+            'th[data-l10n-id="roundtrip-latency"]'
+          ).nextSibling.textContent = latencyString;
+        })
+        .catch(e => {});
+    }
+
     // Basic information
     insertBasicInfo("audio-backend", data.currentAudioBackend);
     insertBasicInfo("max-audio-channels", data.currentMaxAudioChannels);
     insertBasicInfo("sample-rate", data.currentPreferredSampleRate);
-    insertBasicInfo("roundtrip-latency", "...");
-    window.windowUtils
-      .defaultDevicesRoundTripLatency()
-      .then(latency => {
-        var latencyString = `${(latency[0] * 1000).toFixed(2)}ms (${(
-          latency[1] * 1000
-        ).toFixed(2)})`;
-        data.defaultDevicesRoundTripLatency = latencyString;
-        document.querySelector(
-          'th[data-l10n-id="roundtrip-latency"]'
-        ).nextSibling.textContent = latencyString;
-      })
-      .catch(e => {});
+
+    if (AppConstants.platform == "macosx") {
+      var micStatus = {};
+      let permission = Cc["@mozilla.org/ospermissionrequest;1"].getService(
+        Ci.nsIOSPermissionRequest
+      );
+      permission.getAudioCapturePermissionState(micStatus);
+      if (micStatus.value == permission.PERMISSION_STATE_AUTHORIZED) {
+        roundtripAudioLatency();
+      }
+    } else {
+      roundtripAudioLatency();
+    }
 
     // Output devices information
     insertDeviceInfo("output", data.audioOutputDevices);
@@ -1448,11 +1464,9 @@ function openProfileDirectory() {
 function populateActionBox() {
   if (ResetProfile.resetSupported()) {
     $("reset-box").style.display = "block";
-    $("action-box").style.display = "block";
   }
   if (!Services.appinfo.inSafeMode && AppConstants.platform !== "android") {
     $("safe-mode-box").style.display = "block";
-    $("action-box").style.display = "block";
 
     if (Services.policies && !Services.policies.isAllowed("safeMode")) {
       $("restart-in-safe-mode-button").setAttribute("disabled", "true");
@@ -1483,6 +1497,42 @@ function setupEventListeners() {
   if (button) {
     button.addEventListener("click", function(event) {
       ResetProfile.openConfirmationDialog(window);
+    });
+  }
+  button = $("clear-startup-cache-button");
+  if (button) {
+    button.addEventListener("click", async function(event) {
+      const [
+        promptTitle,
+        promptBody,
+        restartButtonLabel,
+      ] = await document.l10n.formatValues([
+        { id: "startup-cache-dialog-title" },
+        { id: "startup-cache-dialog-body" },
+        { id: "restart-button-label" },
+      ]);
+      const buttonFlags =
+        Services.prompt.BUTTON_POS_0 * Services.prompt.BUTTON_TITLE_IS_STRING +
+        Services.prompt.BUTTON_POS_1 * Services.prompt.BUTTON_TITLE_CANCEL +
+        Services.prompt.BUTTON_POS_0_DEFAULT;
+      const result = Services.prompt.confirmEx(
+        window,
+        promptTitle,
+        promptBody,
+        buttonFlags,
+        restartButtonLabel,
+        null,
+        null,
+        null,
+        {}
+      );
+      if (result !== 0) {
+        return;
+      }
+      Services.appinfo.invalidateCachesOnRestart();
+      Services.startup.quit(
+        Ci.nsIAppStartup.eRestart | Ci.nsIAppStartup.eAttemptQuit
+      );
     });
   }
   button = $("restart-in-safe-mode-button");
